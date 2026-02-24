@@ -1,7 +1,8 @@
 'use client'
 
-import * as XLSX from 'xlsx';
-import { useState, useEffect, useRef } from 'react'
+// IMPORTANTE: Cambiamos 'xlsx' por 'xlsx-js-style' para poder pintar las celdas
+import * as XLSX from 'xlsx-js-style';
+import { useState, useEffect } from 'react'
 import { supabase } from '@/utils/supabase/client'
 import { motion, AnimatePresence } from 'framer-motion'
 import { format, isToday, subDays, addDays } from 'date-fns'
@@ -9,7 +10,7 @@ import { es } from 'date-fns/locale'
 import { 
   Clock, CalendarDays, ChevronLeft, ChevronRight, 
   CheckCircle2, AlertCircle, LogOut, Activity, UserCircle2,
-  Sun, Moon, Unlock
+  Sun, Moon, Unlock, MessageSquareText, X
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 
@@ -42,6 +43,9 @@ export default function DualDashboardAsistencias() {
   const [mounted, setMounted] = useState(false)
   const [modoEdicion, setModoEdicion] = useState(false)
 
+  // --- NUEVO ESTADO PARA EL POPUP DE NOTAS ---
+  const [notaSeleccionada, setNotaSeleccionada] = useState<{nombre: string, nota: string, hora: string} | null>(null)
+
   // Cargar preferencia de tema al iniciar
   useEffect(() => {
     setMounted(true)
@@ -55,27 +59,23 @@ export default function DualDashboardAsistencias() {
     }
   }, [])
 
-  // --- EL TRUCO SECRETO: ESCUCHAR LA PALABRA "EDITAR" ---
+  // El truco secreto: Escuchar la palabra "EDITAR"
   useEffect(() => {
     let teclado = ''
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ignorar si el usuario está escribiendo dentro de un input
       if (e.target instanceof HTMLInputElement) return
 
       teclado += e.key.toUpperCase()
-      if (teclado.length > 6) teclado = teclado.slice(-6) // Mantener solo los últimos 6 caracteres
+      if (teclado.length > 6) teclado = teclado.slice(-6)
 
       if (teclado === 'EDITAR') {
         setModoEdicion(prev => {
           const nuevoEstado = !prev
-          if (nuevoEstado) {
-            toast.success('MODO ADMIN ACTIVADO 🔓', { style: { background: '#3b82f6', color: 'white' } })
-          } else {
-            toast.error('Modo Admin Bloqueado 🔒', { style: { background: '#1e293b', color: 'white' } })
-          }
+          if (nuevoEstado) toast.success('MODO ADMIN ACTIVADO 🔓', { style: { background: '#3b82f6', color: 'white' } })
+          else toast.error('Modo Admin Bloqueado 🔒', { style: { background: '#1e293b', color: 'white' } })
           return nuevoEstado
         })
-        teclado = '' // Reiniciar tras activarlo
+        teclado = '' 
       }
     }
 
@@ -130,40 +130,96 @@ export default function DualDashboardAsistencias() {
     }
   }, [fechaActual])
 
+  // --- NUEVA DESCARGA DE EXCEL CON DISEÑO (CORREGIDA POR DÍA) ---
   const descargarReporteExcel = async () => {
     try {
-      toast.info("Generando reporte Excel...");
+      // Obtenemos la fecha exacta que estás viendo en la pantalla
+      const fechaString = format(fechaActual, 'yyyy-MM-dd')
+      toast.info(`Generando reporte Excel del ${fechaString}...`);
       
       const { data, error } = await supabase
         .from('registro_asistencias')
         .select('*')
-        .order('fecha', { ascending: false })
+        .eq('fecha', fechaString) // <-- ¡EL FILTRO MÁGICO! Solo trae los de este día
         .order('hora_ingreso', { ascending: false });
 
       if (error) throw error;
       if (!data || data.length === 0) {
-        toast.error("No hay datos para exportar");
+        toast.error(`No hay datos para exportar el ${fechaString}`);
         return;
       }
 
-      const datosFormateados = data.map((registro) => ({
-        'Fecha': registro.fecha,
-        'DNI': registro.dni,
-        'Nombre Completo': registro.nombres_completos,
-        'Área': registro.area,
-        'Hora de Ingreso': new Date(registro.hora_ingreso).toLocaleTimeString('es-PE', { timeZone: 'America/Lima' }),
-        'Estado': registro.estado_ingreso,
-        'Hora de Salida': registro.hora_salida 
-          ? new Date(registro.hora_salida).toLocaleTimeString('es-PE', { timeZone: 'America/Lima' }) 
-          : 'Sin marcar'
-      }));
+      // 1. Definir Estilos
+      const headerStyle = {
+        font: { bold: true, color: { rgb: "FFFFFF" }, sz: 12 },
+        fill: { fgColor: { rgb: "1E293B" } }, // Pizarra Oscuro
+        alignment: { horizontal: "center", vertical: "center" },
+        border: { bottom: { style: "medium", color: { rgb: "000000" } } }
+      };
 
-      const hoja = XLSX.utils.json_to_sheet(datosFormateados);
+      const stylePuntual = { font: { color: { rgb: "059669" }, bold: true }, alignment: { horizontal: "center" } };
+      const styleTardanza = { font: { color: { rgb: "DC2626" }, bold: true }, alignment: { horizontal: "center" } };
+      const styleCenter = { alignment: { horizontal: "center" } };
+
+      // 2. Crear los datos crudos (Array de Arrays)
+      const ws_data: any[][] = [
+        ["FECHA", "DNI", "NOMBRE COMPLETO", "ÁREA", "INGRESO", "ESTADO", "SALIDA", "MOTIVO / NOTA"]
+      ];
+
+      data.forEach((registro) => {
+        ws_data.push([
+          registro.fecha,
+          registro.dni,
+          registro.nombres_completos,
+          registro.area,
+          new Date(registro.hora_ingreso).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute:'2-digit' }),
+          registro.estado_ingreso,
+          registro.hora_salida ? new Date(registro.hora_salida).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute:'2-digit' }) : 'Sin marcar',
+          registro.notas || '-'
+        ]);
+      });
+
+      // 3. Crear hoja
+      const ws = XLSX.utils.aoa_to_sheet(ws_data);
+
+      // 4. Aplicar los estilos celda por celda
+      for (let R = 0; R < ws_data.length; R++) {
+        for (let C = 0; C < 8; C++) {
+          const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+          if (!ws[cellAddress]) continue;
+
+          // Estilo de Cabecera (Fila 0)
+          if (R === 0) {
+            ws[cellAddress].s = headerStyle;
+          } else {
+            // Estilo de Contenido
+            if (C === 5) { // Columna ESTADO
+              ws[cellAddress].s = ws[cellAddress].v === 'PUNTUAL' ? stylePuntual : styleTardanza;
+            } else if ([0, 1, 3, 4, 6].includes(C)) { // Centrar otras columnas
+              ws[cellAddress].s = styleCenter;
+            }
+          }
+        }
+      }
+
+      // 5. Ajustar anchos de las columnas
+      ws['!cols'] = [
+        { wpx: 80 },  // Fecha
+        { wpx: 80 },  // DNI
+        { wpx: 220 }, // Nombre Completo
+        { wpx: 130 }, // Área
+        { wpx: 80 },  // Ingreso
+        { wpx: 90 },  // Estado
+        { wpx: 80 },  // Salida
+        { wpx: 280 }, // Notas
+      ];
+
       const libro = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(libro, hoja, "Asistencias");
+      XLSX.utils.book_append_sheet(libro, ws, "Asistencias");
 
-      XLSX.writeFile(libro, `Reporte_RUAG_${new Date().toISOString().split('T')[0]}.xlsx`);
-      toast.success("¡Reporte descargado con éxito!");
+      // El archivo ahora se llamará con la fecha exacta que descargaste
+      XLSX.writeFile(libro, `Reporte_RUAG_${fechaString}.xlsx`);
+      toast.success(`¡Reporte del ${fechaString} descargado!`);
 
     } catch (error) {
       console.error("Error exportando a Excel:", error);
@@ -171,7 +227,6 @@ export default function DualDashboardAsistencias() {
     }
   };
 
-  // --- FUNCIÓN PARA GUARDAR LA NUEVA HORA EN SUPABASE ---
   const actualizarHora = async (id: string, campo: 'hora_ingreso' | 'hora_salida', nuevaHora: string, fechaBase: string) => {
     if (!nuevaHora) return
 
@@ -183,7 +238,6 @@ export default function DualDashboardAsistencias() {
       const timestampISO = fechaObj.toISOString()
       let datosAActualizar: any = { [campo]: timestampISO }
 
-      // Si editamos el ingreso, recalculamos PUNTUAL o TARDANZA automáticamente
       if (campo === 'hora_ingreso') {
         const h = parseInt(horas)
         const m = parseInt(minutos)
@@ -191,16 +245,10 @@ export default function DualDashboardAsistencias() {
         datosAActualizar.estado_ingreso = isPuntual ? 'PUNTUAL' : 'TARDANZA'
       }
 
-      const { error } = await supabase
-        .from('registro_asistencias')
-        .update(datosAActualizar)
-        .eq('id', id)
-
+      const { error } = await supabase.from('registro_asistencias').update(datosAActualizar).eq('id', id)
       if (error) throw error
 
       toast.success('Registro actualizado correctamente')
-      
-      // Actualizar la interfaz inmediatamente sin recargar
       setAsistencias(prev => prev.map(a => a.id === id ? { ...a, ...datosAActualizar } : a))
 
     } catch (error) {
@@ -216,7 +264,7 @@ export default function DualDashboardAsistencias() {
   if (!mounted) return null
 
   return (
-    <div className={`min-h-screen ${modoEdicion ? 'bg-blue-50 dark:bg-slate-900' : 'bg-slate-100 dark:bg-slate-950'} text-slate-900 dark:text-slate-100 font-sans transition-colors duration-500 overflow-hidden flex flex-col`}>
+    <div className={`min-h-screen ${modoEdicion ? 'bg-blue-50 dark:bg-slate-900' : 'bg-slate-100 dark:bg-slate-950'} text-slate-900 dark:text-slate-100 font-sans transition-colors duration-500 overflow-hidden flex flex-col relative`}>
       <Toaster position="top-center" richColors />
       
       {/* HEADER DUAL */}
@@ -323,13 +371,65 @@ export default function DualDashboardAsistencias() {
                   data={asistencia} 
                   index={idx} 
                   modoEdicion={modoEdicion} 
-                  onActualizar={actualizarHora} 
+                  onActualizar={actualizarHora}
+                  onAbrirNota={(notaData: {nombre: string, nota: string, hora: string}) => setNotaSeleccionada(notaData)}
                 />
               ))}
             </AnimatePresence>
           </motion.div>
         )}
       </main>
+
+      {/* --- EL POPUP MODAL DE NOTAS --- */}
+      <AnimatePresence>
+        {notaSeleccionada && (
+          <motion.div 
+            initial={{ opacity: 0 }} 
+            animate={{ opacity: 1 }} 
+            exit={{ opacity: 0 }} 
+            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }} 
+              animate={{ scale: 1, y: 0 }} 
+              exit={{ scale: 0.9, y: 20 }}
+              className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[24px] shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-700"
+            >
+              <div className="bg-amber-500 h-2 w-full" />
+              <div className="p-6 relative">
+                <button 
+                  onClick={() => setNotaSeleccionada(null)}
+                  className="absolute top-4 right-4 p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"
+                >
+                  <X size={20} />
+                </button>
+                
+                <div className="flex items-center gap-3 mb-4 text-amber-500">
+                  <MessageSquareText size={28} />
+                  <h3 className="text-xl font-black text-slate-900 dark:text-white">Motivo de Salida</h3>
+                </div>
+                
+                <p className="text-sm font-bold text-slate-500 dark:text-slate-400 mb-4 pb-4 border-b border-slate-100 dark:border-slate-800">
+                  {notaSeleccionada.nombre} <br/>
+                  <span className="font-normal opacity-70">Salió a las {notaSeleccionada.hora}</span>
+                </p>
+                
+                <div className="bg-slate-50 dark:bg-slate-950/50 p-4 rounded-xl border border-slate-100 dark:border-slate-800 text-slate-700 dark:text-slate-300 min-h-[100px] whitespace-pre-wrap">
+                  {notaSeleccionada.nota}
+                </div>
+                
+                <button 
+                  onClick={() => setNotaSeleccionada(null)}
+                  className="w-full mt-6 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-white font-bold py-3 rounded-xl transition-colors"
+                >
+                  Cerrar
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
     </div>
   )
 }
@@ -349,7 +449,7 @@ function StatCard({ title, value, icon, color, border, textColor }: any) {
   )
 }
 
-function FotocheckCard({ data, index, modoEdicion, onActualizar }: { data: any, index: number, modoEdicion: boolean, onActualizar: Function }) {
+function FotocheckCard({ data, index, modoEdicion, onActualizar, onAbrirNota }: { data: any, index: number, modoEdicion: boolean, onActualizar: Function, onAbrirNota: (nota: {nombre: string, nota: string, hora: string}) => void }) {
   const isPuntual = data.estado_ingreso === 'PUNTUAL'
   const justAdded = index === 0 && isToday(new Date(data.hora_ingreso))
   
@@ -367,8 +467,24 @@ function FotocheckCard({ data, index, modoEdicion, onActualizar }: { data: any, 
     >
       <div className={`h-2 lg:h-3 w-full shadow-sm dark:shadow-[0_0_15px_rgba(0,0,0,0.5)] z-10 ${isPuntual ? 'bg-emerald-500' : 'bg-red-500'}`} />
       
-      <div className="p-5 lg:p-6 flex-1 flex flex-col z-10">
-        <div className="flex gap-4 lg:gap-5 items-center mb-5 lg:mb-6">
+      <div className="p-5 lg:p-6 flex-1 flex flex-col z-10 relative">
+        
+        {/* BOTÓN FLOTANTE PARA VER NOTA */}
+        {data.notas && (
+          <button 
+            onClick={() => onAbrirNota({
+              nombre: data.nombres_completos, 
+              nota: data.notas,
+              hora: data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm a') : 'Desconocida'
+            })}
+            className="absolute top-4 right-4 bg-amber-100 hover:bg-amber-200 dark:bg-amber-500/20 dark:hover:bg-amber-500/30 text-amber-600 dark:text-amber-400 p-2 rounded-full transition-colors shadow-sm"
+            title="Ver motivo de salida"
+          >
+            <MessageSquareText size={20} />
+          </button>
+        )}
+
+        <div className="flex gap-4 lg:gap-5 items-center mb-5 lg:mb-6 mt-2">
           <div className="relative shrink-0">
             {data.foto_url ? (
               <img src={data.foto_url} alt="Foto" className="w-20 h-20 lg:w-24 lg:h-24 rounded-2xl object-cover bg-slate-100 dark:bg-slate-800 shadow-inner border border-slate-200 dark:border-slate-700" />
@@ -380,7 +496,7 @@ function FotocheckCard({ data, index, modoEdicion, onActualizar }: { data: any, 
             <div className={`absolute -bottom-2 -right-2 w-5 h-5 lg:w-6 lg:h-6 rounded-full border-4 border-white dark:border-slate-900 shadow-sm dark:shadow-lg ${isPuntual ? 'bg-emerald-500' : 'bg-red-500'}`} />
           </div>
           
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-0 pr-4">
             <h3 className="font-bold text-slate-900 dark:text-slate-100 text-lg lg:text-xl leading-tight truncate">
               {data.nombres_completos}
             </h3>
@@ -393,7 +509,6 @@ function FotocheckCard({ data, index, modoEdicion, onActualizar }: { data: any, 
 
         <div className="mt-auto space-y-2 lg:space-y-3 bg-slate-50 dark:bg-slate-950 rounded-2xl p-3 lg:p-4 border border-slate-100 dark:border-slate-800/50 shadow-inner">
           
-          {/* HORA DE INGRESO (Editable) */}
           <div className="flex justify-between items-center">
             <span className="text-slate-500 flex items-center gap-1.5 lg:gap-2 text-[10px] lg:text-xs font-bold uppercase tracking-widest"><Clock size={14}/> INGRESO</span>
             {modoEdicion ? (
@@ -414,7 +529,6 @@ function FotocheckCard({ data, index, modoEdicion, onActualizar }: { data: any, 
             )}
           </div>
           
-          {/* HORA DE SALIDA (Editable) */}
           <div className="flex justify-between items-center pt-2 lg:pt-3 border-t border-slate-200 dark:border-slate-800">
             <span className="text-slate-500 flex items-center gap-1.5 lg:gap-2 text-[10px] lg:text-xs font-bold uppercase tracking-widest"><LogOut size={14}/> SALIDA</span>
             
@@ -426,7 +540,6 @@ function FotocheckCard({ data, index, modoEdicion, onActualizar }: { data: any, 
                 onBlur={(e) => {
                   const currentValue = data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm') : ''
                   if(e.target.value && e.target.value !== currentValue) {
-                    // Si no había hora de salida antes, usamos la fecha base de la fila para construir el nuevo timestamp
                     const baseDate = data.hora_salida || data.hora_ingreso || `${data.fecha}T00:00:00`
                     onActualizar(data.id, 'hora_salida', e.target.value, baseDate)
                   }
