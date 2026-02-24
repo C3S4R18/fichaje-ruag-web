@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { Scanner } from '@yudiel/react-qr-scanner'
 import { createClient } from '@supabase/supabase-js'
 import { MapPin, AlertTriangle, CheckCircle, Loader2, User, LogOut, History } from 'lucide-react'
-import { format, parseISO } from 'date-fns'
+import { format } from 'date-fns'
 
 // --- INTERFACES TYPESCRIPT ---
 interface Perfil {
@@ -61,15 +61,15 @@ export default function EscanerIOS() {
 
       setPerfil({ dni, nombres, area: area || '', foto_url: foto || '' })
 
-      // Buscar si ya marcó asistencia hoy
+      // Buscar si ya marcó asistencia hoy (Usando la columna 'fecha' exacta)
       try {
-        const hoy = new Date().toISOString().split('T')[0]
+        const hoyStr = format(new Date(), 'yyyy-MM-dd')
         const { data, error } = await supabase
           .from('registro_asistencias')
           .select('id, hora_ingreso, estado_ingreso, hora_salida')
           .eq('dni', dni)
-          .like('created_at', `${hoy}%`)
-          .order('created_at', { ascending: false })
+          .eq('fecha', hoyStr) // Búsqueda exacta por fecha local
+          .order('hora_ingreso', { ascending: false })
           .limit(1)
           .single()
 
@@ -149,6 +149,7 @@ export default function EscanerIOS() {
       const minutoActual = new Date().getMinutes()
       const isPuntual = horaActual < 9 || (horaActual === 9 && minutoActual <= 5)
       const estado = isPuntual ? 'PUNTUAL' : 'TARDANZA'
+      const hoyStr = format(new Date(), 'yyyy-MM-dd')
 
       const { data, error } = await supabase.from('registro_asistencias').insert({
         dni: perfil.dni,
@@ -156,6 +157,7 @@ export default function EscanerIOS() {
         area: perfil.area,
         foto_url: perfil.foto_url,
         estado_ingreso: estado,
+        fecha: hoyStr // Aseguramos la fecha exacta local
       }).select().single()
 
       if (error) throw error
@@ -164,8 +166,33 @@ export default function EscanerIOS() {
       mostrarExito("¡INGRESO REGISTRADO!\nGPS Verificado")
 
     } catch (error: any) {
-      if (error.code === 1) mostrarError("Enciende el GPS de tu celular para poder registrar tu asistencia.")
-      else mostrarError(`Error al registrar: ${error.message}`)
+      const errorStr = error.message || ''
+
+      if (error.code === 1) {
+        mostrarError("Enciende el GPS de tu celular para poder registrar tu asistencia.")
+      } 
+      // LA MAGIA AQUÍ: Si escanean doble, lo atajamos y mostramos su Fotocheck
+      else if (errorStr.includes('duplicate key') || errorStr.includes('unique constraint')) {
+        const hoyStr = format(new Date(), 'yyyy-MM-dd')
+        
+        // Buscamos su asistencia ya existente
+        const { data: registroPrevio } = await supabase
+          .from('registro_asistencias')
+          .select('id, hora_ingreso, estado_ingreso, hora_salida')
+          .eq('dni', perfil.dni)
+          .eq('fecha', hoyStr)
+          .single()
+
+        if (registroPrevio) {
+          setAsistenciaHoy(registroPrevio as Asistencia)
+          mostrarExito("¡INGRESO REGISTRADO!\nGPS Verificado")
+        } else {
+          mostrarError("Error al recuperar tu registro de hoy.")
+        }
+      } 
+      else {
+        mostrarError(`Error al registrar: ${error.message}`)
+      }
     }
   }
 
@@ -241,7 +268,6 @@ export default function EscanerIOS() {
     let horaIngresoFormateada = "--:--"
     try {
       if (asistenciaHoy.hora_ingreso) {
-        // Parsear ISO y ajustar por UTC si es necesario. (Dependiendo de cómo lo guarde Supabase)
         const fecha = new Date(asistenciaHoy.hora_ingreso)
         horaIngresoFormateada = format(fecha, 'hh:mm a')
       }
