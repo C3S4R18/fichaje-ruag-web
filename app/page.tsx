@@ -130,17 +130,16 @@ export default function DualDashboardAsistencias() {
     }
   }, [fechaActual])
 
-  // --- NUEVA DESCARGA DE EXCEL CON DISEÑO (CORREGIDA POR DÍA) ---
+  // --- NUEVA DESCARGA DE EXCEL CON DISEÑO Y APELLIDOS PRIMERO ---
   const descargarReporteExcel = async () => {
     try {
-      // Obtenemos la fecha exacta que estás viendo en la pantalla
       const fechaString = format(fechaActual, 'yyyy-MM-dd')
       toast.info(`Generando reporte Excel del ${fechaString}...`);
       
       const { data, error } = await supabase
         .from('registro_asistencias')
         .select('*')
-        .eq('fecha', fechaString) // <-- ¡EL FILTRO MÁGICO! Solo trae los de este día
+        .eq('fecha', fechaString)
         .order('hora_ingreso', { ascending: false });
 
       if (error) throw error;
@@ -161,16 +160,35 @@ export default function DualDashboardAsistencias() {
       const styleTardanza = { font: { color: { rgb: "DC2626" }, bold: true }, alignment: { horizontal: "center" } };
       const styleCenter = { alignment: { horizontal: "center" } };
 
-      // 2. Crear los datos crudos (Array de Arrays)
+      // 2. Crear los datos crudos con la nueva Cabecera
       const ws_data: any[][] = [
-        ["FECHA", "DNI", "NOMBRE COMPLETO", "ÁREA", "INGRESO", "ESTADO", "SALIDA", "MOTIVO / NOTA"]
+        ["FECHA", "DNI", "APELLIDOS Y NOMBRES", "ÁREA", "INGRESO", "ESTADO", "SALIDA", "MOTIVO / NOTA"]
       ];
+
+      // --- FUNCIÓN INTELIGENTE PARA INVERTIR NOMBRES ---
+      const ordenarApellidosNombres = (nombreCompleto: string) => {
+        if (!nombreCompleto) return '-';
+        const partes = nombreCompleto.trim().split(' ');
+        
+        // Si tiene 3 o más palabras (ej: Juan Carlos Perez Gomez)
+        if (partes.length >= 3) {
+          const apellidos = partes.slice(-2).join(' '); // Toma las últimas 2 palabras
+          const nombres = partes.slice(0, -2).join(' '); // Toma el resto
+          return `${apellidos}, ${nombres}`;
+        } 
+        // Si tiene 2 palabras (ej: Cesar Jormard)
+        else if (partes.length === 2) {
+          return `${partes[1]}, ${partes[0]}`;
+        }
+        // Si solo puso 1 palabra o está raro, lo devuelve igual
+        return nombreCompleto;
+      };
 
       data.forEach((registro) => {
         ws_data.push([
           registro.fecha,
           registro.dni,
-          registro.nombres_completos,
+          ordenarApellidosNombres(registro.nombres_completos), // <-- Aplicamos la magia aquí
           registro.area,
           new Date(registro.hora_ingreso).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute:'2-digit' }),
           registro.estado_ingreso,
@@ -206,7 +224,7 @@ export default function DualDashboardAsistencias() {
       ws['!cols'] = [
         { wpx: 80 },  // Fecha
         { wpx: 80 },  // DNI
-        { wpx: 220 }, // Nombre Completo
+        { wpx: 240 }, // Apellidos y Nombres (Un poco más ancho)
         { wpx: 130 }, // Área
         { wpx: 80 },  // Ingreso
         { wpx: 90 },  // Estado
@@ -217,7 +235,6 @@ export default function DualDashboardAsistencias() {
       const libro = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(libro, ws, "Asistencias");
 
-      // El archivo ahora se llamará con la fecha exacta que descargaste
       XLSX.writeFile(libro, `Reporte_RUAG_${fechaString}.xlsx`);
       toast.success(`¡Reporte del ${fechaString} descargado!`);
 
