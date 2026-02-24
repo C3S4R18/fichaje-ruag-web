@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Scanner } from '@yudiel/react-qr-scanner'
 import { createClient } from '@supabase/supabase-js'
-import { MapPin, AlertTriangle, CheckCircle, Loader2, User, LogOut, History } from 'lucide-react'
+import { MapPin, AlertTriangle, CheckCircle, Loader2, User, LogOut, History, Edit2, Edit3, X } from 'lucide-react'
 import { format } from 'date-fns'
 
 // --- INTERFACES TYPESCRIPT ---
@@ -44,31 +44,35 @@ export default function EscanerIOS() {
   const [mensaje, setMensaje] = useState('')
   const [isMarkingExit, setIsMarkingExit] = useState(false)
 
+  // Estados de Notas y Foto (NUEVO)
+  const [mostrarDialogoNota, setMostrarDialogoNota] = useState(false)
+  const [notaTexto, setNotaTexto] = useState('')
+  const [guardandoNota, setGuardandoNota] = useState(false)
+  const [isUploadingPhoto, setIsUploadingPhoto] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
   // 1. CARGAR DATOS AL INICIAR
   useEffect(() => {
     const cargarDatos = async () => {
-      // Leer LocalStorage
       const dni = localStorage.getItem('RUAG_DNI')
       const nombres = localStorage.getItem('RUAG_NOMBRE')
       const area = localStorage.getItem('RUAG_AREA')
       const foto = localStorage.getItem('RUAG_FOTO')
 
       if (!dni || !nombres) {
-        // Si no hay datos, lo mandamos a crear su perfil
         router.push('/setup')
         return
       }
 
       setPerfil({ dni, nombres, area: area || '', foto_url: foto || '' })
 
-      // Buscar si ya marcó asistencia hoy (Usando la columna 'fecha' exacta)
       try {
         const hoyStr = format(new Date(), 'yyyy-MM-dd')
         const { data, error } = await supabase
           .from('registro_asistencias')
           .select('id, hora_ingreso, estado_ingreso, hora_salida')
           .eq('dni', dni)
-          .eq('fecha', hoyStr) // Búsqueda exacta por fecha local
+          .eq('fecha', hoyStr) 
           .order('hora_ingreso', { ascending: false })
           .limit(1)
           .single()
@@ -114,7 +118,6 @@ export default function EscanerIOS() {
   const procesarQR = async (textoQR: string) => {
     if (estadoEscaner !== 'ESCANEO' || !perfil) return
     
-    // 1. Antifraude Dinámico
     if (!textoQR.startsWith("RUAG_INGRESO_")) {
         mostrarError("Código QR no reconocido.")
         return
@@ -134,7 +137,6 @@ export default function EscanerIOS() {
     setEstadoEscaner('CARGANDO')
     setMensaje('Calculando coordenadas y validando...')
 
-    // 2. Candado GPS
     try {
       const position = await obtenerUbicacion()
       const distancia = calcularDistancia(position.coords.latitude, position.coords.longitude, OBRA_LAT, OBRA_LON)
@@ -144,7 +146,6 @@ export default function EscanerIOS() {
         return
       }
 
-      // 3. Registrar Ingreso
       const horaActual = new Date().getHours()
       const minutoActual = new Date().getMinutes()
       const isPuntual = horaActual < 9 || (horaActual === 9 && minutoActual <= 5)
@@ -157,7 +158,7 @@ export default function EscanerIOS() {
         area: perfil.area,
         foto_url: perfil.foto_url,
         estado_ingreso: estado,
-        fecha: hoyStr // Aseguramos la fecha exacta local
+        fecha: hoyStr 
       }).select().single()
 
       if (error) throw error
@@ -171,11 +172,8 @@ export default function EscanerIOS() {
       if (error.code === 1) {
         mostrarError("Enciende el GPS de tu celular para poder registrar tu asistencia.")
       } 
-      // LA MAGIA AQUÍ: Si escanean doble, lo atajamos y mostramos su Fotocheck
       else if (errorStr.includes('duplicate key') || errorStr.includes('unique constraint')) {
         const hoyStr = format(new Date(), 'yyyy-MM-dd')
-        
-        // Buscamos su asistencia ya existente
         const { data: registroPrevio } = await supabase
           .from('registro_asistencias')
           .select('id, hora_ingreso, estado_ingreso, hora_salida')
@@ -230,6 +228,78 @@ export default function EscanerIOS() {
     }
   }
 
+  // --- NUEVO: GUARDAR NOTA ---
+  const handleGuardarNota = async () => {
+    if (notaTexto.trim() === '') {
+      alert("El motivo no puede estar vacío")
+      return
+    }
+    if (!asistenciaHoy) return
+
+    setGuardandoNota(true)
+    try {
+      const { error } = await supabase
+        .from('registro_asistencias')
+        .update({ notas: notaTexto })
+        .eq('id', asistenciaHoy.id)
+
+      if (error) throw error
+
+      alert("¡Motivo guardado correctamente!")
+      setMostrarDialogoNota(false)
+      setNotaTexto('')
+    } catch (error: any) {
+      alert(`Error: ${error.message}`)
+    } finally {
+      setGuardandoNota(false)
+    }
+  }
+
+  // --- NUEVO: CAMBIAR FOTO ---
+  const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file || !perfil || !asistenciaHoy) return
+
+    setIsUploadingPhoto(true)
+    try {
+      const fileExt = file.name.split('.').pop()
+      const fileName = `${perfil.dni}_${Date.now()}.${fileExt}`
+
+      // 1. Subir a Storage
+      const { error: uploadError } = await supabase.storage
+        .from('fotos_perfil')
+        .upload(fileName, file, { upsert: true })
+
+      if (uploadError) throw uploadError
+
+      // 2. Obtener URL
+      const { data: publicUrlData } = supabase.storage
+        .from('fotos_perfil')
+        .getPublicUrl(fileName)
+      const nuevaFotoUrl = publicUrlData.publicUrl
+
+      // 3. Actualizar tabla maestra
+      await supabase.from('fotocheck_perfiles')
+        .update({ foto_url: nuevaFotoUrl })
+        .eq('dni', perfil.dni)
+
+      // 4. Actualizar tabla de hoy para el panel Admin
+      await supabase.from('registro_asistencias')
+        .update({ foto_url: nuevaFotoUrl })
+        .eq('id', asistenciaHoy.id)
+
+      // 5. Actualizar memoria y estado local
+      localStorage.setItem('RUAG_FOTO', nuevaFotoUrl)
+      setPerfil({ ...perfil, foto_url: nuevaFotoUrl })
+
+      alert("¡Foto actualizada en el sistema!")
+    } catch (error: any) {
+      alert(`Error al subir foto: ${error.message}`)
+    } finally {
+      setIsUploadingPhoto(false)
+    }
+  }
+
 
   // --- UTILIDADES VISUALES ---
   const mostrarError = (msg: string) => {
@@ -241,7 +311,6 @@ export default function EscanerIOS() {
   const mostrarExito = (msg: string) => {
     setMensaje(msg)
     setEstadoEscaner('EXITO')
-    // No reseteamos porque la UI cambiará automáticamente al fotocheck al tener 'asistenciaHoy'
   }
 
   // PANTALLA DE CARGA INICIAL
@@ -264,7 +333,6 @@ export default function EscanerIOS() {
     const statusBorderColor = isPuntual ? 'border-emerald-500' : 'border-amber-500'
     const yaMarcoSalida = asistenciaHoy.hora_salida !== null
 
-    // Formatear hora de ingreso de "2024-10-31T14:30:00" a "02:30 PM"
     let horaIngresoFormateada = "--:--"
     try {
       if (asistenciaHoy.hora_ingreso) {
@@ -276,6 +344,40 @@ export default function EscanerIOS() {
     return (
       <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 relative">
         
+        {/* MODAL DE NOTAS (Superpuesto) */}
+        {mostrarDialogoNota && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
+            <div className="bg-slate-900 w-full max-w-sm rounded-[24px] p-6 border border-slate-800 shadow-2xl relative">
+              <button onClick={() => setMostrarDialogoNota(false)} className="absolute top-4 right-4 text-slate-400 hover:text-white">
+                <X size={24} />
+              </button>
+              <h3 className="text-xl font-bold text-white mb-4">Añadir Motivo de Salida</h3>
+              <textarea 
+                value={notaTexto}
+                onChange={(e) => setNotaTexto(e.target.value)}
+                placeholder="Ej: Permiso por cita médica, trabajo en campo..."
+                className="w-full h-32 bg-slate-800 text-white rounded-xl p-4 border border-slate-700 focus:border-blue-500 outline-none resize-none mb-4"
+              />
+              <button 
+                onClick={handleGuardarNota}
+                disabled={guardandoNota}
+                className="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-xl flex justify-center items-center transition-colors"
+              >
+                {guardandoNota ? <Loader2 className="animate-spin" size={24} /> : 'Guardar'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Input Oculto para la foto */}
+        <input 
+          type="file" 
+          accept="image/*" 
+          ref={fileInputRef}
+          onChange={handleImageChange}
+          className="hidden"
+        />
+
         {/* Botón superior de Historial */}
         <button className="absolute top-6 right-6 text-white bg-slate-800 p-3 rounded-full hover:bg-slate-700 transition">
             <History size={24} />
@@ -287,13 +389,32 @@ export default function EscanerIOS() {
             <div className={`w-full h-2 ${statusColor}`} />
             
             <div className="p-8 flex flex-col items-center">
-              {/* Foto circular con borde dinámico */}
-              <div className={`w-32 h-32 rounded-full border-4 ${statusBorderColor} p-1 mb-4`}>
-                <img 
-                  src={perfil.foto_url || 'https://via.placeholder.com/150'} 
-                  alt="Fotocheck" 
-                  className="w-full h-full rounded-full object-cover"
-                />
+              
+              {/* Foto circular con botón de editar integrado */}
+              <div className="relative mb-4">
+                <div className={`w-32 h-32 rounded-full border-4 ${statusBorderColor} p-1 relative overflow-hidden`}>
+                  <img 
+                    src={perfil.foto_url || 'https://via.placeholder.com/150'} 
+                    alt="Fotocheck" 
+                    className="w-full h-full rounded-full object-cover"
+                  />
+                  {/* Capa de carga si se está subiendo */}
+                  {isUploadingPhoto && (
+                    <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
+                      <Loader2 className="animate-spin text-white" size={32} />
+                    </div>
+                  )}
+                </div>
+                
+                {/* Botón Edit (Oculto si está cargando) */}
+                {!isUploadingPhoto && (
+                  <button 
+                    onClick={() => fileInputRef.current?.click()}
+                    className="absolute bottom-0 right-0 w-10 h-10 bg-blue-600 rounded-full border-4 border-slate-900 flex items-center justify-center text-white shadow-lg hover:bg-blue-500 transition-colors"
+                  >
+                    <Edit2 size={16} />
+                  </button>
+                )}
               </div>
               
               <h2 className="text-white text-xl font-bold text-center">{perfil.nombres}</h2>
@@ -321,14 +442,23 @@ export default function EscanerIOS() {
           </div>
         </div>
 
-        {/* Zona de Acción (Salida) */}
+        {/* Zona de Acción (Salida y Notas) */}
         {yaMarcoSalida ? (
           <div className="text-center">
             <p className="text-slate-400 text-base">Ya marcaste tu salida hoy.</p>
             <p className="text-white text-xl font-bold mt-2">Hasta mañana.</p>
           </div>
         ) : (
-          <div className="w-full max-w-sm text-center">
+          <div className="w-full max-w-sm text-center flex flex-col gap-3">
+            
+            <button
+              onClick={() => setMostrarDialogoNota(true)}
+              className="w-full py-4 border border-slate-700 hover:bg-slate-800 rounded-2xl flex items-center justify-center text-slate-400 transition-colors"
+            >
+              <Edit3 size={20} className="mr-2" />
+              <span className="font-semibold">Añadir motivo de salida (Opcional)</span>
+            </button>
+
             <button
               onClick={handleMarcarSalida}
               disabled={isMarkingExit}
@@ -343,7 +473,7 @@ export default function EscanerIOS() {
                 </>
               )}
             </button>
-            <p className="text-slate-400 text-xs mt-4">Toca al finalizar tu turno laboral</p>
+            <p className="text-slate-400 text-xs mt-2">Toca al finalizar tu turno laboral</p>
           </div>
         )}
 
@@ -357,19 +487,16 @@ export default function EscanerIOS() {
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col relative overflow-hidden">
       
-      {/* Botón superior de Historial */}
       <button className="absolute top-6 right-6 text-white bg-slate-800/80 p-3 rounded-full hover:bg-slate-700 transition z-40 backdrop-blur-md">
           <History size={24} />
       </button>
 
-      {/* Cabecera Flotante */}
       <div className="absolute top-0 left-0 w-full p-6 z-20 flex flex-col items-start bg-gradient-to-b from-black/80 to-transparent pointer-events-none">
         <IconoQR />
         <h1 className="text-lg font-bold text-white mt-4">Escanea el QR de Ingreso</h1>
         <p className="text-xs text-emerald-400 mt-1">Se verificará tu GPS</p>
       </div>
 
-      {/* Visor de Cámara */}
       <div className="flex-1 relative bg-black flex items-center justify-center">
         {estadoEscaner === 'ESCANEO' && (
           <div className="absolute inset-0 z-10 opacity-80">
@@ -385,15 +512,12 @@ export default function EscanerIOS() {
           </div>
         )}
 
-        {/* Overlay Cuadrado Animado (Diseño Ruag) */}
         {estadoEscaner === 'ESCANEO' && (
           <div className="z-20 w-64 h-64 border-4 border-blue-400 rounded-3xl relative">
-            {/* Línea escaneadora */}
             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-blue-400 to-transparent shadow-[0_0_15px_#60A5FA] animate-[scan_2s_linear_infinite_alternate]" />
           </div>
         )}
 
-        {/* Pantallas de Estado superpuestas (Error/Éxito/Carga) */}
         {estadoEscaner !== 'ESCANEO' && (
           <div className={`z-30 absolute inset-0 flex flex-col items-center justify-center p-6 backdrop-blur-xl transition-all duration-300 ${
             estadoEscaner === 'CARGANDO' ? 'bg-slate-950/90' : 
@@ -427,7 +551,6 @@ export default function EscanerIOS() {
         )}
       </div>
       
-      {/* Definición de animaciones CSS in-line */}
       <style dangerouslySetInnerHTML={{__html: `
         @keyframes scan {
           0% { top: 0%; }
@@ -443,7 +566,6 @@ export default function EscanerIOS() {
   )
 }
 
-// Subcomponente simple para el icono del QR en la esquina
 function IconoQR() {
   return (
     <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
