@@ -1,8 +1,7 @@
 'use client'
 
-// IMPORTANTE: Cambiamos 'xlsx' por 'xlsx-js-style' para poder pintar las celdas
 import * as XLSX from 'xlsx-js-style';
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '@/utils/supabase/client'
 import { motion, AnimatePresence } from 'framer-motion'
 import { format, isToday, subDays, addDays } from 'date-fns'
@@ -10,7 +9,7 @@ import { es } from 'date-fns/locale'
 import { 
   Clock, CalendarDays, ChevronLeft, ChevronRight, 
   CheckCircle2, AlertCircle, LogOut, Activity, UserCircle2,
-  Sun, Moon, Unlock, MessageSquareText, X
+  Sun, Moon, Unlock, MessageSquareText, X, UserPlus, Loader2, Search, Filter, SlidersHorizontal
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 
@@ -38,15 +37,18 @@ export default function DualDashboardAsistencias() {
   const [loading, setLoading] = useState(true)
   const [fechaActual, setFechaActual] = useState(new Date())
   
-  // Estado para el Modo Oscuro y Modo Edición Secreto
   const [isDarkMode, setIsDarkMode] = useState(true)
   const [mounted, setMounted] = useState(false)
   const [modoEdicion, setModoEdicion] = useState(false)
 
-  // --- NUEVO ESTADO PARA EL POPUP DE NOTAS ---
   const [notaSeleccionada, setNotaSeleccionada] = useState<{nombre: string, nota: string, hora: string} | null>(null)
+  const [mostrarModalManual, setMostrarModalManual] = useState(false)
 
-  // Cargar preferencia de tema al iniciar
+  // --- ESTADOS PARA FILTROS ---
+  const [busqueda, setBusqueda] = useState('')
+  const [filtroArea, setFiltroArea] = useState('TODAS')
+  const [filtroEstado, setFiltroEstado] = useState('TODOS')
+
   useEffect(() => {
     setMounted(true)
     const savedTheme = localStorage.getItem('ruag_theme')
@@ -59,11 +61,10 @@ export default function DualDashboardAsistencias() {
     }
   }, [])
 
-  // El truco secreto: Escuchar la palabra "EDITAR"
   useEffect(() => {
     let teclado = ''
     const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement) return
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement || e.target instanceof HTMLTextAreaElement) return
 
       teclado += e.key.toUpperCase()
       if (teclado.length > 6) teclado = teclado.slice(-6)
@@ -130,28 +131,47 @@ export default function DualDashboardAsistencias() {
     }
   }, [fechaActual])
 
-  // --- NUEVA DESCARGA DE EXCEL CON DISEÑO Y APELLIDOS PRIMERO ---
+  // --- LÓGICA DE FILTRADO ---
+  // 1. Obtener lista única de áreas presentes en los datos de hoy
+  const areasDisponibles = useMemo(() => {
+    const areasSet = new Set(asistencias.map(a => a.area).filter(Boolean));
+    return ['TODAS', ...Array.from(areasSet)].sort();
+  }, [asistencias]);
+
+  // 2. Aplicar filtros
+  const asistenciasFiltradas = useMemo(() => {
+    return asistencias.filter(item => {
+      const coincideBusqueda = 
+        busqueda === '' || 
+        item.nombres_completos.toLowerCase().includes(busqueda.toLowerCase()) ||
+        item.dni.includes(busqueda);
+      
+      const coincideArea = filtroArea === 'TODAS' || item.area === filtroArea;
+      const coincideEstado = filtroEstado === 'TODOS' || item.estado_ingreso === filtroEstado;
+
+      return coincideBusqueda && coincideArea && coincideEstado;
+    });
+  }, [asistencias, busqueda, filtroArea, filtroEstado]);
+
+
   const descargarReporteExcel = async () => {
     try {
       const fechaString = format(fechaActual, 'yyyy-MM-dd')
       toast.info(`Generando reporte Excel del ${fechaString}...`);
       
-      const { data, error } = await supabase
-        .from('registro_asistencias')
-        .select('*')
-        .eq('fecha', fechaString)
-        .order('hora_ingreso', { ascending: false });
+      // Usamos los datos filtrados si hay filtros activos, si no, descargamos todo el día.
+      // IMPORTANTE: Si quieres que SIEMPRE descargue todo el día ignorando filtros visuales,
+      // cambia 'asistenciasFiltradas' por 'asistencias' en la siguiente línea.
+      const dataParaExcel = asistenciasFiltradas;
 
-      if (error) throw error;
-      if (!data || data.length === 0) {
-        toast.error(`No hay datos para exportar el ${fechaString}`);
+      if (dataParaExcel.length === 0) {
+        toast.error("No hay datos visibles para exportar");
         return;
       }
 
-      // 1. Definir Estilos
       const headerStyle = {
         font: { bold: true, color: { rgb: "FFFFFF" }, sz: 12 },
-        fill: { fgColor: { rgb: "1E293B" } }, // Pizarra Oscuro
+        fill: { fgColor: { rgb: "1E293B" } }, 
         alignment: { horizontal: "center", vertical: "center" },
         border: { bottom: { style: "medium", color: { rgb: "000000" } } }
       };
@@ -160,35 +180,28 @@ export default function DualDashboardAsistencias() {
       const styleTardanza = { font: { color: { rgb: "DC2626" }, bold: true }, alignment: { horizontal: "center" } };
       const styleCenter = { alignment: { horizontal: "center" } };
 
-      // 2. Crear los datos crudos con la nueva Cabecera
       const ws_data: any[][] = [
         ["FECHA", "DNI", "APELLIDOS Y NOMBRES", "ÁREA", "INGRESO", "ESTADO", "SALIDA", "MOTIVO / NOTA"]
       ];
 
-      // --- FUNCIÓN INTELIGENTE PARA INVERTIR NOMBRES ---
       const ordenarApellidosNombres = (nombreCompleto: string) => {
         if (!nombreCompleto) return '-';
         const partes = nombreCompleto.trim().split(' ');
-        
-        // Si tiene 3 o más palabras (ej: Juan Carlos Perez Gomez)
         if (partes.length >= 3) {
-          const apellidos = partes.slice(-2).join(' '); // Toma las últimas 2 palabras
-          const nombres = partes.slice(0, -2).join(' '); // Toma el resto
+          const apellidos = partes.slice(-2).join(' ');
+          const nombres = partes.slice(0, -2).join(' ');
           return `${apellidos}, ${nombres}`;
-        } 
-        // Si tiene 2 palabras (ej: Cesar Jormard)
-        else if (partes.length === 2) {
+        } else if (partes.length === 2) {
           return `${partes[1]}, ${partes[0]}`;
         }
-        // Si solo puso 1 palabra o está raro, lo devuelve igual
         return nombreCompleto;
       };
 
-      data.forEach((registro) => {
+      dataParaExcel.forEach((registro) => {
         ws_data.push([
           registro.fecha,
           registro.dni,
-          ordenarApellidosNombres(registro.nombres_completos), // <-- Aplicamos la magia aquí
+          ordenarApellidosNombres(registro.nombres_completos),
           registro.area,
           new Date(registro.hora_ingreso).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute:'2-digit' }),
           registro.estado_ingreso,
@@ -197,46 +210,30 @@ export default function DualDashboardAsistencias() {
         ]);
       });
 
-      // 3. Crear hoja
       const ws = XLSX.utils.aoa_to_sheet(ws_data);
 
-      // 4. Aplicar los estilos celda por celda
       for (let R = 0; R < ws_data.length; R++) {
         for (let C = 0; C < 8; C++) {
           const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
           if (!ws[cellAddress]) continue;
-
-          // Estilo de Cabecera (Fila 0)
-          if (R === 0) {
-            ws[cellAddress].s = headerStyle;
-          } else {
-            // Estilo de Contenido
-            if (C === 5) { // Columna ESTADO
-              ws[cellAddress].s = ws[cellAddress].v === 'PUNTUAL' ? stylePuntual : styleTardanza;
-            } else if ([0, 1, 3, 4, 6].includes(C)) { // Centrar otras columnas
-              ws[cellAddress].s = styleCenter;
-            }
+          if (R === 0) ws[cellAddress].s = headerStyle;
+          else {
+            if (C === 5) ws[cellAddress].s = ws[cellAddress].v === 'PUNTUAL' ? stylePuntual : styleTardanza;
+            else if ([0, 1, 3, 4, 6].includes(C)) ws[cellAddress].s = styleCenter;
           }
         }
       }
 
-      // 5. Ajustar anchos de las columnas
       ws['!cols'] = [
-        { wpx: 80 },  // Fecha
-        { wpx: 80 },  // DNI
-        { wpx: 240 }, // Apellidos y Nombres (Un poco más ancho)
-        { wpx: 130 }, // Área
-        { wpx: 80 },  // Ingreso
-        { wpx: 90 },  // Estado
-        { wpx: 80 },  // Salida
-        { wpx: 280 }, // Notas
+        { wpx: 80 }, { wpx: 80 }, { wpx: 240 }, { wpx: 130 }, 
+        { wpx: 80 }, { wpx: 90 }, { wpx: 80 }, { wpx: 280 }
       ];
 
       const libro = XLSX.utils.book_new();
       XLSX.utils.book_append_sheet(libro, ws, "Asistencias");
 
-      XLSX.writeFile(libro, `Reporte_RUAG_${fechaString}.xlsx`);
-      toast.success(`¡Reporte del ${fechaString} descargado!`);
+      XLSX.writeFile(libro, `Reporte_RUAG_${fechaString}_filtrado.xlsx`);
+      toast.success(`¡Reporte descargado!`);
 
     } catch (error) {
       console.error("Error exportando a Excel:", error);
@@ -246,7 +243,6 @@ export default function DualDashboardAsistencias() {
 
   const actualizarHora = async (id: string, campo: 'hora_ingreso' | 'hora_salida', nuevaHora: string, fechaBase: string) => {
     if (!nuevaHora) return
-
     try {
       const [horas, minutos] = nuevaHora.split(':')
       const fechaObj = new Date(fechaBase)
@@ -267,7 +263,6 @@ export default function DualDashboardAsistencias() {
 
       toast.success('Registro actualizado correctamente')
       setAsistencias(prev => prev.map(a => a.id === id ? { ...a, ...datosAActualizar } : a))
-
     } catch (error) {
       console.error(error)
       toast.error('Error al actualizar la hora')
@@ -310,6 +305,16 @@ export default function DualDashboardAsistencias() {
 
           <div className="flex items-center gap-4 w-full lg:w-auto justify-between lg:justify-end">
             
+            {modoEdicion && (
+               <button 
+                onClick={() => setMostrarModalManual(true)}
+                className="flex items-center justify-center gap-2 p-2 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold transition-all border border-blue-500/50 active:scale-95 shadow-lg shadow-blue-600/20"
+               >
+                 <UserPlus size={20} />
+                 <span className="hidden sm:inline">Registro Manual</span>
+               </button>
+            )}
+
             <button 
               onClick={descargarReporteExcel}
               className="flex items-center justify-center gap-2 p-2 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold transition-all border border-emerald-500/50 active:scale-95 shadow-lg shadow-emerald-600/20"
@@ -360,8 +365,9 @@ export default function DualDashboardAsistencias() {
         </div>
       </header>
 
-      <main className="flex-1 w-full px-6 py-6 lg:px-8 lg:py-8 flex flex-col gap-6 lg:gap-8 overflow-y-auto">
+      <main className="flex-1 w-full px-6 py-6 lg:px-8 lg:py-8 flex flex-col gap-6 lg:gap-8 overflow-y-auto z-10">
         
+        {/* --- ESTADÍSTICAS SUPERIORES --- */}
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6 shrink-0">
           <StatCard title="INGRESOS HOY" value={asistencias.length} icon={<UserCircle2 size={28}/>} color="from-blue-500 to-blue-700 dark:from-blue-600 dark:to-blue-900" border="border-blue-200 dark:border-blue-500/30" textColor="text-blue-600 dark:text-blue-400" />
           <StatCard title="PUNTUALES" value={puntuales} icon={<CheckCircle2 size={28}/>} color="from-emerald-400 to-emerald-600 dark:from-emerald-500 dark:to-emerald-900" border="border-emerald-200 dark:border-emerald-500/30" textColor="text-emerald-600 dark:text-emerald-400" />
@@ -369,6 +375,60 @@ export default function DualDashboardAsistencias() {
           <StatCard title="SALIDAS" value={salidas} icon={<LogOut size={28}/>} color="from-slate-500 to-slate-700 dark:from-slate-600 dark:to-slate-900" border="border-slate-300 dark:border-slate-500/30" textColor="text-slate-600 dark:text-slate-400" />
         </div>
 
+        {/* --- BARRA DE FILTROS INTELIGENTE --- */}
+        {asistencias.length > 0 && (
+          <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl p-4 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col lg:flex-row gap-4 items-center">
+            <div className="flex items-center gap-3 text-slate-500 dark:text-slate-400 mr-2">
+              <SlidersHorizontal size={20} />
+              <span className="font-bold text-sm uppercase tracking-widest hidden lg:inline">Filtros</span>
+            </div>
+            
+            {/* Buscador Nombre/DNI */}
+            <div className="relative flex-1 w-full">
+              <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input 
+                type="text" 
+                placeholder="Buscar por Nombre o DNI..." 
+                value={busqueda}
+                onChange={(e) => setBusqueda(e.target.value)}
+                className="w-full bg-slate-100 dark:bg-slate-950/50 pl-12 pr-4 py-3 rounded-xl border border-slate-200 dark:border-slate-800 outline-none focus:ring-2 focus:ring-blue-500 transition-all text-slate-900 dark:text-white"
+              />
+            </div>
+
+             {/* Filtro Área */}
+            <div className="relative w-full lg:w-auto">
+              <Filter size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <select 
+                value={filtroArea} 
+                onChange={(e) => setFiltroArea(e.target.value)}
+                className="w-full lg:w-48 appearance-none bg-slate-100 dark:bg-slate-950/50 pl-12 pr-8 py-3 rounded-xl border border-slate-200 dark:border-slate-800 outline-none focus:ring-2 focus:ring-blue-500 transition-all text-slate-900 dark:text-white cursor-pointer font-medium"
+              >
+                {areasDisponibles.map(area => (
+                  <option key={area} value={area}>{area === 'TODAS' ? 'Todas las Áreas' : area}</option>
+                ))}
+              </select>
+              <ChevronRight size={16} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none rotate-90" />
+            </div>
+
+            {/* Filtro Estado */}
+            <div className="relative w-full lg:w-auto">
+              <div className={`absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full ${filtroEstado === 'TODOS' ? 'bg-slate-400' : filtroEstado === 'PUNTUAL' ? 'bg-emerald-500' : 'bg-red-500'}`} />
+              <select 
+                value={filtroEstado} 
+                onChange={(e) => setFiltroEstado(e.target.value)}
+                className="w-full lg:w-48 appearance-none bg-slate-100 dark:bg-slate-950/50 pl-10 pr-8 py-3 rounded-xl border border-slate-200 dark:border-slate-800 outline-none focus:ring-2 focus:ring-blue-500 transition-all text-slate-900 dark:text-white cursor-pointer font-medium"
+              >
+                <option value="TODOS">Todos los Estados</option>
+                <option value="PUNTUAL">PUNTUAL</option>
+                <option value="TARDANZA">TARDANZA</option>
+              </select>
+              <ChevronRight size={16} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none rotate-90" />
+            </div>
+          </div>
+        )}
+
+
+        {/* --- LISTADO DE TARJETAS --- */}
         {loading ? (
           <div className="flex justify-center py-32">
             <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-blue-600 dark:border-blue-500"></div>
@@ -379,10 +439,18 @@ export default function DualDashboardAsistencias() {
             <h3 className="text-2xl lg:text-3xl font-bold text-slate-400 dark:text-slate-500 text-center px-4">Esperando ingresos...</h3>
             <p className="text-slate-500 dark:text-slate-600 text-base lg:text-lg mt-2 text-center px-4">La pantalla se actualizará automáticamente.</p>
           </motion.div>
+        ) : asistenciasFiltradas.length === 0 ? (
+           // Mensaje cuando el filtro no encuentra nada
+           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center justify-center py-20 border-2 border-dashed border-slate-300 dark:border-slate-800 rounded-3xl">
+             <Search size={60} className="text-slate-300 dark:text-slate-600 mb-4" />
+             <h3 className="text-xl font-bold text-slate-500 dark:text-slate-400">No se encontraron resultados</h3>
+             <p className="text-slate-400 dark:text-slate-500 mt-2">Intenta ajustar los filtros de búsqueda.</p>
+           </motion.div>
         ) : (
-          <motion.div layout className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 auto-rows-max">
+          <motion.div layout className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 auto-rows-max pb-20">
             <AnimatePresence mode="popLayout">
-              {asistencias.map((asistencia, idx) => (
+              {/* USAMOS LA LISTA FILTRADA AQUÍ */}
+              {asistenciasFiltradas.map((asistencia, idx) => (
                 <FotocheckCard 
                   key={asistencia.id} 
                   data={asistencia} 
@@ -397,8 +465,21 @@ export default function DualDashboardAsistencias() {
         )}
       </main>
 
-      {/* --- EL POPUP MODAL DE NOTAS --- */}
+      {/* MODALES SUPERPUESTOS */}
       <AnimatePresence>
+        {mostrarModalManual && (
+          <ModalRegistroManual 
+            onClose={() => setMostrarModalManual(false)} 
+            fechaBase={format(fechaActual, 'yyyy-MM-dd')}
+            onSuccess={(nuevoRegistro) => {
+              if (isToday(fechaActual) || nuevoRegistro.fecha === format(fechaActual, 'yyyy-MM-dd')) {
+                setAsistencias(prev => [nuevoRegistro, ...prev])
+              }
+              setMostrarModalManual(false)
+            }}
+          />
+        )}
+
         {notaSeleccionada && (
           <motion.div 
             initial={{ opacity: 0 }} 
@@ -447,6 +528,30 @@ export default function DualDashboardAsistencias() {
         )}
       </AnimatePresence>
 
+      {/* ESTILOS GLOBALES PARA EL DASHBOARD */}
+      <style dangerouslySetInnerHTML={{__html: `
+        /* Animación para nombres largos */
+        .marquee-container {
+          overflow: hidden;
+          white-space: nowrap;
+          position: relative;
+          width: 100%;
+          mask-image: linear-gradient(to right, black 85%, transparent 100%);
+        }
+        .marquee-text {
+          display: inline-block;
+          animation: marquee 8s linear infinite;
+        }
+        .marquee-text:hover {
+          animation-play-state: paused;
+        }
+        @keyframes marquee {
+          0% { transform: translateX(0); }
+          15% { transform: translateX(0); }
+          100% { transform: translateX(calc(-100% + 150px)); }
+        }
+      `}} />
+
     </div>
   )
 }
@@ -466,112 +571,238 @@ function StatCard({ title, value, icon, color, border, textColor }: any) {
   )
 }
 
+// --- MODAL PARA REGISTRO MANUAL ---
+function ModalRegistroManual({ onClose, fechaBase, onSuccess }: { onClose: () => void, fechaBase: string, onSuccess: (data: any) => void }) {
+  const [nombres, setNombres] = useState('')
+  const [dni, setDni] = useState('')
+  const [area, setArea] = useState('')
+  const [horaIngreso, setHoraIngreso] = useState('08:00')
+  const [guardando, setGuardando] = useState(false)
+
+  const AREAS_LIST = ["Operaciones/Proyectos", "Presupuesto", "Contabilidad", "Ssoma", "Rrhh", "Logística", "Finanzas", "Área comercial", "Software"]
+
+  const handleGuardar = async () => {
+    if (!nombres || dni.length !== 8 || !area || !horaIngreso) {
+      toast.error("Llena todos los campos correctamente.")
+      return
+    }
+
+    setGuardando(true)
+    try {
+      const [horas, minutos] = horaIngreso.split(':')
+      const fechaObj = new Date(fechaBase)
+      fechaObj.setHours(parseInt(horas), parseInt(minutos), 0)
+      
+      const isPuntual = parseInt(horas) < 9 || (parseInt(horas) === 9 && parseInt(minutos) <= 5)
+      
+      const nuevoRegistro = {
+        dni,
+        nombres_completos: nombres.toUpperCase(),
+        area,
+        fecha: fechaBase,
+        hora_ingreso: fechaObj.toISOString(),
+        estado_ingreso: isPuntual ? 'PUNTUAL' : 'TARDANZA',
+        foto_url: '' // Forzamos vacío para que se active el Avatar inteligente
+      }
+
+      const { data, error } = await supabase.from('registro_asistencias').insert(nuevoRegistro).select().single()
+      if (error) throw error
+
+      toast.success("Asistencia manual guardada con éxito")
+      onSuccess(data)
+    } catch (error: any) {
+      toast.error(`Error: ${error.message}`)
+      setGuardando(false)
+    }
+  }
+
+  return (
+    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+      <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }} className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[24px] shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-700 relative">
+        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 h-2 w-full" />
+        <div className="p-6 relative">
+          <button onClick={onClose} className="absolute top-4 right-4 p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"><X size={20} /></button>
+          
+          <div className="flex items-center gap-3 mb-6 text-blue-600 dark:text-blue-500">
+            <div className="p-3 bg-blue-100 dark:bg-blue-900/30 rounded-xl">
+              <UserPlus size={24} />
+            </div>
+            <h3 className="text-xl font-black text-slate-900 dark:text-white">Registro Manual</h3>
+          </div>
+          
+          <div className="space-y-4">
+            <div>
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Nombres y Apellidos</label>
+              <input type="text" value={nombres} onChange={(e) => setNombres(e.target.value)} className="w-full mt-1 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white px-4 py-3 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all" placeholder="Ej: Juan Perez" />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">DNI</label>
+                <input type="number" value={dni} onChange={(e) => {if(e.target.value.length <=8) setDni(e.target.value)}} className="w-full mt-1 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white px-4 py-3 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all" placeholder="12345678" />
+              </div>
+              <div>
+                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Hora Ingreso</label>
+                <input type="time" value={horaIngreso} onChange={(e) => setHoraIngreso(e.target.value)} className="w-full mt-1 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white px-4 py-3 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all" />
+              </div>
+            </div>
+            <div>
+              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Área</label>
+              <select value={area} onChange={(e) => setArea(e.target.value)} className="w-full mt-1 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white px-4 py-3 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all cursor-pointer">
+                <option value="" disabled>Seleccionar Área</option>
+                {AREAS_LIST.map(a => <option key={a} value={a}>{a}</option>)}
+              </select>
+            </div>
+          </div>
+          
+          <button onClick={handleGuardar} disabled={guardando} className="w-full mt-8 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-lg shadow-blue-500/25 text-white font-bold py-4 rounded-xl transition-all flex justify-center items-center active:scale-95">
+            {guardando ? <Loader2 className="animate-spin" size={24}/> : "Registrar Asistencia"}
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  )
+}
+
+// --- NUEVO DISEÑO GLASSMORPHISM PARA LA TARJETA ---
 function FotocheckCard({ data, index, modoEdicion, onActualizar, onAbrirNota }: { data: any, index: number, modoEdicion: boolean, onActualizar: Function, onAbrirNota: (nota: {nombre: string, nota: string, hora: string}) => void }) {
   const isPuntual = data.estado_ingreso === 'PUNTUAL'
   const justAdded = index === 0 && isToday(new Date(data.hora_ingreso))
   
+  const nombreLargo = data.nombres_completos.length > 20;
+  
+  // Color dinámico según estado
+  const accentColor = isPuntual ? 'bg-emerald-500' : 'bg-red-500';
+  const glowColor = isPuntual ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)';
+  const textColor = isPuntual ? 'text-emerald-500 dark:text-emerald-400' : 'text-red-500 dark:text-red-400';
+
+  // Función inteligente para extraer las iniciales
+  const getInitials = (name: string) => {
+    if (!name) return '??';
+    const words = name.trim().split(' ').filter(w => w.length > 0);
+    if (words.length === 1) return words[0].substring(0, 2).toUpperCase();
+    return (words[0][0] + words[1][0]).toUpperCase();
+  };
+
   return (
     <motion.div
       layout
-      initial={{ opacity: 0, scale: 0.8, x: -50 }}
-      animate={{ opacity: 1, scale: 1, x: 0 }}
-      exit={{ opacity: 0, scale: 0.8, y: 50 }}
-      transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-      className={`rounded-3xl border overflow-hidden shadow-md dark:shadow-2xl flex flex-col relative transition-all duration-500
-        ${justAdded 
-          ? 'bg-blue-50/50 dark:bg-slate-800 border-blue-300 dark:border-blue-400 shadow-blue-200 dark:shadow-blue-900/50' 
-          : modoEdicion ? 'bg-white dark:bg-slate-800 border-blue-400/50 shadow-[0_0_15px_rgba(59,130,246,0.2)]' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700/50 hover:shadow-lg'}`}
+      initial={{ opacity: 0, scale: 0.9, y: 30 }}
+      animate={{ opacity: 1, scale: 1, y: 0 }}
+      exit={{ opacity: 0, scale: 0.9, y: 30 }}
+      transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+      style={{ boxShadow: `0 10px 40px -10px ${glowColor}` }}
+      className={`relative group rounded-[2rem] p-5 flex flex-col overflow-hidden transition-all duration-300
+        ${justAdded ? 'border-2 border-blue-400 dark:border-blue-500' : 'border border-slate-200 dark:border-slate-800'}
+        bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl hover:-translate-y-1 z-10`}
     >
-      <div className={`h-2 lg:h-3 w-full shadow-sm dark:shadow-[0_0_15px_rgba(0,0,0,0.5)] z-10 ${isPuntual ? 'bg-emerald-500' : 'bg-red-500'}`} />
-      
-      <div className="p-5 lg:p-6 flex-1 flex flex-col z-10 relative">
-        
-        {/* BOTÓN FLOTANTE PARA VER NOTA */}
-        {data.notas && (
-          <button 
-            onClick={() => onAbrirNota({
-              nombre: data.nombres_completos, 
-              nota: data.notas,
-              hora: data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm a') : 'Desconocida'
-            })}
-            className="absolute top-4 right-4 bg-amber-100 hover:bg-amber-200 dark:bg-amber-500/20 dark:hover:bg-amber-500/30 text-amber-600 dark:text-amber-400 p-2 rounded-full transition-colors shadow-sm"
-            title="Ver motivo de salida"
-          >
-            <MessageSquareText size={20} />
-          </button>
-        )}
+      {/* Resplandor de fondo invisible */}
+      <div className={`absolute -top-20 -right-20 w-40 h-40 rounded-full blur-[50px] opacity-50 pointer-events-none ${accentColor}`} />
 
-        <div className="flex gap-4 lg:gap-5 items-center mb-5 lg:mb-6 mt-2">
-          <div className="relative shrink-0">
+      {/* Botón Flotante de Notas */}
+      {data.notas && (
+        <button 
+          onClick={() => onAbrirNota({
+            nombre: data.nombres_completos, 
+            nota: data.notas,
+            hora: data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm a') : 'Desconocida'
+          })}
+          className="absolute top-4 right-4 z-20 bg-white dark:bg-slate-800 shadow-lg border border-amber-200 dark:border-amber-900/50 hover:bg-amber-50 dark:hover:bg-amber-900/30 text-amber-500 p-2 rounded-full transition-all hover:scale-110"
+          title="Ver motivo de salida"
+        >
+          <MessageSquareText size={18} />
+        </button>
+      )}
+
+      {/* Cabecera: Foto + Info */}
+      <div className="flex items-start gap-4 mb-6 relative z-10">
+        
+        {/* AVATAR INTELIGENTE (Foto o Iniciales con gradiente) */}
+        <div className="relative shrink-0">
+          <div className="w-[72px] h-[72px] rounded-2xl overflow-hidden shadow-inner bg-slate-100 dark:bg-slate-800">
             {data.foto_url ? (
-              <img src={data.foto_url} alt="Foto" className="w-20 h-20 lg:w-24 lg:h-24 rounded-2xl object-cover bg-slate-100 dark:bg-slate-800 shadow-inner border border-slate-200 dark:border-slate-700" />
+              <img src={data.foto_url} alt="Foto" className="w-full h-full object-cover" />
             ) : (
-              <div className="w-20 h-20 lg:w-24 lg:h-24 rounded-2xl bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center text-slate-400 dark:text-slate-500">
-                <UserCircle2 size={40} />
+              <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 text-white font-black text-2xl shadow-inner">
+                {getInitials(data.nombres_completos)}
               </div>
             )}
-            <div className={`absolute -bottom-2 -right-2 w-5 h-5 lg:w-6 lg:h-6 rounded-full border-4 border-white dark:border-slate-900 shadow-sm dark:shadow-lg ${isPuntual ? 'bg-emerald-500' : 'bg-red-500'}`} />
           </div>
-          
-          <div className="flex-1 min-w-0 pr-4">
-            <h3 className="font-bold text-slate-900 dark:text-slate-100 text-lg lg:text-xl leading-tight truncate">
-              {data.nombres_completos}
-            </h3>
-            <p className="text-sm lg:text-base text-slate-500 dark:text-slate-400 font-mono mt-0.5 lg:mt-1 tracking-wider">{data.dni}</p>
-            <div className="mt-2 lg:mt-3 inline-flex border border-slate-200 dark:border-slate-700 px-2 py-0.5 lg:px-3 lg:py-1 bg-slate-50 dark:bg-slate-950/50 text-blue-600 dark:text-blue-400 text-[10px] lg:text-xs font-bold rounded-lg uppercase tracking-widest shadow-inner">
-              {data.area}
-            </div>
-          </div>
+          {/* Indicador de estado sobre la foto */}
+          <div className={`absolute -bottom-1.5 -right-1.5 w-4 h-4 rounded-full border-2 border-white dark:border-slate-900 shadow-md ${accentColor}`} />
         </div>
 
-        <div className="mt-auto space-y-2 lg:space-y-3 bg-slate-50 dark:bg-slate-950 rounded-2xl p-3 lg:p-4 border border-slate-100 dark:border-slate-800/50 shadow-inner">
-          
-          <div className="flex justify-between items-center">
-            <span className="text-slate-500 flex items-center gap-1.5 lg:gap-2 text-[10px] lg:text-xs font-bold uppercase tracking-widest"><Clock size={14}/> INGRESO</span>
-            {modoEdicion ? (
-              <input 
-                type="time" 
-                defaultValue={format(new Date(data.hora_ingreso), 'HH:mm')}
-                className="bg-transparent border-b-2 border-blue-500 text-xl lg:text-2xl font-black text-blue-600 dark:text-blue-400 outline-none w-28 text-right focus:border-emerald-500"
-                onBlur={(e) => {
-                  if(e.target.value !== format(new Date(data.hora_ingreso), 'HH:mm')) {
-                    onActualizar(data.id, 'hora_ingreso', e.target.value, data.hora_ingreso)
-                  }
-                }}
-              />
-            ) : (
-              <span className={`font-black text-xl lg:text-2xl tracking-tighter ${isPuntual ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400 dark:drop-shadow-[0_0_8px_rgba(248,113,113,0.8)]'}`}>
-                {format(new Date(data.hora_ingreso), 'HH:mm')} <span className="text-xs lg:text-sm opacity-60 font-bold">{format(new Date(data.hora_ingreso), 'a')}</span>
-              </span>
-            )}
+        {/* Nombres y DNI */}
+        <div className="flex-1 min-w-0 pt-1">
+          <div className={nombreLargo ? "marquee-container" : ""}>
+            <h3 className={`font-black text-slate-900 dark:text-white text-[17px] leading-tight ${nombreLargo ? "marquee-text" : "truncate"}`}>
+              {data.nombres_completos} {nombreLargo && <span className="opacity-0">___</span>}
+            </h3>
+          </div>
+          <p className="text-xs font-mono text-slate-500 mt-1 mb-2 tracking-widest">{data.dni}</p>
+          <span className="inline-block px-2.5 py-1 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] font-bold rounded-lg uppercase tracking-wider">
+            {data.area}
+          </span>
+        </div>
+      </div>
+
+      {/* Bloque de Tiempos Integrado */}
+      <div className="mt-auto bg-slate-50/50 dark:bg-slate-950/50 rounded-2xl p-4 border border-slate-100 dark:border-slate-800 shadow-inner relative z-10">
+        
+        {/* INGRESO */}
+        <div className="flex justify-between items-center">
+          <div className="flex items-center gap-1.5">
+            <div className={`w-1.5 h-1.5 rounded-full ${accentColor} animate-pulse`} />
+            <span className="text-slate-500 text-[10px] font-bold uppercase tracking-widest">Ingreso</span>
+          </div>
+          {modoEdicion ? (
+            <input 
+              type="time" 
+              defaultValue={format(new Date(data.hora_ingreso), 'HH:mm')}
+              className="bg-transparent border-b border-blue-500 text-lg font-black text-blue-600 dark:text-blue-400 outline-none w-20 text-right focus:border-emerald-500"
+              onBlur={(e) => {
+                if(e.target.value !== format(new Date(data.hora_ingreso), 'HH:mm')) {
+                  onActualizar(data.id, 'hora_ingreso', e.target.value, data.hora_ingreso)
+                }
+              }}
+            />
+          ) : (
+            <span className={`font-black text-xl tracking-tight ${textColor}`}>
+              {format(new Date(data.hora_ingreso), 'HH:mm')} <span className="text-xs opacity-60 font-bold">{format(new Date(data.hora_ingreso), 'a')}</span>
+            </span>
+          )}
+        </div>
+        
+        <div className="h-px w-full bg-slate-200 dark:bg-slate-800 my-2" />
+        
+        {/* SALIDA */}
+        <div className="flex justify-between items-center">
+          <div className="flex items-center gap-1.5 text-slate-500">
+            <LogOut size={12} strokeWidth={3} />
+            <span className="text-[10px] font-bold uppercase tracking-widest">Salida</span>
           </div>
           
-          <div className="flex justify-between items-center pt-2 lg:pt-3 border-t border-slate-200 dark:border-slate-800">
-            <span className="text-slate-500 flex items-center gap-1.5 lg:gap-2 text-[10px] lg:text-xs font-bold uppercase tracking-widest"><LogOut size={14}/> SALIDA</span>
-            
-            {modoEdicion ? (
-              <input 
-                type="time" 
-                defaultValue={data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm') : ''}
-                className="bg-transparent border-b-2 border-blue-500 text-base lg:text-lg font-bold text-slate-700 dark:text-slate-300 outline-none w-24 text-right focus:border-emerald-500"
-                onBlur={(e) => {
-                  const currentValue = data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm') : ''
-                  if(e.target.value && e.target.value !== currentValue) {
-                    const baseDate = data.hora_salida || data.hora_ingreso || `${data.fecha}T00:00:00`
-                    onActualizar(data.id, 'hora_salida', e.target.value, baseDate)
-                  }
-                }}
-              />
-            ) : (
-              <span className="font-bold text-base lg:text-lg text-slate-700 dark:text-slate-300">
-                {data.hora_salida ? (
-                  <>{format(new Date(data.hora_salida), 'HH:mm')} <span className="text-[10px] lg:text-xs opacity-60">{format(new Date(data.hora_salida), 'a')}</span></>
-                ) : (
-                  <span className="text-indigo-600 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-500/10 border border-indigo-200 dark:border-indigo-500/20 px-2 py-0.5 lg:py-1 rounded animate-pulse text-[10px] lg:text-xs uppercase tracking-widest shadow-sm dark:shadow-[0_0_10px_rgba(99,102,241,0.2)]">En Turno</span>
-                )}
-              </span>
-            )}
-          </div>
+          {modoEdicion ? (
+            <input 
+              type="time" 
+              defaultValue={data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm') : ''}
+              className="bg-transparent border-b border-blue-500 text-base font-bold text-slate-700 dark:text-slate-300 outline-none w-20 text-right focus:border-emerald-500"
+              onBlur={(e) => {
+                const currentValue = data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm') : ''
+                if(e.target.value && e.target.value !== currentValue) {
+                  const baseDate = data.hora_salida || data.hora_ingreso || `${data.fecha}T00:00:00`
+                  onActualizar(data.id, 'hora_salida', e.target.value, baseDate)
+                }
+              }}
+            />
+          ) : (
+            <span className="font-bold text-base text-slate-700 dark:text-slate-200">
+              {data.hora_salida ? (
+                <>{format(new Date(data.hora_salida), 'HH:mm')} <span className="text-[10px] opacity-60">{format(new Date(data.hora_salida), 'a')}</span></>
+              ) : (
+                <span className="text-indigo-500 bg-indigo-500/10 px-2 py-0.5 rounded-md animate-pulse text-[10px] uppercase tracking-widest border border-indigo-500/20">En Turno</span>
+              )}
+            </span>
+          )}
         </div>
       </div>
     </motion.div>
