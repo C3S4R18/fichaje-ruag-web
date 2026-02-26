@@ -3,15 +3,154 @@
 import * as XLSX from 'xlsx-js-style';
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '@/utils/supabase/client'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion, AnimatePresence, Variants } from 'framer-motion'
 import { format, isToday, subDays, addDays } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { 
-  Clock, CalendarDays, ChevronLeft, ChevronRight, 
+  CalendarDays, ChevronLeft, ChevronRight, 
   CheckCircle2, AlertCircle, LogOut, Activity, UserCircle2,
-  Sun, Moon, Unlock, MessageSquareText, X, UserPlus, Loader2, Search, Filter, SlidersHorizontal
+  Unlock, MessageSquareText, X, UserPlus, Loader2, Search, Filter,
+  FileSpreadsheet, SlidersHorizontal, Users, ShieldCheck, AlignLeft
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
+
+// --- COMPONENTE SWITCH DE TEMA (UIVERSE) ---
+const ThemeSwitch = ({ isDarkMode, onToggle }: { isDarkMode: boolean, onToggle: () => void }) => (
+  <div className="relative transform scale-[0.6] sm:scale-75 origin-right">
+    <style dangerouslySetInnerHTML={{__html: `
+      .theme-switch {
+        --toggle-size: 20px;
+        --container-width: 5.625em;
+        --container-height: 2.5em;
+        --container-radius: 6.25em;
+        --container-light-bg: #3D7EAE;
+        --container-night-bg: #1D1F2C;
+        --circle-container-diameter: 3.375em;
+        --sun-moon-diameter: 2.125em;
+        --sun-bg: #ECCA2F;
+        --moon-bg: #C4C9D1;
+        --spot-color: #959DB1;
+        --circle-container-offset: calc((var(--circle-container-diameter) - var(--container-height)) / 2 * -1);
+        --stars-color: #fff;
+        --clouds-color: #F3FDFF;
+        --back-clouds-color: #AACADF;
+        --transition: .5s cubic-bezier(0, -0.02, 0.4, 1.25);
+        --circle-transition: .3s cubic-bezier(0, -0.02, 0.35, 1.17);
+      }
+      .theme-switch, .theme-switch *, .theme-switch *::before, .theme-switch *::after {
+        box-sizing: border-box; margin: 0; padding: 0; font-size: var(--toggle-size);
+      }
+      .theme-switch__container {
+        width: var(--container-width); height: var(--container-height);
+        background-color: var(--container-light-bg); border-radius: var(--container-radius);
+        overflow: hidden; cursor: pointer;
+        box-shadow: 0em -0.062em 0.062em rgba(0, 0, 0, 0.25), 0em 0.062em 0.125em rgba(255, 255, 255, 0.94);
+        transition: var(--transition); position: relative; display: block;
+      }
+      .theme-switch__container::before {
+        content: ""; position: absolute; z-index: 1; inset: 0;
+        box-shadow: 0em 0.05em 0.187em rgba(0, 0, 0, 0.25) inset, 0em 0.05em 0.187em rgba(0, 0, 0, 0.25) inset;
+        border-radius: var(--container-radius); pointer-events: none;
+      }
+      .theme-switch__checkbox { display: none; }
+      .theme-switch__circle-container {
+        width: var(--circle-container-diameter); height: var(--circle-container-diameter);
+        background-color: rgba(255, 255, 255, 0.1); position: absolute;
+        left: var(--circle-container-offset); top: var(--circle-container-offset);
+        border-radius: var(--container-radius);
+        box-shadow: inset 0 0 0 3.375em rgba(255, 255, 255, 0.1), inset 0 0 0 3.375em rgba(255, 255, 255, 0.1), 0 0 0 0.625em rgba(255, 255, 255, 0.1), 0 0 0 1.25em rgba(255, 255, 255, 0.1);
+        display: flex; transition: var(--circle-transition); pointer-events: none;
+      }
+      .theme-switch__sun-moon-container {
+        pointer-events: auto; position: relative; z-index: 2;
+        width: var(--sun-moon-diameter); height: var(--sun-moon-diameter);
+        margin: auto; border-radius: var(--container-radius); background-color: var(--sun-bg);
+        box-shadow: 0.062em 0.062em 0.062em 0em rgba(254, 255, 239, 0.61) inset, 0em -0.062em 0.062em 0em #a1872a inset;
+        filter: drop-shadow(0.062em 0.125em 0.125em rgba(0, 0, 0, 0.25)) drop-shadow(0em 0.062em 0.125em rgba(0, 0, 0, 0.25));
+        overflow: hidden; transition: var(--transition);
+      }
+      .theme-switch__moon {
+        transform: translateX(100%); width: 100%; height: 100%;
+        background-color: var(--moon-bg); border-radius: inherit;
+        box-shadow: 0.062em 0.062em 0.062em 0em rgba(254, 255, 239, 0.61) inset, 0em -0.062em 0.062em 0em #969696 inset;
+        transition: var(--transition); position: relative;
+      }
+      .theme-switch__spot {
+        position: absolute; top: 0.75em; left: 0.312em; width: 0.75em; height: 0.75em;
+        border-radius: var(--container-radius); background-color: var(--spot-color);
+        box-shadow: 0em 0.0312em 0.062em rgba(0, 0, 0, 0.25) inset;
+      }
+      .theme-switch__spot:nth-of-type(2) { width: 0.375em; height: 0.375em; top: 0.937em; left: 1.375em; }
+      .theme-switch__spot:nth-last-of-type(3) { width: 0.25em; height: 0.25em; top: 0.312em; left: 0.812em; }
+      .theme-switch__clouds {
+        width: 1.25em; height: 1.25em; background-color: var(--clouds-color);
+        border-radius: var(--container-radius); position: absolute; bottom: -0.625em; left: 0.312em;
+        box-shadow: 0.937em 0.312em var(--clouds-color), -0.312em -0.312em var(--back-clouds-color), 1.437em 0.375em var(--clouds-color), 0.5em -0.125em var(--back-clouds-color), 2.187em 0 var(--clouds-color), 1.25em -0.062em var(--back-clouds-color), 2.937em 0.312em var(--clouds-color), 2em -0.312em var(--back-clouds-color), 3.625em -0.062em var(--clouds-color), 2.625em 0em var(--back-clouds-color), 4.5em -0.312em var(--clouds-color), 3.375em -0.437em var(--back-clouds-color), 4.625em -1.75em 0 0.437em var(--clouds-color), 4em -0.625em var(--back-clouds-color), 4.125em -2.125em 0 0.437em var(--back-clouds-color);
+        transition: 0.5s cubic-bezier(0, -0.02, 0.4, 1.25);
+      }
+      .theme-switch__stars-container {
+        position: absolute; color: var(--stars-color); top: -100%; left: 0.312em; width: 2.75em; height: auto;
+        transition: var(--transition);
+      }
+      .theme-switch__checkbox:checked + .theme-switch__container { background-color: var(--container-night-bg); }
+      .theme-switch__checkbox:checked + .theme-switch__container .theme-switch__circle-container { left: calc(100% - var(--circle-container-offset) - var(--circle-container-diameter)); }
+      .theme-switch__checkbox:checked + .theme-switch__container .theme-switch__circle-container:hover { left: calc(100% - var(--circle-container-offset) - var(--circle-container-diameter) - 0.187em) }
+      .theme-switch__circle-container:hover { left: calc(var(--circle-container-offset) + 0.187em); }
+      .theme-switch__checkbox:checked + .theme-switch__container .theme-switch__moon { transform: translate(0); }
+      .theme-switch__checkbox:checked + .theme-switch__container .theme-switch__clouds { bottom: -4.062em; }
+      .theme-switch__checkbox:checked + .theme-switch__container .theme-switch__stars-container { top: 50%; transform: translateY(-50%); }
+    `}} />
+    <label className="theme-switch">
+      <input type="checkbox" className="theme-switch__checkbox" checked={isDarkMode} onChange={onToggle} />
+      <div className="theme-switch__container">
+        <div className="theme-switch__clouds" />
+        <div className="theme-switch__stars-container">
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 144 55" fill="none">
+            <path fillRule="evenodd" clipRule="evenodd" d="M135.831 3.00688C135.055 3.85027 134.111 4.29946 133 4.35447C134.111 4.40947 135.055 4.85867 135.831 5.71123C136.607 6.55462 136.996 7.56303 136.996 8.72727C136.996 7.95722 137.172 7.25134 137.525 6.59129C137.886 5.93124 138.372 5.39954 138.98 5.00535C139.598 4.60199 140.268 4.39114 141 4.35447C139.88 4.2903 138.936 3.85027 138.16 3.00688C137.384 2.16348 136.996 1.16425 136.996 0C136.996 1.16425 136.607 2.16348 135.831 3.00688ZM31 23.3545C32.1114 23.2995 33.0551 22.8503 33.8313 22.0069C34.6075 21.1635 34.9956 20.1642 34.9956 19C34.9956 20.1642 35.3837 21.1635 36.1599 22.0069C36.9361 22.8503 37.8798 23.2903 39 23.3545C38.2679 23.3911 37.5976 23.602 36.9802 24.0053C36.3716 24.3995 35.8864 24.9312 35.5248 25.5913C35.172 26.2513 34.9956 26.9572 34.9956 27.7273C34.9956 26.563 34.6075 25.5546 33.8313 24.7112C33.0551 23.8587 32.1114 23.4095 31 23.3545ZM0 36.3545C1.11136 36.2995 2.05513 35.8503 2.83131 35.0069C3.6075 34.1635 3.99559 33.1642 3.99559 32C3.99559 33.1642 4.38368 34.1635 5.15987 35.0069C5.93605 35.8503 6.87982 36.2903 8 36.3545C7.26792 36.3911 6.59757 36.602 5.98015 37.0053C5.37155 37.3995 4.88644 37.9312 4.52481 38.5913C4.172 39.2513 3.99559 39.9572 3.99559 40.7273C3.99559 39.563 3.6075 38.5546 2.83131 37.7112C2.05513 36.8587 1.11136 36.4095 0 36.3545ZM56.8313 24.0069C56.0551 24.8503 55.1114 25.2995 54 25.3545C55.1114 25.4095 56.0551 25.8587 56.8313 26.7112C57.6075 27.5546 57.9956 28.563 57.9956 29.7273C57.9956 28.9572 58.172 28.2513 58.5248 27.5913C58.8864 26.9312 59.3716 26.3995 59.9802 26.0053C60.5976 25.602 61.2679 25.3911 62 25.3545C60.8798 25.2903 59.9361 24.8503 59.1599 24.0069C58.3837 23.1635 57.9956 22.1642 57.9956 21C57.9956 22.1642 57.6075 23.1635 56.8313 24.0069ZM81 25.3545C82.1114 25.2995 83.0551 24.8503 83.8313 24.0069C84.6075 23.1635 84.9956 22.1642 84.9956 21C84.9956 22.1642 85.3837 23.1635 86.1599 24.0069C86.9361 24.8503 87.8798 25.2903 89 25.3545C88.2679 25.3911 87.5976 25.602 86.9802 26.0053C86.3716 26.3995 85.8864 26.9312 85.5248 27.5913C85.172 28.2513 84.9956 28.9572 84.9956 29.7273C84.9956 28.563 84.6075 27.5546 83.8313 26.7112C83.0551 25.8587 82.1114 25.4095 81 25.3545ZM136 36.3545C137.111 36.2995 138.055 35.8503 138.831 35.0069C139.607 34.1635 139.996 33.1642 139.996 32C139.996 33.1642 140.384 34.1635 141.16 35.0069C141.936 35.8503 142.88 36.2903 144 36.3545C143.268 36.3911 142.598 36.602 141.98 37.0053C141.372 37.3995 140.886 37.9312 140.525 38.5913C140.172 39.2513 139.996 39.9572 139.996 40.7273C139.996 39.563 139.607 38.5546 138.831 37.7112C138.055 36.8587 137.111 36.4095 136 36.3545ZM101.831 49.0069C101.055 49.8503 100.111 50.2995 99 50.3545C100.111 50.4095 101.055 50.8587 101.831 51.7112C102.607 52.5546 102.996 53.563 102.996 54.7273C102.996 53.9572 103.172 53.2513 103.525 52.5913C103.886 51.9312 104.372 51.3995 104.98 51.0053C105.598 50.602 106.268 50.3911 107 50.3545C105.88 50.2903 104.936 49.8503 104.16 49.0069C103.384 48.1635 102.996 47.1642 102.996 46C102.996 47.1642 102.607 48.1635 101.831 49.0069Z" fill="currentColor" />
+          </svg>
+        </div>
+        <div className="theme-switch__circle-container">
+          <div className="theme-switch__sun-moon-container">
+            <div className="theme-switch__moon">
+              <div className="theme-switch__spot" />
+              <div className="theme-switch__spot" />
+              <div className="theme-switch__spot" />
+            </div>
+          </div>
+        </div>
+      </div>
+    </label>
+  </div>
+)
+
+// --- COMPONENTE LOADER MODERNO (UIVERSE) ---
+const CustomLoader = ({ text = "Sincronizando..." }: { text?: string }) => (
+  <div className="flex flex-col items-center justify-center h-full">
+    <style dangerouslySetInnerHTML={{__html: `
+      .pl { width: 6em; height: 6em; }
+      .pl__ring { animation: ringA 2s linear infinite; }
+      .pl__ring--a { stroke: currentColor; }
+      .pl__ring--b { animation-name: ringB; stroke: currentColor; }
+      .pl__ring--c { animation-name: ringC; stroke: currentColor; }
+      .pl__ring--d { animation-name: ringD; stroke: currentColor; }
+      @keyframes ringA { from, 4% { stroke-dasharray: 0 660; stroke-width: 20; stroke-dashoffset: -330; } 12% { stroke-dasharray: 60 600; stroke-width: 30; stroke-dashoffset: -335; } 32% { stroke-dasharray: 60 600; stroke-width: 30; stroke-dashoffset: -595; } 40%, 54% { stroke-dasharray: 0 660; stroke-width: 20; stroke-dashoffset: -660; } 62% { stroke-dasharray: 60 600; stroke-width: 30; stroke-dashoffset: -665; } 82% { stroke-dasharray: 60 600; stroke-width: 30; stroke-dashoffset: -925; } 90%, to { stroke-dasharray: 0 660; stroke-width: 20; stroke-dashoffset: -990; } }
+      @keyframes ringB { from, 12% { stroke-dasharray: 0 220; stroke-width: 20; stroke-dashoffset: -110; } 20% { stroke-dasharray: 20 200; stroke-width: 30; stroke-dashoffset: -115; } 40% { stroke-dasharray: 20 200; stroke-width: 30; stroke-dashoffset: -195; } 48%, 62% { stroke-dasharray: 0 220; stroke-width: 20; stroke-dashoffset: -220; } 70% { stroke-dasharray: 20 200; stroke-width: 30; stroke-dashoffset: -225; } 90% { stroke-dasharray: 20 200; stroke-width: 30; stroke-dashoffset: -305; } 98%, to { stroke-dasharray: 0 220; stroke-width: 20; stroke-dashoffset: -330; } }
+      @keyframes ringC { from { stroke-dasharray: 0 440; stroke-width: 20; stroke-dashoffset: 0; } 8% { stroke-dasharray: 40 400; stroke-width: 30; stroke-dashoffset: -5; } 28% { stroke-dasharray: 40 400; stroke-width: 30; stroke-dashoffset: -175; } 36%, 58% { stroke-dasharray: 0 440; stroke-width: 20; stroke-dashoffset: -220; } 66% { stroke-dasharray: 40 400; stroke-width: 30; stroke-dashoffset: -225; } 86% { stroke-dasharray: 40 400; stroke-width: 30; stroke-dashoffset: -395; } 94%, to { stroke-dasharray: 0 440; stroke-width: 20; stroke-dashoffset: -440; } }
+      @keyframes ringD { from, 8% { stroke-dasharray: 0 440; stroke-width: 20; stroke-dashoffset: 0; } 16% { stroke-dasharray: 40 400; stroke-width: 30; stroke-dashoffset: -5; } 36% { stroke-dasharray: 40 400; stroke-width: 30; stroke-dashoffset: -175; } 44%, 50% { stroke-dasharray: 0 440; stroke-width: 20; stroke-dashoffset: -220; } 58% { stroke-dasharray: 40 400; stroke-width: 30; stroke-dashoffset: -225; } 78% { stroke-dasharray: 40 400; stroke-width: 30; stroke-dashoffset: -395; } 86%, to { stroke-dasharray: 0 440; stroke-width: 20; stroke-dashoffset: -440; } }
+    `}} />
+    <div className="loader-wrapper drop-shadow-md">
+      <svg viewBox="0 0 240 240" height="120" width="120" className="pl">
+        <circle strokeLinecap="round" strokeDashoffset="-330" strokeDasharray="0 660" strokeWidth="20" stroke="currentColor" fill="none" r="105" cy="120" cx="120" className="pl__ring pl__ring--a text-blue-600 dark:text-blue-500" />
+        <circle strokeLinecap="round" strokeDashoffset="-110" strokeDasharray="0 220" strokeWidth="20" stroke="currentColor" fill="none" r="35" cy="120" cx="120" className="pl__ring pl__ring--b text-emerald-500 dark:text-emerald-400" />
+        <circle strokeLinecap="round" strokeDasharray="0 440" strokeWidth="20" stroke="currentColor" fill="none" r="70" cy="120" cx="85" className="pl__ring pl__ring--c text-amber-500 dark:text-amber-400" />
+        <circle strokeLinecap="round" strokeDasharray="0 440" strokeWidth="20" stroke="currentColor" fill="none" r="70" cy="120" cx="155" className="pl__ring pl__ring--d text-indigo-500 dark:text-indigo-400" />
+      </svg>
+    </div>
+    <span className="mt-6 font-bold text-slate-500 dark:text-slate-400 text-sm animate-pulse tracking-widest uppercase">
+      {text}
+    </span>
+  </div>
+);
 
 // Componente para el reloj en vivo
 function LiveClock() {
@@ -22,11 +161,11 @@ function LiveClock() {
   }, [])
   return (
     <div className="flex flex-col items-end">
-      <span className="text-4xl lg:text-5xl font-black text-slate-900 dark:text-white tracking-tighter tabular-nums drop-shadow-sm dark:drop-shadow-md transition-colors">
+      <span className="text-3xl lg:text-4xl font-black text-slate-900 dark:text-white tracking-tighter tabular-nums drop-shadow-sm transition-colors">
         {format(time, 'HH:mm:ss')}
       </span>
-      <span className="text-emerald-600 dark:text-emerald-400 font-bold tracking-widest uppercase text-[10px] sm:text-sm mt-1 transition-colors">
-        Hora Oficial del Sistema
+      <span className="text-emerald-600 dark:text-emerald-400 font-bold tracking-widest uppercase text-[10px] mt-0.5 transition-colors">
+        Hora Oficial
       </span>
     </div>
   )
@@ -35,9 +174,10 @@ function LiveClock() {
 export default function DualDashboardAsistencias() {
   const [asistencias, setAsistencias] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
+  const [isInitialLoad, setIsInitialLoad] = useState(true) // <-- Estado para el Splash Screen
   const [fechaActual, setFechaActual] = useState(new Date())
   
-  const [isDarkMode, setIsDarkMode] = useState(true)
+  const [isDarkMode, setIsDarkMode] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [modoEdicion, setModoEdicion] = useState(false)
 
@@ -49,15 +189,16 @@ export default function DualDashboardAsistencias() {
   const [filtroArea, setFiltroArea] = useState('TODAS')
   const [filtroEstado, setFiltroEstado] = useState('TODOS')
 
+  // Cargar preferencia de tema 
   useEffect(() => {
     setMounted(true)
     const savedTheme = localStorage.getItem('ruag_theme')
-    if (savedTheme === 'light') {
-      setIsDarkMode(false)
-      document.documentElement.classList.remove('dark')
-    } else {
+    if (savedTheme === 'dark') {
       setIsDarkMode(true)
       document.documentElement.classList.add('dark')
+    } else {
+      setIsDarkMode(false)
+      document.documentElement.classList.remove('dark')
     }
   }, [])
 
@@ -72,8 +213,8 @@ export default function DualDashboardAsistencias() {
       if (teclado === 'EDITAR') {
         setModoEdicion(prev => {
           const nuevoEstado = !prev
-          if (nuevoEstado) toast.success('MODO ADMIN ACTIVADO 🔓', { style: { background: '#3b82f6', color: 'white' } })
-          else toast.error('Modo Admin Bloqueado 🔒', { style: { background: '#1e293b', color: 'white' } })
+          if (nuevoEstado) toast.success('MODO ADMIN ACTIVADO 🔓')
+          else toast.error('Modo Admin Bloqueado 🔒')
           return nuevoEstado
         })
         teclado = '' 
@@ -86,12 +227,12 @@ export default function DualDashboardAsistencias() {
 
   const toggleTheme = () => {
     setIsDarkMode(!isDarkMode)
-    if (isDarkMode) {
-      document.documentElement.classList.remove('dark')
-      localStorage.setItem('ruag_theme', 'light')
-    } else {
+    if (!isDarkMode) {
       document.documentElement.classList.add('dark')
       localStorage.setItem('ruag_theme', 'dark')
+    } else {
+      document.documentElement.classList.remove('dark')
+      localStorage.setItem('ruag_theme', 'light')
     }
   }
 
@@ -106,7 +247,13 @@ export default function DualDashboardAsistencias() {
       .order('hora_ingreso', { ascending: false })
 
     if (!error && data) setAsistencias(data)
+    
     setLoading(false)
+    
+    // Si es la primera vez que carga, le damos medio segundo extra para que se vea la animación épica
+    if (isInitialLoad) {
+      setTimeout(() => setIsInitialLoad(false), 500)
+    }
   }
 
   useEffect(() => {
@@ -131,14 +278,12 @@ export default function DualDashboardAsistencias() {
     }
   }, [fechaActual])
 
-  // --- LÓGICA DE FILTRADO ---
-  // 1. Obtener lista única de áreas presentes en los datos de hoy
+  // --- LÓGICA DE FILTRADO (Optimizada) ---
   const areasDisponibles = useMemo(() => {
     const areasSet = new Set(asistencias.map(a => a.area).filter(Boolean));
     return ['TODAS', ...Array.from(areasSet)].sort();
   }, [asistencias]);
 
-  // 2. Aplicar filtros
   const asistenciasFiltradas = useMemo(() => {
     return asistencias.filter(item => {
       const coincideBusqueda = 
@@ -157,11 +302,8 @@ export default function DualDashboardAsistencias() {
   const descargarReporteExcel = async () => {
     try {
       const fechaString = format(fechaActual, 'yyyy-MM-dd')
-      toast.info(`Generando reporte Excel del ${fechaString}...`);
+      toast.info(`Generando reporte Excel...`);
       
-      // Usamos los datos filtrados si hay filtros activos, si no, descargamos todo el día.
-      // IMPORTANTE: Si quieres que SIEMPRE descargue todo el día ignorando filtros visuales,
-      // cambia 'asistenciasFiltradas' por 'asistencias' en la siguiente línea.
       const dataParaExcel = asistenciasFiltradas;
 
       if (dataParaExcel.length === 0) {
@@ -273,305 +415,254 @@ export default function DualDashboardAsistencias() {
   const tardanzas = asistencias.filter(a => a.estado_ingreso === 'TARDANZA').length
   const salidas = asistencias.filter(a => a.hora_salida !== null).length
 
-  if (!mounted) return null
+  // Variantes de Animación del Contenedor de la Lista
+  const listContainerVariants: Variants = {
+    hidden: { opacity: 0 },
+    show: {
+      opacity: 1,
+      transition: {
+        staggerChildren: 0.05 // Tiempo entre cada fila que aparece
+      }
+    }
+  };
+
+  // --- PANTALLA DE CARGA INICIAL (SPLASH SCREEN LIMPIO) ---
+  if (!mounted || isInitialLoad) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center bg-[#f8f9fa] dark:bg-slate-950 transition-colors duration-500">
+        <CustomLoader text="INICIANDO SISTEMA..." />
+      </div>
+    )
+  }
 
   return (
-    <div className={`min-h-screen ${modoEdicion ? 'bg-blue-50 dark:bg-slate-900' : 'bg-slate-100 dark:bg-slate-950'} text-slate-900 dark:text-slate-100 font-sans transition-colors duration-500 overflow-hidden flex flex-col relative`}>
+    <div className={`min-h-screen flex flex-col ${modoEdicion ? 'bg-blue-50/50 dark:bg-slate-900' : 'bg-[#f8f9fa] dark:bg-slate-950'} text-slate-900 dark:text-slate-100 font-sans transition-colors duration-500`}>
       <Toaster position="top-center" richColors />
       
-      {/* HEADER DUAL */}
-      <header className={`${modoEdicion ? 'bg-blue-600/10 dark:bg-blue-900/20 border-blue-500/30' : 'bg-white/90 dark:bg-slate-900/80 border-slate-200 dark:border-slate-800/50'} border-b backdrop-blur-xl sticky top-0 z-50 shadow-sm transition-colors duration-500`}>
-        <div className="w-full px-6 py-4 lg:py-6 flex flex-col lg:flex-row items-center justify-between gap-4">
+      {/* HEADER SUPERIOR */}
+      <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-50 shadow-sm transition-colors duration-500">
+        <div className="max-w-[1600px] mx-auto w-full px-6 h-20 flex items-center justify-between">
           
-          <div className="flex items-center gap-5 w-full lg:w-auto justify-between lg:justify-start">
-            <div className="flex items-center gap-5">
-              <div className={`w-14 h-14 lg:w-16 lg:h-16 ${modoEdicion ? 'bg-blue-600' : 'bg-gradient-to-br from-blue-500 to-indigo-600'} rounded-2xl flex items-center justify-center shadow-lg text-white border border-black/10 transition-colors`}>
-                {modoEdicion ? <Unlock size={32} className="animate-pulse" /> : <Activity size={32} />}
-              </div>
-              <div>
-                <h1 className="text-2xl lg:text-3xl font-black tracking-tight text-slate-900 dark:text-white leading-none">
-                  {modoEdicion ? 'MODO EDICIÓN ACTIVO' : 'RUAG ASISTENCIAS'}
-                </h1>
-                <p className={`text-xs lg:text-sm font-bold uppercase tracking-[0.2em] mt-1.5 lg:mt-2 ${modoEdicion ? 'text-red-500' : 'text-blue-600 dark:text-blue-400'}`}>
-                  {modoEdicion ? 'Modificando Base de Datos' : 'Monitoreo en Tiempo Real'}
-                </p>
-              </div>
+          <div className="flex items-center gap-4">
+            <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold shadow-md ${modoEdicion ? 'bg-blue-600' : 'bg-gradient-to-br from-blue-600 to-indigo-600'}`}>
+              <ShieldCheck size={28} />
             </div>
-            
-            <button onClick={toggleTheme} className="lg:hidden p-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-amber-400">
-              {isDarkMode ? <Sun size={24}/> : <Moon size={24}/>}
-            </button>
-          </div>
-
-          <div className="flex items-center gap-4 w-full lg:w-auto justify-between lg:justify-end">
-            
-            {modoEdicion && (
-               <button 
-                onClick={() => setMostrarModalManual(true)}
-                className="flex items-center justify-center gap-2 p-2 px-4 rounded-xl bg-blue-600 hover:bg-blue-500 text-white font-bold transition-all border border-blue-500/50 active:scale-95 shadow-lg shadow-blue-600/20"
-               >
-                 <UserPlus size={20} />
-                 <span className="hidden sm:inline">Registro Manual</span>
-               </button>
-            )}
-
-            <button 
-              onClick={descargarReporteExcel}
-              className="flex items-center justify-center gap-2 p-2 px-4 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold transition-all border border-emerald-500/50 active:scale-95 shadow-lg shadow-emerald-600/20"
-            >
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
-              <span className="hidden sm:inline">Exportar Excel</span>
-            </button>
-
-            <button 
-              onClick={toggleTheme} 
-              className="hidden lg:flex items-center justify-center p-3 rounded-2xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500 dark:text-amber-400 transition-all border border-slate-200 dark:border-slate-700 active:scale-95"
-            >
-              {isDarkMode ? <Sun size={24}/> : <Moon size={24}/>}
-            </button>
-
-            <div className="flex items-center gap-2 lg:gap-4 bg-white dark:bg-slate-950/50 p-1.5 lg:p-2 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-inner w-full lg:w-auto justify-between transition-colors duration-500">
-              <button onClick={() => setFechaActual(prev => subDays(prev, 1))} className="p-2 lg:p-3 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors text-slate-500 hover:text-slate-900 dark:hover:text-white">
-                <ChevronLeft size={20} />
-              </button>
-              <div className="flex items-center justify-center gap-2 lg:gap-3 px-2 w-48 lg:w-56 relative cursor-pointer group">
-                <CalendarDays size={18} className="text-blue-600 dark:text-blue-500 group-hover:scale-110 transition-transform" />
-                <span className="font-bold text-lg lg:text-xl capitalize text-slate-700 dark:text-slate-200 group-hover:text-blue-600 dark:group-hover:text-white transition-colors">
-                  {isToday(fechaActual) ? 'Hoy' : format(fechaActual, "d MMM yyyy", { locale: es })}
-                </span>
-                <input 
-                  type="date" 
-                  className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" 
-                  value={format(fechaActual, 'yyyy-MM-dd')} 
-                  onChange={(e) => {
-                    if (e.target.value) {
-                      const [year, month, day] = e.target.value.split('-').map(Number)
-                      setFechaActual(new Date(year, month - 1, day))
-                    }
-                  }} 
-                />
-              </div>
-              <button onClick={() => setFechaActual(prev => addDays(prev, 1))} disabled={isToday(fechaActual)} className="p-2 lg:p-3 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-xl transition-colors text-slate-500 disabled:opacity-20">
-                <ChevronRight size={20} />
-              </button>
-            </div>
-            
-            <div className="hidden lg:block">
-              <LiveClock />
+            <div>
+              <h1 className="text-xl font-black tracking-tight text-slate-800 dark:text-white leading-tight">
+                {modoEdicion ? 'MODO ADMIN' : 'RUAG Control'}
+              </h1>
+              <p className="text-xs text-slate-500 font-medium">Sistema de Asistencias</p>
             </div>
           </div>
+
+          <div className="flex items-center gap-6">
+            <ThemeSwitch isDarkMode={isDarkMode} onToggle={toggleTheme} />
+            <div className="h-8 w-px bg-slate-200 dark:bg-slate-800 hidden sm:block"></div>
+            <div className="hidden sm:block">
+               <LiveClock />
+            </div>
+          </div>
+
         </div>
       </header>
 
-      <main className="flex-1 w-full px-6 py-6 lg:px-8 lg:py-8 flex flex-col gap-6 lg:gap-8 overflow-y-auto z-10">
+      {/* CONTENIDO PRINCIPAL Y BARRA DE HERRAMIENTAS */}
+      <main className="flex-1 w-full max-w-[1600px] mx-auto px-6 py-8 flex flex-col xl:flex-row gap-8">
         
-        {/* --- ESTADÍSTICAS SUPERIORES --- */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 lg:gap-6 shrink-0">
-          <StatCard title="INGRESOS HOY" value={asistencias.length} icon={<UserCircle2 size={28}/>} color="from-blue-500 to-blue-700 dark:from-blue-600 dark:to-blue-900" border="border-blue-200 dark:border-blue-500/30" textColor="text-blue-600 dark:text-blue-400" />
-          <StatCard title="PUNTUALES" value={puntuales} icon={<CheckCircle2 size={28}/>} color="from-emerald-400 to-emerald-600 dark:from-emerald-500 dark:to-emerald-900" border="border-emerald-200 dark:border-emerald-500/30" textColor="text-emerald-600 dark:text-emerald-400" />
-          <StatCard title="TARDANZAS" value={tardanzas} icon={<AlertCircle size={28}/>} color="from-red-400 to-red-600 dark:from-red-500 dark:to-red-900" border="border-red-200 dark:border-red-500/30" textColor="text-red-600 dark:text-red-400" />
-          <StatCard title="SALIDAS" value={salidas} icon={<LogOut size={28}/>} color="from-slate-500 to-slate-700 dark:from-slate-600 dark:to-slate-900" border="border-slate-300 dark:border-slate-500/30" textColor="text-slate-600 dark:text-slate-400" />
+        {/* COLUMNA IZQUIERDA: CONTROLES Y FILTROS */}
+        <div className="w-full xl:w-80 shrink-0 flex flex-col gap-6">
+          
+          {/* Reloj móvil */}
+          <div className="sm:hidden w-full flex justify-center mb-2">
+            <LiveClock />
+          </div>
+
+          {/* Tarjeta de Calendario */}
+          <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors duration-500">
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Fecha de Consulta</p>
+            <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-950 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 transition-colors duration-500">
+              <button onClick={() => setFechaActual(prev => subDays(prev, 1))} className="p-2 hover:bg-white dark:hover:bg-slate-800 rounded-lg transition-colors text-slate-500">
+                <ChevronLeft size={20} />
+              </button>
+              <div className="flex items-center gap-2 relative cursor-pointer flex-1 justify-center">
+                <CalendarDays size={18} className="text-blue-600 dark:text-blue-500" />
+                <span className="font-bold text-sm capitalize text-slate-700 dark:text-slate-200">
+                  {isToday(fechaActual) ? 'Hoy' : format(fechaActual, "d MMM yyyy", { locale: es })}
+                </span>
+                <input type="date" className="absolute inset-0 w-full h-full opacity-0 cursor-pointer" value={format(fechaActual, 'yyyy-MM-dd')} onChange={(e) => { if (e.target.value) { const [year, month, day] = e.target.value.split('-').map(Number); setFechaActual(new Date(year, month - 1, day)) } }} />
+              </div>
+              <button onClick={() => setFechaActual(prev => addDays(prev, 1))} disabled={isToday(fechaActual)} className="p-2 hover:bg-white dark:hover:bg-slate-800 rounded-lg transition-colors text-slate-500 disabled:opacity-20">
+                <ChevronRight size={20} />
+              </button>
+            </div>
+          </div>
+
+          {/* Tarjeta de Filtros */}
+          <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors duration-500">
+            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
+              <SlidersHorizontal size={14}/> Filtros
+            </p>
+            
+            <div className="space-y-4">
+              <div className="relative">
+                <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input 
+                  type="text" placeholder="Buscar por DNI o Nombre..." value={busqueda} onChange={(e) => setBusqueda(e.target.value)}
+                  className="w-full bg-slate-50 dark:bg-slate-950 pl-10 pr-4 py-3 rounded-xl border border-slate-200 dark:border-slate-800 outline-none focus:ring-2 focus:ring-blue-500 text-sm font-medium transition-all"
+                />
+              </div>
+
+              <div className="relative">
+                <Filter size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <select value={filtroArea} onChange={(e) => setFiltroArea(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-950 pl-10 pr-8 py-3 rounded-xl border border-slate-200 dark:border-slate-800 outline-none focus:ring-2 focus:ring-blue-500 text-sm font-medium cursor-pointer appearance-none transition-all">
+                  {areasDisponibles.map(area => <option key={area} value={area}>{area === 'TODAS' ? 'Todas las Áreas' : area}</option>)}
+                </select>
+                <ChevronRight size={16} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none rotate-90" />
+              </div>
+
+              <div className="relative">
+                <div className={`absolute left-4 top-1/2 -translate-y-1/2 w-2.5 h-2.5 rounded-full ${filtroEstado === 'TODOS' ? 'bg-slate-400' : filtroEstado === 'PUNTUAL' ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                <select value={filtroEstado} onChange={(e) => setFiltroEstado(e.target.value)} className="w-full bg-slate-50 dark:bg-slate-950 pl-10 pr-8 py-3 rounded-xl border border-slate-200 dark:border-slate-800 outline-none focus:ring-2 focus:ring-blue-500 text-sm font-medium cursor-pointer appearance-none transition-all">
+                  <option value="TODOS">Todos los Estados</option>
+                  <option value="PUNTUAL">Puntuales</option>
+                  <option value="TARDANZA">Tardanzas</option>
+                </select>
+                <ChevronRight size={16} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none rotate-90" />
+              </div>
+            </div>
+          </div>
+
+          {/* Tarjeta de Acciones Rápida */}
+          <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3 transition-colors duration-500">
+            <button onClick={descargarReporteExcel} className="w-full flex items-center justify-center gap-2 p-3 rounded-xl bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20 text-sm font-bold transition-all active:scale-95">
+              <FileSpreadsheet size={18} /> Exportar Reporte Excel
+            </button>
+            
+            {modoEdicion && (
+              <button onClick={() => setMostrarModalManual(true)} className="w-full flex items-center justify-center gap-2 p-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold transition-all shadow-lg shadow-blue-600/20 active:scale-95">
+                <UserPlus size={18} /> Añadir Registro Manual
+              </button>
+            )}
+          </div>
+
         </div>
 
-        {/* --- BARRA DE FILTROS INTELIGENTE --- */}
-        {asistencias.length > 0 && (
-          <div className="bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl p-4 rounded-3xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col lg:flex-row gap-4 items-center">
-            <div className="flex items-center gap-3 text-slate-500 dark:text-slate-400 mr-2">
-              <SlidersHorizontal size={20} />
-              <span className="font-bold text-sm uppercase tracking-widest hidden lg:inline">Filtros</span>
-            </div>
+        {/* COLUMNA DERECHA: TABLA Y ESTADÍSTICAS */}
+        <div className="flex-1 flex flex-col min-w-0">
+          
+          {/* Estadísticas */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+            <StatCard title="Ingresos" value={asistencias.length} icon={<Users size={20}/>} color="bg-blue-500" />
+            <StatCard title="Puntuales" value={puntuales} icon={<CheckCircle2 size={20}/>} color="bg-emerald-500" />
+            <StatCard title="Tardanzas" value={tardanzas} icon={<AlertCircle size={20}/>} color="bg-red-500" />
+            <StatCard title="Salidas" value={salidas} icon={<LogOut size={20}/>} color="bg-slate-500" />
+          </div>
+
+          {/* CONTENEDOR DE LA LISTA TIPO TABLA */}
+          <div className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm flex flex-col overflow-hidden transition-colors duration-500">
             
-            {/* Buscador Nombre/DNI */}
-            <div className="relative flex-1 w-full">
-              <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-              <input 
-                type="text" 
-                placeholder="Buscar por Nombre o DNI..." 
-                value={busqueda}
-                onChange={(e) => setBusqueda(e.target.value)}
-                className="w-full bg-slate-100 dark:bg-slate-950/50 pl-12 pr-4 py-3 rounded-xl border border-slate-200 dark:border-slate-800 outline-none focus:ring-2 focus:ring-blue-500 transition-all text-slate-900 dark:text-white"
-              />
+            {/* Header de la Tabla */}
+            <div className="bg-slate-50 dark:bg-slate-950/50 border-b border-slate-200 dark:border-slate-800 p-4 flex items-center justify-between transition-colors duration-500">
+              <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
+                <AlignLeft size={18} />
+                <h3 className="font-bold text-sm uppercase tracking-widest">Registros del Día</h3>
+              </div>
+              <span className="text-xs font-bold text-slate-500 bg-slate-200 dark:bg-slate-800 px-2.5 py-1 rounded-lg">
+                {asistenciasFiltradas.length} encontrados
+              </span>
             </div>
 
-             {/* Filtro Área */}
-            <div className="relative w-full lg:w-auto">
-              <Filter size={16} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-              <select 
-                value={filtroArea} 
-                onChange={(e) => setFiltroArea(e.target.value)}
-                className="w-full lg:w-48 appearance-none bg-slate-100 dark:bg-slate-950/50 pl-12 pr-8 py-3 rounded-xl border border-slate-200 dark:border-slate-800 outline-none focus:ring-2 focus:ring-blue-500 transition-all text-slate-900 dark:text-white cursor-pointer font-medium"
-              >
-                {areasDisponibles.map(area => (
-                  <option key={area} value={area}>{area === 'TODAS' ? 'Todas las Áreas' : area}</option>
-                ))}
-              </select>
-              <ChevronRight size={16} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none rotate-90" />
-            </div>
-
-            {/* Filtro Estado */}
-            <div className="relative w-full lg:w-auto">
-              <div className={`absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 rounded-full ${filtroEstado === 'TODOS' ? 'bg-slate-400' : filtroEstado === 'PUNTUAL' ? 'bg-emerald-500' : 'bg-red-500'}`} />
-              <select 
-                value={filtroEstado} 
-                onChange={(e) => setFiltroEstado(e.target.value)}
-                className="w-full lg:w-48 appearance-none bg-slate-100 dark:bg-slate-950/50 pl-10 pr-8 py-3 rounded-xl border border-slate-200 dark:border-slate-800 outline-none focus:ring-2 focus:ring-blue-500 transition-all text-slate-900 dark:text-white cursor-pointer font-medium"
-              >
-                <option value="TODOS">Todos los Estados</option>
-                <option value="PUNTUAL">PUNTUAL</option>
-                <option value="TARDANZA">TARDANZA</option>
-              </select>
-              <ChevronRight size={16} className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none rotate-90" />
+            {/* Cuerpo de la Tabla con Scroll Independiente */}
+            <div className="flex-1 overflow-y-auto p-3 bg-slate-50/50 dark:bg-slate-900/50 transition-colors duration-500">
+              {loading ? (
+                <div className="flex h-64 justify-center items-center">
+                  <CustomLoader text="Buscando..." />
+                </div>
+              ) : asistencias.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-64 text-slate-400">
+                  <CalendarDays size={60} className="mb-4 opacity-50" />
+                  <h3 className="text-lg font-bold">Esperando registros...</h3>
+                </div>
+              ) : asistenciasFiltradas.length === 0 ? (
+                 <div className="flex flex-col items-center justify-center h-64 text-slate-400">
+                   <Search size={50} className="mb-4 opacity-50" />
+                   <h3 className="text-lg font-bold">No hay coincidencias</h3>
+                 </div>
+              ) : (
+                // Lista de animaciones controlada por Framer Motion
+                <motion.div 
+                  variants={listContainerVariants}
+                  initial="hidden"
+                  animate="show"
+                  className="flex flex-col gap-2.5 pb-4"
+                >
+                  <AnimatePresence>
+                    {asistenciasFiltradas.map((asistencia, idx) => (
+                      <FotocheckRow 
+                        key={asistencia.id} 
+                        data={asistencia} 
+                        index={idx} 
+                        modoEdicion={modoEdicion} 
+                        onActualizar={actualizarHora}
+                        onAbrirNota={(notaData) => setNotaSeleccionada(notaData)}
+                      />
+                    ))}
+                  </AnimatePresence>
+                </motion.div>
+              )}
             </div>
           </div>
-        )}
+        </div>
 
-
-        {/* --- LISTADO DE TARJETAS --- */}
-        {loading ? (
-          <div className="flex justify-center py-32">
-            <div className="animate-spin rounded-full h-16 w-16 border-b-4 border-blue-600 dark:border-blue-500"></div>
-          </div>
-        ) : asistencias.length === 0 ? (
-          <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex-1 flex flex-col items-center justify-center border-2 border-dashed border-slate-300 dark:border-slate-800 rounded-3xl bg-white/50 dark:bg-slate-900/20 py-20 lg:py-0">
-            <CalendarDays size={80} className="text-slate-300 dark:text-slate-700 mb-6" />
-            <h3 className="text-2xl lg:text-3xl font-bold text-slate-400 dark:text-slate-500 text-center px-4">Esperando ingresos...</h3>
-            <p className="text-slate-500 dark:text-slate-600 text-base lg:text-lg mt-2 text-center px-4">La pantalla se actualizará automáticamente.</p>
-          </motion.div>
-        ) : asistenciasFiltradas.length === 0 ? (
-           // Mensaje cuando el filtro no encuentra nada
-           <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col items-center justify-center py-20 border-2 border-dashed border-slate-300 dark:border-slate-800 rounded-3xl">
-             <Search size={60} className="text-slate-300 dark:text-slate-600 mb-4" />
-             <h3 className="text-xl font-bold text-slate-500 dark:text-slate-400">No se encontraron resultados</h3>
-             <p className="text-slate-400 dark:text-slate-500 mt-2">Intenta ajustar los filtros de búsqueda.</p>
-           </motion.div>
-        ) : (
-          <motion.div layout className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5 gap-6 auto-rows-max pb-20">
-            <AnimatePresence mode="popLayout">
-              {/* USAMOS LA LISTA FILTRADA AQUÍ */}
-              {asistenciasFiltradas.map((asistencia, idx) => (
-                <FotocheckCard 
-                  key={asistencia.id} 
-                  data={asistencia} 
-                  index={idx} 
-                  modoEdicion={modoEdicion} 
-                  onActualizar={actualizarHora}
-                  onAbrirNota={(notaData: {nombre: string, nota: string, hora: string}) => setNotaSeleccionada(notaData)}
-                />
-              ))}
-            </AnimatePresence>
-          </motion.div>
-        )}
       </main>
 
       {/* MODALES SUPERPUESTOS */}
-      <AnimatePresence>
-        {mostrarModalManual && (
-          <ModalRegistroManual 
-            onClose={() => setMostrarModalManual(false)} 
-            fechaBase={format(fechaActual, 'yyyy-MM-dd')}
-            onSuccess={(nuevoRegistro) => {
-              if (isToday(fechaActual) || nuevoRegistro.fecha === format(fechaActual, 'yyyy-MM-dd')) {
-                setAsistencias(prev => [nuevoRegistro, ...prev])
-              }
-              setMostrarModalManual(false)
-            }}
-          />
-        )}
+      {mostrarModalManual && (
+        <ModalRegistroManual onClose={() => setMostrarModalManual(false)} fechaBase={format(fechaActual, 'yyyy-MM-dd')} onSuccess={(nuevoRegistro) => { if (isToday(fechaActual) || nuevoRegistro.fecha === format(fechaActual, 'yyyy-MM-dd')) { setAsistencias(prev => [nuevoRegistro, ...prev]) }; setMostrarModalManual(false) }} />
+      )}
 
-        {notaSeleccionada && (
-          <motion.div 
-            initial={{ opacity: 0 }} 
-            animate={{ opacity: 1 }} 
-            exit={{ opacity: 0 }} 
-            className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
-          >
-            <motion.div 
-              initial={{ scale: 0.9, y: 20 }} 
-              animate={{ scale: 1, y: 0 }} 
-              exit={{ scale: 0.9, y: 20 }}
-              className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[24px] shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-700"
-            >
-              <div className="bg-amber-500 h-2 w-full" />
-              <div className="p-6 relative">
-                <button 
-                  onClick={() => setNotaSeleccionada(null)}
-                  className="absolute top-4 right-4 p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"
-                >
-                  <X size={20} />
-                </button>
-                
-                <div className="flex items-center gap-3 mb-4 text-amber-500">
-                  <MessageSquareText size={28} />
-                  <h3 className="text-xl font-black text-slate-900 dark:text-white">Motivo de Salida</h3>
-                </div>
-                
-                <p className="text-sm font-bold text-slate-500 dark:text-slate-400 mb-4 pb-4 border-b border-slate-100 dark:border-slate-800">
-                  {notaSeleccionada.nombre} <br/>
-                  <span className="font-normal opacity-70">Salió a las {notaSeleccionada.hora}</span>
-                </p>
-                
-                <div className="bg-slate-50 dark:bg-slate-950/50 p-4 rounded-xl border border-slate-100 dark:border-slate-800 text-slate-700 dark:text-slate-300 min-h-[100px] whitespace-pre-wrap">
-                  {notaSeleccionada.nota}
-                </div>
-                
-                <button 
-                  onClick={() => setNotaSeleccionada(null)}
-                  className="w-full mt-6 bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-700 dark:text-white font-bold py-3 rounded-xl transition-colors"
-                >
-                  Cerrar
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {notaSeleccionada && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-700 animate-in zoom-in-95 duration-200 transition-colors duration-500">
+            <div className="bg-amber-500 h-1.5 w-full" />
+            <div className="p-6 relative">
+              <button onClick={() => setNotaSeleccionada(null)} className="absolute top-4 right-4 p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"><X size={20} /></button>
+              <div className="flex items-center gap-3 mb-4 text-amber-500"><MessageSquareText size={28} /><h3 className="text-xl font-black text-slate-900 dark:text-white">Motivo de Salida</h3></div>
+              <p className="text-sm font-bold text-slate-500 dark:text-slate-400 mb-4 pb-4 border-b border-slate-100 dark:border-slate-800">{notaSeleccionada.nombre} <br/><span className="font-normal opacity-70">Salió a las {notaSeleccionada.hora}</span></p>
+              <div className="bg-slate-50 dark:bg-slate-950/50 p-4 rounded-xl border border-slate-100 dark:border-slate-800 text-slate-700 dark:text-slate-300 min-h-[100px] whitespace-pre-wrap text-sm leading-relaxed transition-colors duration-500">{notaSeleccionada.nota}</div>
+              <button onClick={() => setNotaSeleccionada(null)} className="w-full mt-6 bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold py-3 rounded-xl transition-transform active:scale-95">Cerrar</button>
+            </div>
+          </div>
+        </div>
+      )}
 
-      {/* ESTILOS GLOBALES PARA EL DASHBOARD */}
+      {/* Estilos para animación del texto largo que fluye */}
       <style dangerouslySetInnerHTML={{__html: `
-        /* Animación para nombres largos */
-        .marquee-container {
-          overflow: hidden;
-          white-space: nowrap;
-          position: relative;
-          width: 100%;
-          mask-image: linear-gradient(to right, black 85%, transparent 100%);
-        }
-        .marquee-text {
-          display: inline-block;
-          animation: marquee 8s linear infinite;
-        }
-        .marquee-text:hover {
-          animation-play-state: paused;
-        }
-        @keyframes marquee {
-          0% { transform: translateX(0); }
-          15% { transform: translateX(0); }
-          100% { transform: translateX(calc(-100% + 150px)); }
-        }
+        .marquee-container { overflow: hidden; white-space: nowrap; position: relative; width: 100%; mask-image: linear-gradient(to right, black 85%, transparent 100%); }
+        .marquee-text { display: inline-block; animation: marquee 8s linear infinite; }
+        .marquee-text:hover { animation-play-state: paused; }
+        @keyframes marquee { 0% { transform: translateX(0); } 15% { transform: translateX(0); } 100% { transform: translateX(calc(-100% + 150px)); } }
       `}} />
 
     </div>
   )
 }
 
-function StatCard({ title, value, icon, color, border, textColor }: any) {
+function StatCard({ title, value, icon, color }: any) {
   return (
-    <div className={`bg-white dark:bg-slate-900/80 p-5 lg:p-6 rounded-3xl border border-slate-200 dark:border-transparent dark:border-[${border}] shadow-sm dark:shadow-2xl flex items-center gap-4 lg:gap-6 backdrop-blur-md relative overflow-hidden transition-colors duration-500`}>
-      <div className={`hidden lg:block absolute -right-10 -bottom-10 opacity-5 dark:opacity-10 blur-2xl rounded-full w-40 h-40 bg-gradient-to-br ${color}`}></div>
-      <div className={`w-14 h-14 lg:w-20 lg:h-20 rounded-2xl bg-gradient-to-br ${color} text-white flex items-center justify-center shadow-inner shrink-0 relative z-10 border border-black/5 dark:border-white/10`}>
+    <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex items-center gap-4 relative overflow-hidden transition-all hover:-translate-y-1 hover:shadow-md duration-500">
+      <div className={`w-12 h-12 rounded-xl ${color} text-white flex items-center justify-center shadow-inner shrink-0`}>
         {icon}
       </div>
-      <div className="relative z-10">
-        <p className={`text-[10px] lg:text-sm font-black ${textColor} uppercase tracking-[0.1em] lg:tracking-[0.2em]`}>{title}</p>
-        <p className="text-4xl lg:text-6xl font-black text-slate-900 dark:text-white leading-none mt-1 lg:mt-2 drop-shadow-sm transition-colors">{value}</p>
+      <div className="min-w-0">
+        <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest truncate">{title}</p>
+        <p className="text-2xl font-black text-slate-800 dark:text-white leading-none mt-1">{value}</p>
       </div>
     </div>
   )
 }
 
-// --- MODAL PARA REGISTRO MANUAL ---
+// --- MODAL REGISTRO MANUAL ---
 function ModalRegistroManual({ onClose, fechaBase, onSuccess }: { onClose: () => void, fechaBase: string, onSuccess: (data: any) => void }) {
   const [nombres, setNombres] = useState('')
   const [dni, setDni] = useState('')
@@ -596,19 +687,13 @@ function ModalRegistroManual({ onClose, fechaBase, onSuccess }: { onClose: () =>
       const isPuntual = parseInt(horas) < 9 || (parseInt(horas) === 9 && parseInt(minutos) <= 5)
       
       const nuevoRegistro = {
-        dni,
-        nombres_completos: nombres.toUpperCase(),
-        area,
-        fecha: fechaBase,
-        hora_ingreso: fechaObj.toISOString(),
-        estado_ingreso: isPuntual ? 'PUNTUAL' : 'TARDANZA',
-        foto_url: '' // Forzamos vacío para que se active el Avatar inteligente
+        dni, nombres_completos: nombres.toUpperCase(), area, fecha: fechaBase, hora_ingreso: fechaObj.toISOString(), estado_ingreso: isPuntual ? 'PUNTUAL' : 'TARDANZA', foto_url: '' 
       }
 
       const { data, error } = await supabase.from('registro_asistencias').insert(nuevoRegistro).select().single()
       if (error) throw error
 
-      toast.success("Asistencia manual guardada con éxito")
+      toast.success("Asistencia manual guardada")
       onSuccess(data)
     } catch (error: any) {
       toast.error(`Error: ${error.message}`)
@@ -617,65 +702,44 @@ function ModalRegistroManual({ onClose, fechaBase, onSuccess }: { onClose: () =>
   }
 
   return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
-      <motion.div initial={{ scale: 0.9, y: 20 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 20 }} className="bg-white dark:bg-slate-900 w-full max-w-md rounded-[24px] shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-700 relative">
-        <div className="bg-gradient-to-r from-blue-600 to-indigo-600 h-2 w-full" />
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+      <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-700 relative animate-in zoom-in-95 duration-200 transition-colors duration-500">
+        <div className="bg-blue-600 h-1.5 w-full" />
         <div className="p-6 relative">
           <button onClick={onClose} className="absolute top-4 right-4 p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"><X size={20} /></button>
-          
           <div className="flex items-center gap-3 mb-6 text-blue-600 dark:text-blue-500">
-            <div className="p-3 bg-blue-100 dark:bg-blue-900/30 rounded-xl">
-              <UserPlus size={24} />
-            </div>
-            <h3 className="text-xl font-black text-slate-900 dark:text-white">Registro Manual</h3>
+            <div className="p-2.5 bg-blue-100 dark:bg-blue-900/30 rounded-xl"><UserPlus size={20} /></div>
+            <h3 className="text-lg font-black text-slate-900 dark:text-white">Registro Manual</h3>
           </div>
-          
           <div className="space-y-4">
-            <div>
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Nombres y Apellidos</label>
-              <input type="text" value={nombres} onChange={(e) => setNombres(e.target.value)} className="w-full mt-1 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white px-4 py-3 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all" placeholder="Ej: Juan Perez" />
-            </div>
+            <div><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Nombres y Apellidos</label><input type="text" value={nombres} onChange={(e) => setNombres(e.target.value)} className="w-full mt-1 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 px-4 py-2.5 rounded-xl outline-none focus:border-blue-500 text-sm transition-colors" placeholder="Ej: Juan Perez" /></div>
             <div className="grid grid-cols-2 gap-4">
-              <div>
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">DNI</label>
-                <input type="number" value={dni} onChange={(e) => {if(e.target.value.length <=8) setDni(e.target.value)}} className="w-full mt-1 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white px-4 py-3 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all" placeholder="12345678" />
-              </div>
-              <div>
-                <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Hora Ingreso</label>
-                <input type="time" value={horaIngreso} onChange={(e) => setHoraIngreso(e.target.value)} className="w-full mt-1 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white px-4 py-3 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all" />
-              </div>
+              <div><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">DNI</label><input type="number" value={dni} onChange={(e) => {if(e.target.value.length <=8) setDni(e.target.value)}} className="w-full mt-1 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 px-4 py-2.5 rounded-xl outline-none focus:border-blue-500 text-sm transition-colors" placeholder="12345678" /></div>
+              <div><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Hora Ingreso</label><input type="time" value={horaIngreso} onChange={(e) => setHoraIngreso(e.target.value)} className="w-full mt-1 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 px-4 py-2.5 rounded-xl outline-none focus:border-blue-500 text-sm transition-colors" /></div>
             </div>
             <div>
-              <label className="text-[10px] font-black text-slate-500 uppercase tracking-widest ml-1">Área</label>
-              <select value={area} onChange={(e) => setArea(e.target.value)} className="w-full mt-1 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white px-4 py-3 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all cursor-pointer">
-                <option value="" disabled>Seleccionar Área</option>
-                {AREAS_LIST.map(a => <option key={a} value={a}>{a}</option>)}
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Área</label>
+              <select value={area} onChange={(e) => setArea(e.target.value)} className="w-full mt-1 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 px-4 py-2.5 rounded-xl outline-none focus:border-blue-500 text-sm transition-colors cursor-pointer appearance-none">
+                <option value="" disabled>Seleccionar Área</option>{AREAS_LIST.map(a => <option key={a} value={a}>{a}</option>)}
               </select>
             </div>
           </div>
-          
-          <button onClick={handleGuardar} disabled={guardando} className="w-full mt-8 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 shadow-lg shadow-blue-500/25 text-white font-bold py-4 rounded-xl transition-all flex justify-center items-center active:scale-95">
-            {guardando ? <Loader2 className="animate-spin" size={24}/> : "Registrar Asistencia"}
+          <button onClick={handleGuardar} disabled={guardando} className="w-full mt-8 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl flex justify-center items-center transition-transform active:scale-95 shadow-md">
+            {guardando ? <Loader2 className="animate-spin" size={20}/> : "Registrar Asistencia"}
           </button>
         </div>
-      </motion.div>
-    </motion.div>
+      </div>
+    </div>
   )
 }
 
-// --- NUEVO DISEÑO GLASSMORPHISM PARA LA TARJETA ---
-function FotocheckCard({ data, index, modoEdicion, onActualizar, onAbrirNota }: { data: any, index: number, modoEdicion: boolean, onActualizar: Function, onAbrirNota: (nota: {nombre: string, nota: string, hora: string}) => void }) {
+// --- FILA DE TABLA (ANIMADA Y MÁS GRANDE) ---
+function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota }: { data: any, index: number, modoEdicion: boolean, onActualizar: Function, onAbrirNota: (nota: {nombre: string, nota: string, hora: string}) => void }) {
   const isPuntual = data.estado_ingreso === 'PUNTUAL'
   const justAdded = index === 0 && isToday(new Date(data.hora_ingreso))
   
-  const nombreLargo = data.nombres_completos.length > 20;
-  
-  // Color dinámico según estado
-  const accentColor = isPuntual ? 'bg-emerald-500' : 'bg-red-500';
-  const glowColor = isPuntual ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)';
-  const textColor = isPuntual ? 'text-emerald-500 dark:text-emerald-400' : 'text-red-500 dark:text-red-400';
+  const statusColor = isPuntual ? 'bg-emerald-500' : 'bg-red-500';
 
-  // Función inteligente para extraer las iniciales
   const getInitials = (name: string) => {
     if (!name) return '??';
     const words = name.trim().split(' ').filter(w => w.length > 0);
@@ -683,127 +747,96 @@ function FotocheckCard({ data, index, modoEdicion, onActualizar, onAbrirNota }: 
     return (words[0][0] + words[1][0]).toUpperCase();
   };
 
+  // Animación de entrada de Framer Motion para cada fila
+  const rowVariants: Variants = {
+    hidden: { opacity: 0, x: -20 },
+    show: { 
+      opacity: 1, 
+      x: 0,
+      transition: { type: "spring" as const, stiffness: 300, damping: 24 }
+    }
+  };
+
   return (
-    <motion.div
-      layout
-      initial={{ opacity: 0, scale: 0.9, y: 30 }}
-      animate={{ opacity: 1, scale: 1, y: 0 }}
-      exit={{ opacity: 0, scale: 0.9, y: 30 }}
-      transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-      style={{ boxShadow: `0 10px 40px -10px ${glowColor}` }}
-      className={`relative group rounded-[2rem] p-5 flex flex-col overflow-hidden transition-all duration-300
-        ${justAdded ? 'border-2 border-blue-400 dark:border-blue-500' : 'border border-slate-200 dark:border-slate-800'}
-        bg-white/80 dark:bg-slate-900/80 backdrop-blur-xl hover:-translate-y-1 z-10`}
+    <motion.div 
+      variants={rowVariants}
+      whileHover={{ scale: 1.005 }}
+      className={`group flex items-center justify-between p-4 rounded-xl bg-white dark:bg-slate-900 border transition-colors hover:shadow-md
+        ${justAdded ? 'border-blue-400 ring-1 ring-blue-100 shadow-sm' : 'border-slate-200 dark:border-slate-800'}`}
     >
-      {/* Resplandor de fondo invisible */}
-      <div className={`absolute -top-20 -right-20 w-40 h-40 rounded-full blur-[50px] opacity-50 pointer-events-none ${accentColor}`} />
-
-      {/* Botón Flotante de Notas */}
-      {data.notas && (
-        <button 
-          onClick={() => onAbrirNota({
-            nombre: data.nombres_completos, 
-            nota: data.notas,
-            hora: data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm a') : 'Desconocida'
-          })}
-          className="absolute top-4 right-4 z-20 bg-white dark:bg-slate-800 shadow-lg border border-amber-200 dark:border-amber-900/50 hover:bg-amber-50 dark:hover:bg-amber-900/30 text-amber-500 p-2 rounded-full transition-all hover:scale-110"
-          title="Ver motivo de salida"
-        >
-          <MessageSquareText size={18} />
-        </button>
-      )}
-
-      {/* Cabecera: Foto + Info */}
-      <div className="flex items-start gap-4 mb-6 relative z-10">
-        
-        {/* AVATAR INTELIGENTE (Foto o Iniciales con gradiente) */}
+      
+      {/* 1. Avatar y Nombre (MÁS GRANDE) */}
+      <div className="flex items-center gap-5 flex-1 min-w-0 pr-4">
         <div className="relative shrink-0">
-          <div className="w-[72px] h-[72px] rounded-2xl overflow-hidden shadow-inner bg-slate-100 dark:bg-slate-800">
+          {/* Avatar ampliado a 56px (w-14 h-14) */}
+          <div className="w-14 h-14 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center">
             {data.foto_url ? (
               <img src={data.foto_url} alt="Foto" className="w-full h-full object-cover" />
             ) : (
-              <div className="w-full h-full flex items-center justify-center bg-gradient-to-br from-indigo-500 via-purple-500 to-pink-500 text-white font-black text-2xl shadow-inner">
-                {getInitials(data.nombres_completos)}
-              </div>
+              <span className="font-black text-slate-400 dark:text-slate-500 text-lg">{getInitials(data.nombres_completos)}</span>
             )}
           </div>
-          {/* Indicador de estado sobre la foto */}
-          <div className={`absolute -bottom-1.5 -right-1.5 w-4 h-4 rounded-full border-2 border-white dark:border-slate-900 shadow-md ${accentColor}`} />
+          <div className={`absolute bottom-0 right-0 w-4 h-4 rounded-full border-2 border-white dark:border-slate-900 ${statusColor}`} />
         </div>
-
-        {/* Nombres y DNI */}
-        <div className="flex-1 min-w-0 pt-1">
-          <div className={nombreLargo ? "marquee-container" : ""}>
-            <h3 className={`font-black text-slate-900 dark:text-white text-[17px] leading-tight ${nombreLargo ? "marquee-text" : "truncate"}`}>
-              {data.nombres_completos} {nombreLargo && <span className="opacity-0">___</span>}
-            </h3>
+        
+        <div className="flex flex-col min-w-0">
+          <h4 className="font-bold text-slate-800 dark:text-slate-100 text-[17px] truncate uppercase tracking-tight">
+            {data.nombres_completos}
+          </h4>
+          <div className="flex items-center gap-3 mt-1">
+            <span className="text-sm font-mono text-slate-500 font-medium">{data.dni}</span>
+            <span className="text-slate-300 dark:text-slate-700">•</span>
+            <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{data.area}</span>
           </div>
-          <p className="text-xs font-mono text-slate-500 mt-1 mb-2 tracking-widest">{data.dni}</p>
-          <span className="inline-block px-2.5 py-1 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 text-[10px] font-bold rounded-lg uppercase tracking-wider">
-            {data.area}
-          </span>
         </div>
       </div>
 
-      {/* Bloque de Tiempos Integrado */}
-      <div className="mt-auto bg-slate-50/50 dark:bg-slate-950/50 rounded-2xl p-4 border border-slate-100 dark:border-slate-800 shadow-inner relative z-10">
+      {/* 2. Horarios y Acciones */}
+      <div className="flex items-center gap-8 shrink-0">
         
-        {/* INGRESO */}
-        <div className="flex justify-between items-center">
-          <div className="flex items-center gap-1.5">
-            <div className={`w-1.5 h-1.5 rounded-full ${accentColor} animate-pulse`} />
-            <span className="text-slate-500 text-[10px] font-bold uppercase tracking-widest">Ingreso</span>
-          </div>
+        {/* INGRESO (Textos más grandes) */}
+        <div className="flex flex-col items-end">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Ingreso</span>
           {modoEdicion ? (
-            <input 
-              type="time" 
-              defaultValue={format(new Date(data.hora_ingreso), 'HH:mm')}
-              className="bg-transparent border-b border-blue-500 text-lg font-black text-blue-600 dark:text-blue-400 outline-none w-20 text-right focus:border-emerald-500"
-              onBlur={(e) => {
-                if(e.target.value !== format(new Date(data.hora_ingreso), 'HH:mm')) {
-                  onActualizar(data.id, 'hora_ingreso', e.target.value, data.hora_ingreso)
-                }
-              }}
-            />
+            <input type="time" defaultValue={format(new Date(data.hora_ingreso), 'HH:mm')} className="bg-transparent border-b border-blue-500 text-base font-black text-blue-600 outline-none w-20 text-right" onBlur={(e) => { if(e.target.value !== format(new Date(data.hora_ingreso), 'HH:mm')) onActualizar(data.id, 'hora_ingreso', e.target.value, data.hora_ingreso) }} />
           ) : (
-            <span className={`font-black text-xl tracking-tight ${textColor}`}>
-              {format(new Date(data.hora_ingreso), 'HH:mm')} <span className="text-xs opacity-60 font-bold">{format(new Date(data.hora_ingreso), 'a')}</span>
-            </span>
+            <div className={`font-black text-lg leading-none ${isPuntual ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+              {format(new Date(data.hora_ingreso), 'HH:mm')}
+            </div>
           )}
         </div>
         
-        <div className="h-px w-full bg-slate-200 dark:bg-slate-800 my-2" />
+        <div className="w-px h-8 bg-slate-200 dark:bg-slate-700 hidden sm:block"></div>
         
-        {/* SALIDA */}
-        <div className="flex justify-between items-center">
-          <div className="flex items-center gap-1.5 text-slate-500">
-            <LogOut size={12} strokeWidth={3} />
-            <span className="text-[10px] font-bold uppercase tracking-widest">Salida</span>
-          </div>
-          
+        {/* SALIDA (Textos más grandes) */}
+        <div className="flex flex-col items-end min-w-[70px]">
+          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Salida</span>
           {modoEdicion ? (
-            <input 
-              type="time" 
-              defaultValue={data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm') : ''}
-              className="bg-transparent border-b border-blue-500 text-base font-bold text-slate-700 dark:text-slate-300 outline-none w-20 text-right focus:border-emerald-500"
-              onBlur={(e) => {
-                const currentValue = data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm') : ''
-                if(e.target.value && e.target.value !== currentValue) {
-                  const baseDate = data.hora_salida || data.hora_ingreso || `${data.fecha}T00:00:00`
-                  onActualizar(data.id, 'hora_salida', e.target.value, baseDate)
-                }
-              }}
-            />
+            <input type="time" defaultValue={data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm') : ''} className="bg-transparent border-b border-blue-500 text-base font-bold text-slate-700 dark:text-slate-300 outline-none w-20 text-right" onBlur={(e) => { const currentValue = data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm') : ''; if(e.target.value && e.target.value !== currentValue) onActualizar(data.id, 'hora_salida', e.target.value, data.hora_salida || data.hora_ingreso) }} />
           ) : (
-            <span className="font-bold text-base text-slate-700 dark:text-slate-200">
-              {data.hora_salida ? (
-                <>{format(new Date(data.hora_salida), 'HH:mm')} <span className="text-[10px] opacity-60">{format(new Date(data.hora_salida), 'a')}</span></>
-              ) : (
-                <span className="text-indigo-500 bg-indigo-500/10 px-2 py-0.5 rounded-md animate-pulse text-[10px] uppercase tracking-widest border border-indigo-500/20">En Turno</span>
-              )}
-            </span>
+            data.hora_salida ? (
+              <div className="font-bold text-lg leading-none text-slate-700 dark:text-slate-300">
+                {format(new Date(data.hora_salida), 'HH:mm')}
+              </div>
+            ) : (
+              <span className="text-[11px] font-bold text-slate-400 border border-slate-200 dark:border-slate-700 px-2 py-0.5 rounded-md bg-slate-50 dark:bg-slate-800">
+                --:--
+              </span>
+            )
           )}
         </div>
+
+        {/* BOTÓN NOTA (Fijo a la derecha) */}
+        <div className="w-10 flex justify-center">
+          {data.notas ? (
+            <button onClick={() => onAbrirNota({ nombre: data.nombres_completos, nota: data.notas, hora: data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm a') : 'Desconocida' })} className="p-2 rounded-full bg-amber-50 text-amber-600 border border-amber-100 hover:bg-amber-100 hover:scale-110 transition-all shadow-sm" title="Ver motivo">
+              <MessageSquareText size={18} />
+            </button>
+          ) : (
+            <div className="w-10"></div> 
+          )}
+        </div>
+
       </div>
     </motion.div>
   )
