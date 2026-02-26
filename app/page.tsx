@@ -10,7 +10,8 @@ import {
   CalendarDays, ChevronLeft, ChevronRight, 
   CheckCircle2, AlertCircle, LogOut, Activity, UserCircle2,
   Unlock, MessageSquareText, X, UserPlus, Loader2, Search, Filter,
-  FileSpreadsheet, SlidersHorizontal, Users, ShieldCheck, AlignLeft
+  FileSpreadsheet, SlidersHorizontal, Users, ShieldCheck, AlignLeft,
+  MapPin // <-- Nuevo icono importado para obras
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 
@@ -174,14 +175,15 @@ function LiveClock() {
 export default function DualDashboardAsistencias() {
   const [asistencias, setAsistencias] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [isInitialLoad, setIsInitialLoad] = useState(true) // <-- Estado para el Splash Screen
+  const [isInitialLoad, setIsInitialLoad] = useState(true) 
   const [fechaActual, setFechaActual] = useState(new Date())
   
   const [isDarkMode, setIsDarkMode] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [modoEdicion, setModoEdicion] = useState(false)
 
-  const [notaSeleccionada, setNotaSeleccionada] = useState<{nombre: string, nota: string, hora: string} | null>(null)
+  // --- NUEVO TIPO PARA INCLUIR SI ES OBRA O NO ---
+  const [notaSeleccionada, setNotaSeleccionada] = useState<{nombre: string, nota: string, hora: string, esObra: boolean} | null>(null)
   const [mostrarModalManual, setMostrarModalManual] = useState(false)
 
   // --- ESTADOS PARA FILTROS ---
@@ -250,7 +252,6 @@ export default function DualDashboardAsistencias() {
     
     setLoading(false)
     
-    // Si es la primera vez que carga, le damos medio segundo extra para que se vea la animación épica
     if (isInitialLoad) {
       setTimeout(() => setIsInitialLoad(false), 500)
     }
@@ -624,12 +625,24 @@ export default function DualDashboardAsistencias() {
       {notaSeleccionada && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-700 animate-in zoom-in-95 duration-200 transition-colors duration-500">
-            <div className="bg-amber-500 h-1.5 w-full" />
+            {/* Color de barra superior dependiendo si es obra o nota normal */}
+            <div className={`${notaSeleccionada.esObra ? 'bg-red-500' : 'bg-amber-500'} h-1.5 w-full`} />
             <div className="p-6 relative">
               <button onClick={() => setNotaSeleccionada(null)} className="absolute top-4 right-4 p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"><X size={20} /></button>
-              <div className="flex items-center gap-3 mb-4 text-amber-500"><MessageSquareText size={28} /><h3 className="text-xl font-black text-slate-900 dark:text-white">Motivo de Salida</h3></div>
+              
+              <div className={`flex items-center gap-3 mb-4 ${notaSeleccionada.esObra ? 'text-red-500' : 'text-amber-500'}`}>
+                {notaSeleccionada.esObra ? <MapPin size={28} /> : <MessageSquareText size={28} />}
+                <h3 className="text-xl font-black text-slate-900 dark:text-white">
+                  {notaSeleccionada.esObra ? 'Salida desde Obra' : 'Motivo de Salida'}
+                </h3>
+              </div>
+              
               <p className="text-sm font-bold text-slate-500 dark:text-slate-400 mb-4 pb-4 border-b border-slate-100 dark:border-slate-800">{notaSeleccionada.nombre} <br/><span className="font-normal opacity-70">Salió a las {notaSeleccionada.hora}</span></p>
-              <div className="bg-slate-50 dark:bg-slate-950/50 p-4 rounded-xl border border-slate-100 dark:border-slate-800 text-slate-700 dark:text-slate-300 min-h-[100px] whitespace-pre-wrap text-sm leading-relaxed transition-colors duration-500">{notaSeleccionada.nota}</div>
+              
+              <div className="bg-slate-50 dark:bg-slate-950/50 p-4 rounded-xl border border-slate-100 dark:border-slate-800 text-slate-700 dark:text-slate-300 min-h-[100px] whitespace-pre-wrap text-sm leading-relaxed transition-colors duration-500">
+                {notaSeleccionada.nota}
+              </div>
+              
               <button onClick={() => setNotaSeleccionada(null)} className="w-full mt-6 bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold py-3 rounded-xl transition-transform active:scale-95">Cerrar</button>
             </div>
           </div>
@@ -733,8 +746,8 @@ function ModalRegistroManual({ onClose, fechaBase, onSuccess }: { onClose: () =>
   )
 }
 
-// --- FILA DE TABLA (ANIMADA Y MÁS GRANDE) ---
-function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota }: { data: any, index: number, modoEdicion: boolean, onActualizar: Function, onAbrirNota: (nota: {nombre: string, nota: string, hora: string}) => void }) {
+// --- FILA DE TABLA (INTELIGENTE: DETECTA OBRAS) ---
+function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota }: { data: any, index: number, modoEdicion: boolean, onActualizar: Function, onAbrirNota: (nota: {nombre: string, nota: string, hora: string, esObra: boolean}) => void }) {
   const isPuntual = data.estado_ingreso === 'PUNTUAL'
   const justAdded = index === 0 && isToday(new Date(data.hora_ingreso))
   
@@ -747,7 +760,10 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota }: {
     return (words[0][0] + words[1][0]).toUpperCase();
   };
 
-  // Animación de entrada de Framer Motion para cada fila
+  // Lógica para detectar si la nota es de obra (tiene el tag [GPS:)
+  const tieneNota = !!data.notas;
+  const esDeObra = tieneNota && data.notas.includes('[GPS:');
+
   const rowVariants: Variants = {
     hidden: { opacity: 0, x: -20 },
     show: { 
@@ -765,10 +781,9 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota }: {
         ${justAdded ? 'border-blue-400 ring-1 ring-blue-100 shadow-sm' : 'border-slate-200 dark:border-slate-800'}`}
     >
       
-      {/* 1. Avatar y Nombre (MÁS GRANDE) */}
+      {/* 1. Avatar y Nombre */}
       <div className="flex items-center gap-5 flex-1 min-w-0 pr-4">
         <div className="relative shrink-0">
-          {/* Avatar ampliado a 56px (w-14 h-14) */}
           <div className="w-14 h-14 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center">
             {data.foto_url ? (
               <img src={data.foto_url} alt="Foto" className="w-full h-full object-cover" />
@@ -794,7 +809,7 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota }: {
       {/* 2. Horarios y Acciones */}
       <div className="flex items-center gap-8 shrink-0">
         
-        {/* INGRESO (Textos más grandes) */}
+        {/* INGRESO */}
         <div className="flex flex-col items-end">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Ingreso</span>
           {modoEdicion ? (
@@ -808,7 +823,7 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota }: {
         
         <div className="w-px h-8 bg-slate-200 dark:bg-slate-700 hidden sm:block"></div>
         
-        {/* SALIDA (Textos más grandes) */}
+        {/* SALIDA */}
         <div className="flex flex-col items-end min-w-[70px]">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Salida</span>
           {modoEdicion ? (
@@ -826,11 +841,23 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota }: {
           )}
         </div>
 
-        {/* BOTÓN NOTA (Fijo a la derecha) */}
+        {/* BOTÓN NOTA / OBRA (Inteligente) */}
         <div className="w-10 flex justify-center">
-          {data.notas ? (
-            <button onClick={() => onAbrirNota({ nombre: data.nombres_completos, nota: data.notas, hora: data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm a') : 'Desconocida' })} className="p-2 rounded-full bg-amber-50 text-amber-600 border border-amber-100 hover:bg-amber-100 hover:scale-110 transition-all shadow-sm" title="Ver motivo">
-              <MessageSquareText size={18} />
+          {tieneNota ? (
+            <button 
+              onClick={() => onAbrirNota({ 
+                nombre: data.nombres_completos, 
+                nota: data.notas, 
+                hora: data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm a') : 'Desconocida',
+                esObra: esDeObra 
+              })} 
+              className={`p-2 rounded-full border transition-all shadow-sm hover:scale-110 
+                ${esDeObra 
+                  ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100 dark:bg-red-500/10 dark:border-red-500/30' 
+                  : 'bg-amber-50 text-amber-600 border-amber-200 hover:bg-amber-100 dark:bg-amber-500/10 dark:border-amber-500/30'}`} 
+              title={esDeObra ? "Ver salida de obra" : "Ver motivo"}
+            >
+              {esDeObra ? <MapPin size={18} /> : <MessageSquareText size={18} />}
             </button>
           ) : (
             <div className="w-10"></div> 
