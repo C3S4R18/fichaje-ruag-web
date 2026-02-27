@@ -11,7 +11,7 @@ import {
   CheckCircle2, AlertCircle, LogOut, Activity, UserCircle2,
   Unlock, MessageSquareText, X, UserPlus, Loader2, Search, Filter,
   FileSpreadsheet, SlidersHorizontal, Users, ShieldCheck, AlignLeft,
-  MapPin, Map, Download // <-- Nuevos iconos
+  MapPin, Map, Download, HardHat // <-- Nuevo icono importado para Ingreso en Obra
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 
@@ -183,7 +183,8 @@ export default function DualDashboardAsistencias() {
   const [modoEdicion, setModoEdicion] = useState(false)
 
   // Modales
-  const [notaSeleccionada, setNotaSeleccionada] = useState<{nombre: string, nota: string, hora: string, esObra: boolean, coordenadas?: string} | null>(null)
+  // --- ACTUALIZADO TIPO DE NOTA SELECCIONADA PARA INCLUIR TIPO_OBRA ---
+  const [notaSeleccionada, setNotaSeleccionada] = useState<{nombre: string, nota: string, hora: string, tipoObra: 'ninguna' | 'ingreso' | 'salida', coordenadas?: string} | null>(null)
   const [mostrarModalManual, setMostrarModalManual] = useState(false)
   const [mostrarModalExportar, setMostrarModalExportar] = useState(false)
 
@@ -343,7 +344,6 @@ export default function DualDashboardAsistencias() {
     };
 
     data.forEach((registro) => {
-      // Limpiar nota GPS para el excel si es necesario, o dejarla entera
       ws_data.push([
         registro.fecha,
         registro.dni,
@@ -394,7 +394,6 @@ export default function DualDashboardAsistencias() {
         }
       } 
       else {
-        // Exportación por rango
         if (!exportarDesde || !exportarHasta) {
           toast.error("Selecciona ambas fechas"); return;
         }
@@ -584,7 +583,6 @@ export default function DualDashboardAsistencias() {
 
           {/* Tarjeta de Acciones Rápida */}
           <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3 transition-colors duration-500">
-            {/* BOTÓN ABRE MODAL DE EXPORTACIÓN */}
             <button onClick={() => setMostrarModalExportar(true)} className="w-full flex items-center justify-center gap-2 p-3 rounded-xl bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20 text-sm font-bold transition-all active:scale-95">
               <FileSpreadsheet size={18} /> Exportar Reporte Excel
             </button>
@@ -719,39 +717,58 @@ export default function DualDashboardAsistencias() {
         <ModalRegistroManual onClose={() => setMostrarModalManual(false)} fechaBase={format(fechaActual, 'yyyy-MM-dd')} onSuccess={(nuevoRegistro) => { if (isToday(fechaActual) || nuevoRegistro.fecha === format(fechaActual, 'yyyy-MM-dd')) { setAsistencias(prev => [nuevoRegistro, ...prev]) }; setMostrarModalManual(false) }} />
       )}
 
+      {/* --- MODAL DE NOTAS ACTUALIZADO PARA DIFERENCIAR INGRESO Y SALIDA DE OBRA --- */}
       {notaSeleccionada && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-700 animate-in zoom-in-95 duration-200 transition-colors duration-500">
-            <div className={`${notaSeleccionada.esObra ? 'bg-red-500' : 'bg-amber-500'} h-1.5 w-full`} />
+            {/* Color de barra superior dependiendo del tipo de nota */}
+            <div className={`${notaSeleccionada.tipoObra === 'ingreso' ? 'bg-blue-500' : notaSeleccionada.tipoObra === 'salida' ? 'bg-red-500' : 'bg-amber-500'} h-1.5 w-full`} />
             <div className="p-6 relative">
               <button onClick={() => setNotaSeleccionada(null)} className="absolute top-4 right-4 p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"><X size={20} /></button>
               
-              <div className={`flex items-center gap-3 mb-4 ${notaSeleccionada.esObra ? 'text-red-500' : 'text-amber-500'}`}>
-                {notaSeleccionada.esObra ? <MapPin size={28} /> : <MessageSquareText size={28} />}
+              <div className={`flex items-center gap-3 mb-4 
+                ${notaSeleccionada.tipoObra === 'ingreso' ? 'text-blue-500' : 
+                  notaSeleccionada.tipoObra === 'salida' ? 'text-red-500' : 'text-amber-500'}`}
+              >
+                {notaSeleccionada.tipoObra === 'ingreso' ? <HardHat size={28} /> : 
+                 notaSeleccionada.tipoObra === 'salida' ? <MapPin size={28} /> : 
+                 <MessageSquareText size={28} />}
+                
                 <h3 className="text-xl font-black text-slate-900 dark:text-white">
-                  {notaSeleccionada.esObra ? 'Salida desde Obra' : 'Motivo de Salida'}
+                  {notaSeleccionada.tipoObra === 'ingreso' ? 'Ingreso desde Obra' : 
+                   notaSeleccionada.tipoObra === 'salida' ? 'Salida desde Obra' : 'Motivo Guardado'}
                 </h3>
               </div>
               
-              <p className="text-sm font-bold text-slate-500 dark:text-slate-400 mb-4 pb-4 border-b border-slate-100 dark:border-slate-800">{notaSeleccionada.nombre} <br/><span className="font-normal opacity-70">Salió a las {notaSeleccionada.hora}</span></p>
+              <p className="text-sm font-bold text-slate-500 dark:text-slate-400 mb-4 pb-4 border-b border-slate-100 dark:border-slate-800">
+                {notaSeleccionada.nombre} <br/>
+                <span className="font-normal opacity-70">
+                  {notaSeleccionada.tipoObra === 'ingreso' ? `Ingresó a las ${notaSeleccionada.hora}` : 
+                   notaSeleccionada.tipoObra === 'salida' ? `Salió a las ${notaSeleccionada.hora}` : 
+                   'Dejó una nota'}
+                </span>
+              </p>
               
               <div className="bg-slate-50 dark:bg-slate-950/50 p-4 rounded-xl border border-slate-100 dark:border-slate-800 text-slate-700 dark:text-slate-300 min-h-[100px] whitespace-pre-wrap text-sm leading-relaxed transition-colors duration-500">
                 {notaSeleccionada.nota}
               </div>
 
-              {/* BOTÓN VER EN MAPA SI ES OBRA */}
-              {notaSeleccionada.esObra && notaSeleccionada.coordenadas && (
+              {/* BOTÓN VER EN MAPA SI ES CUALQUIER TIPO DE OBRA */}
+              {notaSeleccionada.tipoObra !== 'ninguna' && notaSeleccionada.coordenadas && (
                 <a 
                   href={`https://www.google.com/maps/search/?api=1&query=${notaSeleccionada.coordenadas}`} 
                   target="_blank" 
                   rel="noreferrer"
-                  className="w-full mt-4 flex items-center justify-center gap-2 bg-red-50 hover:bg-red-100 dark:bg-red-500/10 dark:hover:bg-red-500/20 text-red-600 border border-red-200 dark:border-red-500/30 font-bold py-3 rounded-xl transition-all"
+                  className={`w-full mt-4 flex items-center justify-center gap-2 font-bold py-3 rounded-xl transition-all border
+                    ${notaSeleccionada.tipoObra === 'ingreso' 
+                      ? 'bg-blue-50 hover:bg-blue-100 text-blue-600 border-blue-200 dark:bg-blue-500/10 dark:hover:bg-blue-500/20 dark:border-blue-500/30' 
+                      : 'bg-red-50 hover:bg-red-100 text-red-600 border-red-200 dark:bg-red-500/10 dark:hover:bg-red-500/20 dark:border-red-500/30'}`}
                 >
                   <Map size={18} /> Ver ubicación en Maps
                 </a>
               )}
               
-              <button onClick={() => setNotaSeleccionada(null)} className={`w-full mt-4 ${notaSeleccionada.esObra ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900' : 'bg-slate-900 dark:bg-white text-white dark:text-slate-900'} font-bold py-3 rounded-xl transition-transform active:scale-95`}>
+              <button onClick={() => setNotaSeleccionada(null)} className="w-full mt-4 bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold py-3 rounded-xl transition-transform active:scale-95">
                 Cerrar
               </button>
             </div>
@@ -759,7 +776,6 @@ export default function DualDashboardAsistencias() {
         </div>
       )}
 
-      {/* Estilos para animación del texto largo que fluye */}
       <style dangerouslySetInnerHTML={{__html: `
         .marquee-container { overflow: hidden; white-space: nowrap; position: relative; width: 100%; mask-image: linear-gradient(to right, black 85%, transparent 100%); }
         .marquee-text { display: inline-block; animation: marquee 8s linear infinite; }
@@ -785,7 +801,6 @@ function StatCard({ title, value, icon, color }: any) {
   )
 }
 
-// --- MODAL REGISTRO MANUAL ---
 function ModalRegistroManual({ onClose, fechaBase, onSuccess }: { onClose: () => void, fechaBase: string, onSuccess: (data: any) => void }) {
   const [nombres, setNombres] = useState('')
   const [dni, setDni] = useState('')
@@ -856,8 +871,8 @@ function ModalRegistroManual({ onClose, fechaBase, onSuccess }: { onClose: () =>
   )
 }
 
-// --- FILA DE TABLA (INTELIGENTE: EXTRAE COORDENADAS PARA EL MAPA) ---
-function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota }: { data: any, index: number, modoEdicion: boolean, onActualizar: Function, onAbrirNota: (nota: {nombre: string, nota: string, hora: string, esObra: boolean, coordenadas?: string}) => void }) {
+// --- FILA DE TABLA (INTELIGENTE: DIFERENCIA INGRESO VS SALIDA DE OBRA) ---
+function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota }: { data: any, index: number, modoEdicion: boolean, onActualizar: Function, onAbrirNota: (nota: {nombre: string, nota: string, hora: string, tipoObra: 'ninguna'|'ingreso'|'salida', coordenadas?: string}) => void }) {
   const isPuntual = data.estado_ingreso === 'PUNTUAL'
   const justAdded = index === 0 && isToday(new Date(data.hora_ingreso))
   
@@ -870,19 +885,22 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota }: {
     return (words[0][0] + words[1][0]).toUpperCase();
   };
 
-  // Lógica para extraer la coordenada secreta de la nota
+  // Lógica para extraer la coordenada y determinar si es Ingreso o Salida de obra
   const tieneNota = !!data.notas;
-  const esDeObra = tieneNota && data.notas.includes('[GPS:');
+  const contieneGPS = tieneNota && data.notas.includes('[GPS:');
+  const esIngresoObra = contieneGPS && data.notas.startsWith('Ingreso en:');
   
   let textoLimpio = data.notas || '';
   let coordenadas = '';
+  let tipoObra: 'ninguna' | 'ingreso' | 'salida' = 'ninguna';
 
-  if (esDeObra) {
+  if (contieneGPS) {
+    tipoObra = esIngresoObra ? 'ingreso' : 'salida';
     const startIdx = data.notas.indexOf('[GPS:');
     const endIdx = data.notas.indexOf(']', startIdx);
     if (startIdx !== -1 && endIdx !== -1) {
-      coordenadas = data.notas.substring(startIdx + 5, endIdx).trim(); // Extrae "-12.11, -77.02"
-      textoLimpio = data.notas.substring(0, startIdx).trim(); // Deja solo el texto "En la obra XYZ"
+      coordenadas = data.notas.substring(startIdx + 5, endIdx).trim(); 
+      textoLimpio = data.notas.substring(0, startIdx).trim(); 
     }
   }
 
@@ -958,23 +976,28 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota }: {
           )}
         </div>
 
+        {/* BOTÓN INTELIGENTE (Azul = Ingreso Obra, Rojo = Salida Obra, Ambar = Nota Normal) */}
         <div className="w-10 flex justify-center">
           {tieneNota ? (
             <button 
               onClick={() => onAbrirNota({ 
                 nombre: data.nombres_completos, 
-                nota: textoLimpio, // Se muestra sin las coordenadas raras
-                hora: data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm a') : 'Desconocida',
-                esObra: esDeObra,
+                nota: textoLimpio,
+                hora: tipoObra === 'ingreso' ? format(new Date(data.hora_ingreso), 'HH:mm a') : (data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm a') : 'Desconocida'),
+                tipoObra: tipoObra,
                 coordenadas: coordenadas 
               })} 
               className={`p-2 rounded-full border transition-all shadow-sm hover:scale-110 
-                ${esDeObra 
+                ${tipoObra === 'ingreso'
+                  ? 'bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100 dark:bg-blue-500/10 dark:border-blue-500/30' 
+                  : tipoObra === 'salida' 
                   ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100 dark:bg-red-500/10 dark:border-red-500/30' 
                   : 'bg-amber-50 text-amber-600 border-amber-200 hover:bg-amber-100 dark:bg-amber-500/10 dark:border-amber-500/30'}`} 
-              title={esDeObra ? "Ver salida de obra" : "Ver motivo"}
+              title={tipoObra === 'ingreso' ? "Ver ingreso de obra" : tipoObra === 'salida' ? "Ver salida de obra" : "Ver motivo"}
             >
-              {esDeObra ? <MapPin size={18} /> : <MessageSquareText size={18} />}
+              {tipoObra === 'ingreso' ? <HardHat size={18} /> : 
+               tipoObra === 'salida' ? <MapPin size={18} /> : 
+               <MessageSquareText size={18} />}
             </button>
           ) : (
             <div className="w-10"></div> 

@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Scanner } from '@yudiel/react-qr-scanner'
 import { createClient } from '@supabase/supabase-js'
-import { MapPin, AlertTriangle, CheckCircle, Loader2, User, LogOut, History, Edit2, Edit3, X, Trophy, Lock } from 'lucide-react'
+import { MapPin, AlertTriangle, CheckCircle, Loader2, User, LogOut, History, Edit2, Edit3, X, Trophy, Lock, Map } from 'lucide-react'
 import { format } from 'date-fns'
 
 // --- INTERFACES TYPESCRIPT ---
@@ -20,6 +20,7 @@ interface Asistencia {
   hora_ingreso: string;
   estado_ingreso: string;
   hora_salida: string | null;
+  notas: string | null;
 }
 
 interface LogroItem {
@@ -74,31 +75,27 @@ const obtenerUbicacion = (): Promise<GeolocationPosition> => {
   })
 }
 
-// --- FUNCIÓN EVALUAR LOGROS (Reutilizada de Android) ---
+// --- FUNCIÓN EVALUAR LOGROS ---
 const evaluarLogrosDeIngreso = async (dni: string, horaActual: number, minutoActual: number): Promise<number[]> => {
   const nuevos: number[] = []
   try {
     const todayStr = format(new Date(), 'yyyy-MM-dd')
-    const dayOfWeek = new Date().getDay() // 0 = Domingo, 6 = Sábado
+    const dayOfWeek = new Date().getDay() 
     
-    // 1. PIONERO (Top 10)
     const { count } = await supabase.from('registro_asistencias').select('*', { count: 'exact', head: true }).eq('fecha', todayStr)
     if ((count || 0) <= 10) {
       if (await desbloquearLogro(dni, 8)) nuevos.push(8)
     }
 
-    // 2. MADRUGADOR (Antes 8:30)
     const horaDecimal = horaActual + (minutoActual / 60.0)
     if (horaDecimal <= 8.5) {
       if (await desbloquearLogro(dni, 2)) nuevos.push(2)
     }
 
-    // 3. FIN DE SEMANA
     if (dayOfWeek === 0 || dayOfWeek === 6) {
       if (await desbloquearLogro(dni, 9)) nuevos.push(9)
     }
 
-    // 4. RELOJ SUIZO (5 puntuales seguidos)
     const { data: ultimos } = await supabase.from('registro_asistencias')
       .select('estado_ingreso').eq('dni', dni).order('fecha', { ascending: false }).limit(5)
     
@@ -132,12 +129,15 @@ export default function EscanerIOS() {
   const [mostrarLogros, setMostrarLogros] = useState(false)
   const [achievementToAnimate, setAchievementToAnimate] = useState<LogroItem | null>(null)
 
-  // Estados Notas
+  // Estados Notas y Obra
   const [mostrarDialogoNota, setMostrarDialogoNota] = useState(false)
   const [notaTexto, setNotaTexto] = useState('')
   const [guardandoNota, setGuardandoNota] = useState(false)
   const [isRemoteExit, setIsRemoteExit] = useState(false)
   const [currentLatLon, setCurrentLatLon] = useState('')
+
+  // Estado Modal Ingreso Obra
+  const [mostrarModalIngresoObra, setMostrarModalIngresoObra] = useState(false)
   
   // Foto
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false)
@@ -148,35 +148,44 @@ export default function EscanerIOS() {
     const cargarDatos = async () => {
       const dni = localStorage.getItem('RUAG_DNI')
       const nombres = localStorage.getItem('RUAG_NOMBRE')
-      const area = localStorage.getItem('RUAG_AREA')
-      const foto = localStorage.getItem('RUAG_FOTO')
 
       if (!dni || !nombres) {
         router.push('/setup')
         return
       }
 
-      setPerfil({ dni, nombres, area: area || '', foto_url: foto || '' })
+      // Recuperar resto de datos desde Supabase si faltan en local
+      let perfilCargado: Perfil | null = null
+      
+      const area = localStorage.getItem('RUAG_AREA')
+      const foto = localStorage.getItem('RUAG_FOTO')
 
-      try {
-        const hoyStr = format(new Date(), 'yyyy-MM-dd')
-        
-        // Cargar Asistencia
-        const { data: astData } = await supabase.from('registro_asistencias')
-          .select('id, hora_ingreso, estado_ingreso, hora_salida')
-          .eq('dni', dni).eq('fecha', hoyStr).order('hora_ingreso', { ascending: false }).limit(1).single()
-
-        if (astData) setAsistenciaHoy(astData as Asistencia)
-
-        // Cargar Logros
-        const { data: logData } = await supabase.from('logros_usuarios').select('logro_id').eq('dni', dni)
-        if (logData) setUnlockedLogros(logData.map(l => l.logro_id))
-
-      } catch (e) {
-        console.error("Error carga:", e)
-      } finally {
-        setIsLoading(false)
+      if(!area || !foto) {
+        const { data } = await supabase.from('fotocheck_perfiles').select('*').eq('dni', dni).single()
+        if(data) {
+           localStorage.setItem('RUAG_AREA', data.area)
+           localStorage.setItem('RUAG_FOTO', data.foto_url)
+           perfilCargado = { dni: data.dni, nombres: data.nombres_completos, area: data.area, foto_url: data.foto_url }
+        }
+      } else {
+        perfilCargado = { dni, nombres, area, foto_url: foto }
       }
+
+      if(perfilCargado) {
+        setPerfil(perfilCargado)
+        try {
+          const hoyStr = format(new Date(), 'yyyy-MM-dd')
+          const { data: astData } = await supabase.from('registro_asistencias')
+            .select('id, hora_ingreso, estado_ingreso, hora_salida, notas')
+            .eq('dni', perfilCargado.dni).eq('fecha', hoyStr).order('hora_ingreso', { ascending: false }).limit(1).single()
+
+          if (astData) setAsistenciaHoy(astData as Asistencia)
+
+          const { data: logData } = await supabase.from('logros_usuarios').select('logro_id').eq('dni', perfilCargado.dni)
+          if (logData) setUnlockedLogros(logData.map(l => l.logro_id))
+        } catch (e) { console.error("Error carga:", e) } 
+      }
+      setIsLoading(false)
     }
     cargarDatos()
   }, [router])
@@ -228,7 +237,6 @@ export default function EscanerIOS() {
 
       setAsistenciaHoy(data as Asistencia)
       
-      // Evaluar Logros
       const nuevosLogros = await evaluarLogrosDeIngreso(perfil.dni, horaActual, minutoActual)
       
       mostrarExito("¡INGRESO REGISTRADO!\nGPS Verificado")
@@ -241,12 +249,73 @@ export default function EscanerIOS() {
       }
 
     } catch (error: any) {
-       // ... manejo de errores igual
        const errorStr = error.message || ''
        if (error.code === 1) mostrarError("Enciende el GPS de tu celular para poder registrar tu asistencia.")
        else if (errorStr.includes('duplicate key') || errorStr.includes('unique constraint')) {
            mostrarExito("¡INGRESO REGISTRADO!\nGPS Verificado")
        } else mostrarError(`Error al registrar: ${error.message}`)
+    }
+  }
+
+  // --- INGRESO EN OBRA (BOTÓN MANUAL) ---
+  const handleIngresoObra = async () => {
+    if (notaTexto.trim() === '') {
+      alert("Debes ingresar el nombre de la obra")
+      return
+    }
+    if (!perfil) return
+
+    setGuardandoNota(true)
+    try {
+      const position = await obtenerUbicacion()
+      const lat = position.coords.latitude
+      const lon = position.coords.longitude
+      const distancia = calcularDistancia(lat, lon, OBRA_LAT, OBRA_LON)
+
+      if (distancia <= RADIO_PERMITIDO_METROS) {
+        alert("Estás en la oficina principal. Por favor escanea el código QR.")
+        setGuardandoNota(false)
+        return
+      }
+
+      const horaActual = new Date().getHours()
+      const minutoActual = new Date().getMinutes()
+      const isPuntual = horaActual < 9 || (horaActual === 9 && minutoActual <= 5)
+      const estado = isPuntual ? 'PUNTUAL' : 'TARDANZA'
+      const hoyStr = format(new Date(), 'yyyy-MM-dd')
+      
+      const notaConGps = `Ingreso en: ${notaTexto.trim()} [GPS: ${lat}, ${lon}]`
+
+      const { data, error } = await supabase.from('registro_asistencias').insert({
+        dni: perfil.dni, nombres_completos: perfil.nombres, area: perfil.area,
+        foto_url: perfil.foto_url, estado_ingreso: estado, fecha: hoyStr, notas: notaConGps 
+      }).select().single()
+
+      if (error) throw error
+
+      setAsistenciaHoy(data as Asistencia)
+      setMostrarModalIngresoObra(false)
+      setNotaTexto('')
+      
+      const nuevosLogros = await evaluarLogrosDeIngreso(perfil.dni, horaActual, minutoActual)
+      
+      mostrarExito("¡INGRESO EN OBRA REGISTRADO!")
+      
+      if (nuevosLogros.length > 0) {
+        setTimeout(() => {
+          const logroObj = TODOS_LOS_LOGROS.find(l => l.id === nuevosLogros[0])
+          if (logroObj) setAchievementToAnimate(logroObj)
+        }, 2500)
+      }
+    } catch (error: any) {
+       if (error.code === 1) alert("Enciende tu GPS para marcar entrada.")
+       else if (error.message.includes('duplicate')) {
+           mostrarExito("¡INGRESO REGISTRADO PREVIAMENTE!")
+           setMostrarModalIngresoObra(false)
+       }
+       else alert(`Error: ${error.message}`)
+    } finally {
+      setGuardandoNota(false)
     }
   }
 
@@ -295,16 +364,20 @@ export default function EscanerIOS() {
     setGuardandoNota(true)
     try {
       if (isRemoteExit) {
-        const notaConGps = `${notaTexto.trim()} [GPS: ${currentLatLon}]`
+        const notaNueva = `${notaTexto.trim()} [GPS: ${currentLatLon}]`
+        const notaFinal = asistenciaHoy.notas ? `${asistenciaHoy.notas}\n${notaNueva}` : notaNueva
         const horaSalidaISO = new Date().toISOString()
         
-        await supabase.from('registro_asistencias').update({ notas: notaConGps, hora_salida: horaSalidaISO }).eq('id', asistenciaHoy.id)
+        await supabase.from('registro_asistencias').update({ notas: notaFinal, hora_salida: horaSalidaISO }).eq('id', asistenciaHoy.id)
         
-        setAsistenciaHoy({ ...asistenciaHoy, hora_salida: horaSalidaISO })
+        setAsistenciaHoy({ ...asistenciaHoy, hora_salida: horaSalidaISO, notas: notaFinal })
         alert("¡Salida remota registrada exitosamente!")
         setMostrarDialogoNota(false)
       } else {
-        await supabase.from('registro_asistencias').update({ notas: notaTexto }).eq('id', asistenciaHoy.id)
+        const notaFinal = asistenciaHoy.notas ? `${asistenciaHoy.notas}\n${notaTexto}` : notaTexto
+        await supabase.from('registro_asistencias').update({ notas: notaFinal }).eq('id', asistenciaHoy.id)
+        
+        setAsistenciaHoy({ ...asistenciaHoy, notas: notaFinal })
         alert("¡Motivo guardado correctamente!")
         setMostrarDialogoNota(false)
         setNotaTexto('')
@@ -389,11 +462,9 @@ export default function EscanerIOS() {
         <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageChange} className="hidden" />
 
         <div className="w-full max-w-sm mb-10 relative">
-          {/* Brillo Neon Posterior */}
           <div className={`absolute -inset-1 bg-gradient-to-tr ${gradientFrom} via-transparent ${gradientTo} rounded-[26px] blur-xl opacity-70 animate-pulse`} />
           <div className={`absolute -inset-0.5 bg-gradient-to-tr ${gradientFrom} ${gradientTo} rounded-[24px] opacity-100`} />
           
-          {/* Tarjeta Negra Principal */}
           <div className="relative bg-[#050505] rounded-[22px] shadow-2xl p-8 flex flex-col items-center z-10">
             <div className="relative mb-6 mt-2">
               <div className={`w-32 h-32 rounded-full border-[3px] ${statusBorderColor} p-1 relative overflow-hidden`}>
@@ -438,8 +509,8 @@ export default function EscanerIOS() {
         ) : (
           <div className="w-full max-w-sm flex flex-col gap-3">
             <button
-              onClick={() => { setIsRemoteExit(false); setMostrarDialogoNota(true); }}
-              className="w-full py-4 border border-slate-800 rounded-[16px] flex items-center justify-center text-slate-400 font-semibold"
+              onClick={() => { setIsRemoteExit(false); setNotaTexto(''); setMostrarDialogoNota(true); }}
+              className="w-full py-4 border border-slate-800 rounded-[16px] flex items-center justify-center text-slate-400 font-semibold hover:bg-slate-900 transition-colors"
             >
               <Edit3 size={20} className="mr-2" /> Añadir motivo de salida (Opcional)
             </button>
@@ -564,7 +635,7 @@ export default function EscanerIOS() {
   }
 
   // ============================================================================================
-  // VISTA 1 (UI ESCÁNER) REUTILIZADO
+  // VISTA 1 (UI ESCÁNER) CON BOTÓN DE INGRESO EN OBRA
   // ============================================================================================
   return (
     <div className="min-h-screen bg-slate-950 flex flex-col relative overflow-hidden">
@@ -574,14 +645,53 @@ export default function EscanerIOS() {
         <p className="text-xs text-emerald-400 mt-1">Se verificará tu GPS</p>
       </div>
 
+      {/* BOTÓN HISTORIAL */}
+      <button className="absolute top-6 right-6 text-white bg-slate-800/80 p-3 rounded-full hover:bg-slate-700 transition z-40 backdrop-blur-md">
+        <History size={24} />
+      </button>
+
+      {/* MODAL MANUAL INGRESO OBRA */}
+      {mostrarModalIngresoObra && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-sm bg-gradient-to-br from-white to-slate-50 border border-slate-200 rounded-2xl p-5 shadow-2xl relative">
+            <h2 className="text-center text-xl font-bold mb-4 text-blue-600">
+              Ingreso desde Obra
+            </h2>
+            <textarea 
+              className="w-full bg-slate-50/80 text-slate-700 h-32 placeholder:text-slate-400 border border-blue-200 resize-none outline-none rounded-xl p-4 duration-300 focus:ring-2 focus:ring-blue-100 focus:border-blue-500 focus:shadow-inner" 
+              placeholder="Obligatorio: Escribe el nombre de la obra..."
+              value={notaTexto}
+              onChange={(e) => setNotaTexto(e.target.value)}
+            />
+            <div className="grid grid-cols-2 gap-3 mt-4">
+              <button onClick={() => {setMostrarModalIngresoObra(false); setNotaTexto('')}} className="w-full py-3 rounded-xl font-semibold text-slate-500 hover:bg-slate-100 transition">
+                Cancelar
+              </button>
+              <button 
+                onClick={handleIngresoObra}
+                disabled={guardandoNota}
+                className="w-full flex items-center justify-center gap-2 rounded-xl py-3 bg-slate-100 border border-slate-200 text-slate-700 font-bold hover:bg-slate-200 active:scale-95 transition-all shadow-sm"
+              >
+                {guardandoNota ? <Loader2 className="animate-spin" size={20}/> : (
+                  <>
+                    <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5 stroke-slate-700"><path d="M7.4 6.3L15.9 3.5C19.7 2.2 21.8 4.3 20.5 8.1L17.7 16.6C15.8 22.3 12.7 22.3 10.8 16.6L9.9 14.1L7.4 13.2C1.7 11.3 1.7 8.2 7.4 6.3Z" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /><path d="M10.1 13.7L13.7 10.1" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                    Enviar
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="flex-1 relative bg-black flex items-center justify-center">
-        {estadoEscaner === 'ESCANEO' && (
+        {estadoEscaner === 'ESCANEO' && !mostrarModalIngresoObra && (
           <div className="absolute inset-0 z-10 opacity-80">
             <Scanner onScan={(result) => { if (result && result.length > 0) procesarQR(result[0].rawValue) }} components={{ finder: false }} />
           </div>
         )}
 
-        {estadoEscaner === 'ESCANEO' && (
+        {estadoEscaner === 'ESCANEO' && !mostrarModalIngresoObra && (
           <div className="z-20 w-64 h-64 border-4 border-blue-400 rounded-3xl relative">
             <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-blue-400 to-transparent shadow-[0_0_15px_#60A5FA] animate-[scan_2s_linear_infinite_alternate]" />
           </div>
@@ -609,6 +719,19 @@ export default function EscanerIOS() {
           </div>
         )}
       </div>
+
+      {/* BOTÓN DE INGRESO EN OBRA (EN LA PARTE INFERIOR) */}
+      {estadoEscaner === 'ESCANEO' && !mostrarModalIngresoObra && (
+        <div className="absolute bottom-10 left-0 right-0 px-6 z-20">
+          <button 
+            onClick={() => { setNotaTexto(''); setMostrarModalIngresoObra(true); }}
+            className="w-full flex items-center justify-center py-4 bg-slate-950/80 backdrop-blur-md border border-slate-800 rounded-2xl text-white font-semibold transition hover:bg-slate-900"
+          >
+            <Map className="mr-2 text-blue-400" size={20} />
+            ¿Fuiste directo a Obra?
+          </button>
+        </div>
+      )}
       
       <style dangerouslySetInnerHTML={{__html: `@keyframes scan { 0% { top: 0%; } 100% { top: 100%; } } @keyframes pop { 0% { transform: scale(0.8); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }`}} />
     </div>
