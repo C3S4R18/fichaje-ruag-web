@@ -411,13 +411,22 @@ export default function EscanerIOS() {
       localStorage.setItem('RUAG_FOTO', nuevaFotoUrl)
       setPerfil({ ...perfil, foto_url: nuevaFotoUrl })
 
-      // LOGRO CAMARA
-      if (await desbloquearLogro(perfil.dni, 3)) {
+      // --- LOGRO CÁMARA CORREGIDO ---
+      const seDesbloqueo = await desbloquearLogro(perfil.dni, 3)
+      
+      alert("¡Foto actualizada!") // Mostramos el mensaje primero
+
+      if (seDesbloqueo) {
+        // 1. Lo agregamos a la lista visual para quitar el candado
+        setUnlockedLogros(prev => [...prev, 3]) 
+        
+        // 2. Disparamos la animación épica a pantalla completa
         const logroObj = TODOS_LOS_LOGROS.find(l => l.id === 3)
-        if (logroObj) setAchievementToAnimate(logroObj)
+        if (logroObj) {
+          setTimeout(() => setAchievementToAnimate(logroObj), 500)
+        }
       }
 
-      alert("¡Foto actualizada!")
     } catch (error: any) {
       alert(`Error: ${error.message}`)
     } finally {
