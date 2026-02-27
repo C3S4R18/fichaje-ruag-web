@@ -4,14 +4,14 @@ import * as XLSX from 'xlsx-js-style';
 import { useState, useEffect, useMemo } from 'react'
 import { supabase } from '@/utils/supabase/client'
 import { motion, AnimatePresence, Variants } from 'framer-motion'
-import { format, isToday, subDays, addDays } from 'date-fns'
+import { format, isToday, subDays, addDays, parseISO } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { 
   CalendarDays, ChevronLeft, ChevronRight, 
   CheckCircle2, AlertCircle, LogOut, Activity, UserCircle2,
   Unlock, MessageSquareText, X, UserPlus, Loader2, Search, Filter,
   FileSpreadsheet, SlidersHorizontal, Users, ShieldCheck, AlignLeft,
-  MapPin // <-- Nuevo icono importado para obras
+  MapPin, Map, Download // <-- Nuevos iconos
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 
@@ -182,14 +182,21 @@ export default function DualDashboardAsistencias() {
   const [mounted, setMounted] = useState(false)
   const [modoEdicion, setModoEdicion] = useState(false)
 
-  // --- NUEVO TIPO PARA INCLUIR SI ES OBRA O NO ---
-  const [notaSeleccionada, setNotaSeleccionada] = useState<{nombre: string, nota: string, hora: string, esObra: boolean} | null>(null)
+  // Modales
+  const [notaSeleccionada, setNotaSeleccionada] = useState<{nombre: string, nota: string, hora: string, esObra: boolean, coordenadas?: string} | null>(null)
   const [mostrarModalManual, setMostrarModalManual] = useState(false)
+  const [mostrarModalExportar, setMostrarModalExportar] = useState(false)
 
-  // --- ESTADOS PARA FILTROS ---
+  // Filtros
   const [busqueda, setBusqueda] = useState('')
   const [filtroArea, setFiltroArea] = useState('TODAS')
   const [filtroEstado, setFiltroEstado] = useState('TODOS')
+
+  // Exportar Fechas
+  const [exportarDesde, setExportarDesde] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const [exportarHasta, setExportarHasta] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const [exportando, setExportando] = useState(false)
+  const [tipoExportacion, setTipoExportacion] = useState<'dia'|'rango'>('dia')
 
   // Cargar preferencia de tema 
   useEffect(() => {
@@ -300,89 +307,131 @@ export default function DualDashboardAsistencias() {
   }, [asistencias, busqueda, filtroArea, filtroEstado]);
 
 
-  const descargarReporteExcel = async () => {
+  // --- NUEVA LÓGICA DE EXPORTACIÓN (DIA O RANGO) ---
+  const procesarYDescargarExcel = (data: any[], nombreArchivo: string) => {
+    if (data.length === 0) {
+      toast.error("No hay registros en estas fechas para exportar");
+      return false;
+    }
+
+    const headerStyle = {
+      font: { bold: true, color: { rgb: "FFFFFF" }, sz: 12 },
+      fill: { fgColor: { rgb: "1E293B" } }, 
+      alignment: { horizontal: "center", vertical: "center" },
+      border: { bottom: { style: "medium", color: { rgb: "000000" } } }
+    };
+
+    const stylePuntual = { font: { color: { rgb: "059669" }, bold: true }, alignment: { horizontal: "center" } };
+    const styleTardanza = { font: { color: { rgb: "DC2626" }, bold: true }, alignment: { horizontal: "center" } };
+    const styleCenter = { alignment: { horizontal: "center" } };
+
+    const ws_data: any[][] = [
+      ["FECHA", "DNI", "APELLIDOS Y NOMBRES", "ÁREA", "INGRESO", "ESTADO", "SALIDA", "MOTIVO / NOTA"]
+    ];
+
+    const ordenarApellidosNombres = (nombreCompleto: string) => {
+      if (!nombreCompleto) return '-';
+      const partes = nombreCompleto.trim().split(' ');
+      if (partes.length >= 3) {
+        const apellidos = partes.slice(-2).join(' ');
+        const nombres = partes.slice(0, -2).join(' ');
+        return `${apellidos}, ${nombres}`;
+      } else if (partes.length === 2) {
+        return `${partes[1]}, ${partes[0]}`;
+      }
+      return nombreCompleto;
+    };
+
+    data.forEach((registro) => {
+      // Limpiar nota GPS para el excel si es necesario, o dejarla entera
+      ws_data.push([
+        registro.fecha,
+        registro.dni,
+        ordenarApellidosNombres(registro.nombres_completos),
+        registro.area,
+        new Date(registro.hora_ingreso).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute:'2-digit' }),
+        registro.estado_ingreso,
+        registro.hora_salida ? new Date(registro.hora_salida).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute:'2-digit' }) : 'Sin marcar',
+        registro.notas || '-'
+      ]);
+    });
+
+    const ws = XLSX.utils.aoa_to_sheet(ws_data);
+
+    for (let R = 0; R < ws_data.length; R++) {
+      for (let C = 0; C < 8; C++) {
+        const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
+        if (!ws[cellAddress]) continue;
+        if (R === 0) ws[cellAddress].s = headerStyle;
+        else {
+          if (C === 5) ws[cellAddress].s = ws[cellAddress].v === 'PUNTUAL' ? stylePuntual : styleTardanza;
+          else if ([0, 1, 3, 4, 6].includes(C)) ws[cellAddress].s = styleCenter;
+        }
+      }
+    }
+
+    ws['!cols'] = [
+      { wpx: 80 }, { wpx: 80 }, { wpx: 240 }, { wpx: 130 }, 
+      { wpx: 80 }, { wpx: 90 }, { wpx: 80 }, { wpx: 280 }
+    ];
+
+    const libro = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(libro, ws, "Asistencias");
+
+    XLSX.writeFile(libro, `${nombreArchivo}.xlsx`);
+    return true;
+  }
+
+  const ejecutarExportacion = async () => {
     try {
-      const fechaString = format(fechaActual, 'yyyy-MM-dd')
-      toast.info(`Generando reporte Excel...`);
-      
-      const dataParaExcel = asistenciasFiltradas;
-
-      if (dataParaExcel.length === 0) {
-        toast.error("No hay datos visibles para exportar");
-        return;
-      }
-
-      const headerStyle = {
-        font: { bold: true, color: { rgb: "FFFFFF" }, sz: 12 },
-        fill: { fgColor: { rgb: "1E293B" } }, 
-        alignment: { horizontal: "center", vertical: "center" },
-        border: { bottom: { style: "medium", color: { rgb: "000000" } } }
-      };
-
-      const stylePuntual = { font: { color: { rgb: "059669" }, bold: true }, alignment: { horizontal: "center" } };
-      const styleTardanza = { font: { color: { rgb: "DC2626" }, bold: true }, alignment: { horizontal: "center" } };
-      const styleCenter = { alignment: { horizontal: "center" } };
-
-      const ws_data: any[][] = [
-        ["FECHA", "DNI", "APELLIDOS Y NOMBRES", "ÁREA", "INGRESO", "ESTADO", "SALIDA", "MOTIVO / NOTA"]
-      ];
-
-      const ordenarApellidosNombres = (nombreCompleto: string) => {
-        if (!nombreCompleto) return '-';
-        const partes = nombreCompleto.trim().split(' ');
-        if (partes.length >= 3) {
-          const apellidos = partes.slice(-2).join(' ');
-          const nombres = partes.slice(0, -2).join(' ');
-          return `${apellidos}, ${nombres}`;
-        } else if (partes.length === 2) {
-          return `${partes[1]}, ${partes[0]}`;
+      if (tipoExportacion === 'dia') {
+        const fechaString = format(fechaActual, 'yyyy-MM-dd')
+        toast.info(`Generando reporte del día...`);
+        const exito = procesarYDescargarExcel(asistenciasFiltradas, `Reporte_RUAG_${fechaString}`);
+        if (exito) {
+          toast.success(`¡Reporte descargado!`);
+          setMostrarModalExportar(false);
         }
-        return nombreCompleto;
-      };
+      } 
+      else {
+        // Exportación por rango
+        if (!exportarDesde || !exportarHasta) {
+          toast.error("Selecciona ambas fechas"); return;
+        }
+        if (new Date(exportarDesde) > new Date(exportarHasta)) {
+          toast.error("La fecha 'Desde' no puede ser mayor que 'Hasta'"); return;
+        }
 
-      dataParaExcel.forEach((registro) => {
-        ws_data.push([
-          registro.fecha,
-          registro.dni,
-          ordenarApellidosNombres(registro.nombres_completos),
-          registro.area,
-          new Date(registro.hora_ingreso).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute:'2-digit' }),
-          registro.estado_ingreso,
-          registro.hora_salida ? new Date(registro.hora_salida).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute:'2-digit' }) : 'Sin marcar',
-          registro.notas || '-'
-        ]);
-      });
+        setExportando(true);
+        toast.loading("Descargando datos de la nube...", { id: 'descargando' });
 
-      const ws = XLSX.utils.aoa_to_sheet(ws_data);
+        const { data, error } = await supabase
+          .from('registro_asistencias')
+          .select('*')
+          .gte('fecha', exportarDesde)
+          .lte('fecha', exportarHasta)
+          .order('fecha', { ascending: true })
+          .order('hora_ingreso', { ascending: true });
 
-      for (let R = 0; R < ws_data.length; R++) {
-        for (let C = 0; C < 8; C++) {
-          const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
-          if (!ws[cellAddress]) continue;
-          if (R === 0) ws[cellAddress].s = headerStyle;
-          else {
-            if (C === 5) ws[cellAddress].s = ws[cellAddress].v === 'PUNTUAL' ? stylePuntual : styleTardanza;
-            else if ([0, 1, 3, 4, 6].includes(C)) ws[cellAddress].s = styleCenter;
-          }
+        if (error) throw error;
+
+        toast.dismiss('descargando');
+        const exito = procesarYDescargarExcel(data, `Reporte_RUAG_RANGO_${exportarDesde}_AL_${exportarHasta}`);
+        
+        if (exito) {
+          toast.success(`¡Reporte múltiple descargado! (${data.length} registros)`);
+          setMostrarModalExportar(false);
         }
       }
-
-      ws['!cols'] = [
-        { wpx: 80 }, { wpx: 80 }, { wpx: 240 }, { wpx: 130 }, 
-        { wpx: 80 }, { wpx: 90 }, { wpx: 80 }, { wpx: 280 }
-      ];
-
-      const libro = XLSX.utils.book_new();
-      XLSX.utils.book_append_sheet(libro, ws, "Asistencias");
-
-      XLSX.writeFile(libro, `Reporte_RUAG_${fechaString}_filtrado.xlsx`);
-      toast.success(`¡Reporte descargado!`);
-
     } catch (error) {
       console.error("Error exportando a Excel:", error);
+      toast.dismiss('descargando');
       toast.error("Hubo un error al generar el Excel.");
+    } finally {
+      setExportando(false);
     }
   };
+
 
   const actualizarHora = async (id: string, campo: 'hora_ingreso' | 'hora_salida', nuevaHora: string, fechaBase: string) => {
     if (!nuevaHora) return
@@ -535,7 +584,8 @@ export default function DualDashboardAsistencias() {
 
           {/* Tarjeta de Acciones Rápida */}
           <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3 transition-colors duration-500">
-            <button onClick={descargarReporteExcel} className="w-full flex items-center justify-center gap-2 p-3 rounded-xl bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20 text-sm font-bold transition-all active:scale-95">
+            {/* BOTÓN ABRE MODAL DE EXPORTACIÓN */}
+            <button onClick={() => setMostrarModalExportar(true)} className="w-full flex items-center justify-center gap-2 p-3 rounded-xl bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20 text-sm font-bold transition-all active:scale-95">
               <FileSpreadsheet size={18} /> Exportar Reporte Excel
             </button>
             
@@ -618,6 +668,53 @@ export default function DualDashboardAsistencias() {
       </main>
 
       {/* MODALES SUPERPUESTOS */}
+
+      {/* MODAL EXPORTAR EXCEL */}
+      {mostrarModalExportar && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-700 relative animate-in zoom-in-95 duration-200">
+            <div className="bg-emerald-500 h-1.5 w-full" />
+            <div className="p-6 relative">
+              <button onClick={() => setMostrarModalExportar(false)} className="absolute top-4 right-4 p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"><X size={20} /></button>
+              <div className="flex items-center gap-3 mb-6 text-emerald-600 dark:text-emerald-500">
+                <div className="p-2.5 bg-emerald-100 dark:bg-emerald-900/30 rounded-xl"><FileSpreadsheet size={20} /></div>
+                <h3 className="text-lg font-black text-slate-900 dark:text-white">Exportar a Excel</h3>
+              </div>
+              
+              <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl mb-6">
+                <button onClick={() => setTipoExportacion('dia')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${tipoExportacion === 'dia' ? 'bg-white dark:bg-slate-700 text-emerald-600 shadow-sm' : 'text-slate-500'}`}>
+                  Día Actual
+                </button>
+                <button onClick={() => setTipoExportacion('rango')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${tipoExportacion === 'rango' ? 'bg-white dark:bg-slate-700 text-emerald-600 shadow-sm' : 'text-slate-500'}`}>
+                  Por Rango
+                </button>
+              </div>
+
+              {tipoExportacion === 'dia' ? (
+                <div className="bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 rounded-xl p-4 text-center">
+                  <p className="text-slate-600 dark:text-slate-400 text-sm">Se exportarán los <strong className="text-emerald-600">{asistenciasFiltradas.length}</strong> registros filtrados del día de hoy.</p>
+                </div>
+              ) : (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Desde</label>
+                    <input type="date" value={exportarDesde} onChange={e => setExportarDesde(e.target.value)} className="w-full mt-1 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 px-4 py-2.5 rounded-xl outline-none focus:border-emerald-500 text-sm" />
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Hasta</label>
+                    <input type="date" value={exportarHasta} onChange={e => setExportarHasta(e.target.value)} className="w-full mt-1 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 px-4 py-2.5 rounded-xl outline-none focus:border-emerald-500 text-sm" />
+                  </div>
+                </div>
+              )}
+
+              <button onClick={ejecutarExportacion} disabled={exportando} className="w-full mt-8 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3.5 rounded-xl flex justify-center items-center transition-transform active:scale-95 shadow-md disabled:opacity-70">
+                {exportando ? <Loader2 className="animate-spin" size={20}/> : <><Download size={18} className="mr-2"/> Descargar Excel</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {mostrarModalManual && (
         <ModalRegistroManual onClose={() => setMostrarModalManual(false)} fechaBase={format(fechaActual, 'yyyy-MM-dd')} onSuccess={(nuevoRegistro) => { if (isToday(fechaActual) || nuevoRegistro.fecha === format(fechaActual, 'yyyy-MM-dd')) { setAsistencias(prev => [nuevoRegistro, ...prev]) }; setMostrarModalManual(false) }} />
       )}
@@ -625,7 +722,6 @@ export default function DualDashboardAsistencias() {
       {notaSeleccionada && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-700 animate-in zoom-in-95 duration-200 transition-colors duration-500">
-            {/* Color de barra superior dependiendo si es obra o nota normal */}
             <div className={`${notaSeleccionada.esObra ? 'bg-red-500' : 'bg-amber-500'} h-1.5 w-full`} />
             <div className="p-6 relative">
               <button onClick={() => setNotaSeleccionada(null)} className="absolute top-4 right-4 p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"><X size={20} /></button>
@@ -642,8 +738,22 @@ export default function DualDashboardAsistencias() {
               <div className="bg-slate-50 dark:bg-slate-950/50 p-4 rounded-xl border border-slate-100 dark:border-slate-800 text-slate-700 dark:text-slate-300 min-h-[100px] whitespace-pre-wrap text-sm leading-relaxed transition-colors duration-500">
                 {notaSeleccionada.nota}
               </div>
+
+              {/* BOTÓN VER EN MAPA SI ES OBRA */}
+              {notaSeleccionada.esObra && notaSeleccionada.coordenadas && (
+                <a 
+                  href={`https://www.google.com/maps/search/?api=1&query=${notaSeleccionada.coordenadas}`} 
+                  target="_blank" 
+                  rel="noreferrer"
+                  className="w-full mt-4 flex items-center justify-center gap-2 bg-red-50 hover:bg-red-100 dark:bg-red-500/10 dark:hover:bg-red-500/20 text-red-600 border border-red-200 dark:border-red-500/30 font-bold py-3 rounded-xl transition-all"
+                >
+                  <Map size={18} /> Ver ubicación en Maps
+                </a>
+              )}
               
-              <button onClick={() => setNotaSeleccionada(null)} className="w-full mt-6 bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold py-3 rounded-xl transition-transform active:scale-95">Cerrar</button>
+              <button onClick={() => setNotaSeleccionada(null)} className={`w-full mt-4 ${notaSeleccionada.esObra ? 'bg-slate-900 dark:bg-white text-white dark:text-slate-900' : 'bg-slate-900 dark:bg-white text-white dark:text-slate-900'} font-bold py-3 rounded-xl transition-transform active:scale-95`}>
+                Cerrar
+              </button>
             </div>
           </div>
         </div>
@@ -746,8 +856,8 @@ function ModalRegistroManual({ onClose, fechaBase, onSuccess }: { onClose: () =>
   )
 }
 
-// --- FILA DE TABLA (INTELIGENTE: DETECTA OBRAS) ---
-function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota }: { data: any, index: number, modoEdicion: boolean, onActualizar: Function, onAbrirNota: (nota: {nombre: string, nota: string, hora: string, esObra: boolean}) => void }) {
+// --- FILA DE TABLA (INTELIGENTE: EXTRAE COORDENADAS PARA EL MAPA) ---
+function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota }: { data: any, index: number, modoEdicion: boolean, onActualizar: Function, onAbrirNota: (nota: {nombre: string, nota: string, hora: string, esObra: boolean, coordenadas?: string}) => void }) {
   const isPuntual = data.estado_ingreso === 'PUNTUAL'
   const justAdded = index === 0 && isToday(new Date(data.hora_ingreso))
   
@@ -760,9 +870,21 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota }: {
     return (words[0][0] + words[1][0]).toUpperCase();
   };
 
-  // Lógica para detectar si la nota es de obra (tiene el tag [GPS:)
+  // Lógica para extraer la coordenada secreta de la nota
   const tieneNota = !!data.notas;
   const esDeObra = tieneNota && data.notas.includes('[GPS:');
+  
+  let textoLimpio = data.notas || '';
+  let coordenadas = '';
+
+  if (esDeObra) {
+    const startIdx = data.notas.indexOf('[GPS:');
+    const endIdx = data.notas.indexOf(']', startIdx);
+    if (startIdx !== -1 && endIdx !== -1) {
+      coordenadas = data.notas.substring(startIdx + 5, endIdx).trim(); // Extrae "-12.11, -77.02"
+      textoLimpio = data.notas.substring(0, startIdx).trim(); // Deja solo el texto "En la obra XYZ"
+    }
+  }
 
   const rowVariants: Variants = {
     hidden: { opacity: 0, x: -20 },
@@ -781,7 +903,6 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota }: {
         ${justAdded ? 'border-blue-400 ring-1 ring-blue-100 shadow-sm' : 'border-slate-200 dark:border-slate-800'}`}
     >
       
-      {/* 1. Avatar y Nombre */}
       <div className="flex items-center gap-5 flex-1 min-w-0 pr-4">
         <div className="relative shrink-0">
           <div className="w-14 h-14 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center">
@@ -806,10 +927,7 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota }: {
         </div>
       </div>
 
-      {/* 2. Horarios y Acciones */}
       <div className="flex items-center gap-8 shrink-0">
-        
-        {/* INGRESO */}
         <div className="flex flex-col items-end">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Ingreso</span>
           {modoEdicion ? (
@@ -823,7 +941,6 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota }: {
         
         <div className="w-px h-8 bg-slate-200 dark:bg-slate-700 hidden sm:block"></div>
         
-        {/* SALIDA */}
         <div className="flex flex-col items-end min-w-[70px]">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Salida</span>
           {modoEdicion ? (
@@ -841,15 +958,15 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota }: {
           )}
         </div>
 
-        {/* BOTÓN NOTA / OBRA (Inteligente) */}
         <div className="w-10 flex justify-center">
           {tieneNota ? (
             <button 
               onClick={() => onAbrirNota({ 
                 nombre: data.nombres_completos, 
-                nota: data.notas, 
+                nota: textoLimpio, // Se muestra sin las coordenadas raras
                 hora: data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm a') : 'Desconocida',
-                esObra: esDeObra 
+                esObra: esDeObra,
+                coordenadas: coordenadas 
               })} 
               className={`p-2 rounded-full border transition-all shadow-sm hover:scale-110 
                 ${esDeObra 
