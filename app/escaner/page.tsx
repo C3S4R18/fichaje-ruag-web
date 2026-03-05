@@ -4,8 +4,8 @@ import { useState, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { Scanner } from '@yudiel/react-qr-scanner'
 import { createClient } from '@supabase/supabase-js'
-import { MapPin, AlertTriangle, CheckCircle, Loader2, User, LogOut, History, Edit2, Edit3, X, Trophy, Lock, Map } from 'lucide-react'
-import { format } from 'date-fns'
+import { MapPin, AlertTriangle, CheckCircle, Loader2, User, LogOut, History, Edit2, Edit3, X, Trophy, Lock, Map, Calendar, ChevronLeft, ChevronRight, CheckCircle2 } from 'lucide-react'
+import { format, differenceInDays, parseISO } from 'date-fns'
 
 // --- INTERFACES TYPESCRIPT ---
 interface Perfil {
@@ -17,6 +17,7 @@ interface Perfil {
 
 interface Asistencia {
   id: string;
+  fecha?: string;
   hora_ingreso: string;
   estado_ingreso: string;
   hora_salida: string | null;
@@ -75,47 +76,115 @@ const obtenerUbicacion = (): Promise<GeolocationPosition> => {
   })
 }
 
-// --- FUNCIÓN EVALUAR LOGROS ---
+// --- FUNCIONES EVALUAR LOGROS ---
+
+const desbloquearLogro = async (dni: string, logroId: number): Promise<boolean> => {
+  try {
+    // Primero verificar si ya lo tiene para no intentar insertar duplicados si la BD tiene constraints
+    const { data: existente } = await supabase.from('logros_usuarios').select('*').eq('dni', dni).eq('logro_id', logroId).single()
+    if (existente) return false // Ya lo tiene, no cuenta como "recién desbloqueado"
+
+    const { error } = await supabase.from('logros_usuarios').insert({ dni, logro_id: logroId })
+    return !error 
+  } catch { return false }
+}
+
 const evaluarLogrosDeIngreso = async (dni: string, horaActual: number, minutoActual: number): Promise<number[]> => {
   const nuevos: number[] = []
   try {
     const todayStr = format(new Date(), 'yyyy-MM-dd')
     const dayOfWeek = new Date().getDay() 
     
+    // Logro 8: Pionero
     const { count } = await supabase.from('registro_asistencias').select('*', { count: 'exact', head: true }).eq('fecha', todayStr)
     if ((count || 0) <= 10) {
       if (await desbloquearLogro(dni, 8)) nuevos.push(8)
     }
 
+    // Logro 2: Madrugador
     const horaDecimal = horaActual + (minutoActual / 60.0)
     if (horaDecimal <= 8.5) {
       if (await desbloquearLogro(dni, 2)) nuevos.push(2)
     }
 
+    // Logro 9: Héroe de Fin de Semana
     if (dayOfWeek === 0 || dayOfWeek === 6) {
       if (await desbloquearLogro(dni, 9)) nuevos.push(9)
     }
 
-    const { data: ultimos } = await supabase.from('registro_asistencias')
-      .select('estado_ingreso').eq('dni', dni).order('fecha', { ascending: false }).limit(5)
+    // Obtener historial reciente para evaluar rachas
+    const { data: historial } = await supabase.from('registro_asistencias')
+      .select('fecha, estado_ingreso').eq('dni', dni).order('fecha', { ascending: false }).limit(100)
     
-    if (ultimos && ultimos.length === 5 && ultimos.every(a => a.estado_ingreso === 'PUNTUAL')) {
-      if (await desbloquearLogro(dni, 1)) nuevos.push(1)
+    if (historial && historial.length > 0) {
+        // Logro 1: Reloj Suizo (5 días puntuales)
+        if (historial.length >= 5 && historial.slice(0, 5).every(a => a.estado_ingreso === 'PUNTUAL')) {
+          if (await desbloquearLogro(dni, 1)) nuevos.push(1)
+        }
+
+        // Logro 4: Imparable (30 días seguidos) - Lógica simplificada: 30 registros en 30 días distintos
+        if (historial.length >= 30) {
+            let rachaConsecutiva = 1;
+            for (let i = 0; i < 29; i++) {
+                const fechaActual = parseISO(historial[i].fecha);
+                const fechaAnterior = parseISO(historial[i+1].fecha);
+                if (differenceInDays(fechaActual, fechaAnterior) === 1) {
+                    rachaConsecutiva++;
+                } else {
+                    break;
+                }
+            }
+            if (rachaConsecutiva >= 30) {
+                if (await desbloquearLogro(dni, 4)) nuevos.push(4)
+            }
+        }
+
+        // Logro 10: Invencible (100 días sin tardanza)
+        if (historial.length === 100 && historial.every(a => a.estado_ingreso === 'PUNTUAL')) {
+             if (await desbloquearLogro(dni, 10)) nuevos.push(10)
+        }
     }
-  } catch (e) { console.error("Error logros:", e) }
+
+  } catch (e) { console.error("Error logros ingreso:", e) }
   return nuevos
 }
 
-const desbloquearLogro = async (dni: string, logroId: number): Promise<boolean> => {
-  try {
-    const { error } = await supabase.from('logros_usuarios').insert({ dni, logro_id: logroId })
-    return !error 
-  } catch { return false }
+const evaluarLogrosDeSalida = async (dni: string): Promise<number[]> => {
+    const nuevos: number[] = []
+    try {
+        const horaActual = new Date().getHours()
+        // Logro 6: Noctámbulo (Después de las 7:00 PM / 19:00)
+        if (horaActual >= 19) {
+            if (await desbloquearLogro(dni, 6)) nuevos.push(6)
+        }
+    } catch (e) { console.error("Error logros salida:", e) }
+    return nuevos;
 }
+
+const evaluarLogrosDeNotas = async (dni: string): Promise<number[]> => {
+    const nuevos: number[] = []
+    try {
+        // Logro 5: Comunicador (3 notas)
+        // Consultar cuántas asistencias tienen la columna 'notas' no nula
+        const { data, error } = await supabase.from('registro_asistencias')
+            .select('id')
+            .eq('dni', dni)
+            .not('notas', 'is', null)
+
+        if (!error && data && data.length >= 3) { // Si ya hay 3 (incluyendo la actual que se acaba de guardar)
+             if (await desbloquearLogro(dni, 5)) nuevos.push(5)
+        }
+    } catch(e) { console.error("Error logros notas:", e)}
+    return nuevos;
+}
+
 
 export default function EscanerIOS() {
   const router = useRouter()
   
+  // Tiempo de inicio para Logro 7 (Flash)
+  const startTimeRef = useRef<number>(Date.now());
+
   // Estados Globales
   const [perfil, setPerfil] = useState<Perfil | null>(null)
   const [asistenciaHoy, setAsistenciaHoy] = useState<Asistencia | null>(null)
@@ -139,9 +208,21 @@ export default function EscanerIOS() {
   // Estado Modal Ingreso Obra
   const [mostrarModalIngresoObra, setMostrarModalIngresoObra] = useState(false)
   
+  // Estado Calendario
+  const [mostrarCalendario, setMostrarCalendario] = useState(false)
+  const [historialMes, setHistorialMes] = useState<Asistencia[]>([])
+  const [targetDate, setTargetDate] = useState(new Date())
+  const [selectedDayInfo, setSelectedDayInfo] = useState<Asistencia | null>(null)
+  const [loadingCalendar, setLoadingCalendar] = useState(false)
+
   // Foto
   const [isUploadingPhoto, setIsUploadingPhoto] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Reiniciar temporizador al montar componente
+  useEffect(() => {
+      startTimeRef.current = Date.now();
+  }, [])
 
   // 1. CARGAR DATOS
   useEffect(() => {
@@ -154,9 +235,7 @@ export default function EscanerIOS() {
         return
       }
 
-      // Recuperar resto de datos desde Supabase si faltan en local
       let perfilCargado: Perfil | null = null
-      
       const area = localStorage.getItem('RUAG_AREA')
       const foto = localStorage.getItem('RUAG_FOTO')
 
@@ -190,10 +269,29 @@ export default function EscanerIOS() {
     cargarDatos()
   }, [router])
 
-  // --- PROCESAR QR ---
+  // --- CARGAR CALENDARIO ---
+  useEffect(() => {
+    if (mostrarCalendario && perfil) {
+      const fetchHistorial = async () => {
+        setLoadingCalendar(true)
+        const { data } = await supabase.from('registro_asistencias')
+          .select('*')
+          .eq('dni', perfil.dni)
+          .order('fecha', { ascending: false })
+        if (data) setHistorialMes(data as Asistencia[])
+        setLoadingCalendar(false)
+      }
+      fetchHistorial()
+    }
+  }, [mostrarCalendario, perfil])
+
+  // --- PROCESAR QR (Oficina) ---
   const procesarQR = async (textoQR: string) => {
     if (estadoEscaner !== 'ESCANEO' || !perfil) return
     
+    const tiempoEscaneo = Date.now();
+    const tiempoTranscurridoSecs = (tiempoEscaneo - startTimeRef.current) / 1000;
+
     if (!textoQR.startsWith("RUAG_INGRESO_")) {
         mostrarError("Código QR no reconocido.")
         return
@@ -236,12 +334,17 @@ export default function EscanerIOS() {
       if (error) throw error
 
       setAsistenciaHoy(data as Asistencia)
-      
       const nuevosLogros = await evaluarLogrosDeIngreso(perfil.dni, horaActual, minutoActual)
       
+      // Logro 7: Flash
+      if (tiempoTranscurridoSecs <= 5) {
+          if (await desbloquearLogro(perfil.dni, 7)) nuevosLogros.push(7);
+      }
+
       mostrarExito("¡INGRESO REGISTRADO!\nGPS Verificado")
       
       if (nuevosLogros.length > 0) {
+        setUnlockedLogros(prev => [...prev, ...nuevosLogros])
         setTimeout(() => {
           const logroObj = TODOS_LOS_LOGROS.find(l => l.id === nuevosLogros[0])
           if (logroObj) setAchievementToAnimate(logroObj)
@@ -257,7 +360,7 @@ export default function EscanerIOS() {
     }
   }
 
-  // --- INGRESO EN OBRA (BOTÓN MANUAL) ---
+  // --- INGRESO EN OBRA (BOTÓN MANUAL) CON NUEVO HORARIO ---
   const handleIngresoObra = async () => {
     if (notaTexto.trim() === '') {
       alert("Debes ingresar el nombre de la obra")
@@ -280,10 +383,12 @@ export default function EscanerIOS() {
 
       const horaActual = new Date().getHours()
       const minutoActual = new Date().getMinutes()
-      const isPuntual = horaActual < 9 || (horaActual === 9 && minutoActual <= 5)
-      const estado = isPuntual ? 'PUNTUAL' : 'TARDANZA'
-      const hoyStr = format(new Date(), 'yyyy-MM-dd')
       
+      // NUEVA LÓGICA: 7:30 AM con tolerancia de 5 min (hasta 7:35 AM)
+      const isPuntual = horaActual < 7 || (horaActual === 7 && minutoActual <= 35)
+      const estado = isPuntual ? 'PUNTUAL' : 'TARDANZA'
+      
+      const hoyStr = format(new Date(), 'yyyy-MM-dd')
       const notaConGps = `Ingreso en: ${notaTexto.trim()} [GPS: ${lat}, ${lon}]`
 
       const { data, error } = await supabase.from('registro_asistencias').insert({
@@ -298,10 +403,10 @@ export default function EscanerIOS() {
       setNotaTexto('')
       
       const nuevosLogros = await evaluarLogrosDeIngreso(perfil.dni, horaActual, minutoActual)
-      
       mostrarExito("¡INGRESO EN OBRA REGISTRADO!")
       
       if (nuevosLogros.length > 0) {
+        setUnlockedLogros(prev => [...prev, ...nuevosLogros])
         setTimeout(() => {
           const logroObj = TODOS_LOS_LOGROS.find(l => l.id === nuevosLogros[0])
           if (logroObj) setAchievementToAnimate(logroObj)
@@ -319,8 +424,9 @@ export default function EscanerIOS() {
     }
   }
 
+  // --- MARCAR SALIDA ---
   const handleMarcarSalidaClick = async () => {
-    if (!asistenciaHoy || isMarkingExit) return
+    if (!asistenciaHoy || isMarkingExit || !perfil) return
     setIsMarkingExit(true)
 
     try {
@@ -330,7 +436,6 @@ export default function EscanerIOS() {
       const distancia = calcularDistancia(lat, lon, OBRA_LAT, OBRA_LON)
 
       if (distancia > RADIO_PERMITIDO_METROS) {
-        // ES SALIDA REMOTA
         setCurrentLatLon(`${lat}, ${lon}`)
         setIsRemoteExit(true)
         setMostrarDialogoNota(true)
@@ -338,13 +443,21 @@ export default function EscanerIOS() {
         return
       }
 
-      // SALIDA NORMAL
       const horaSalidaISO = new Date().toISOString()
       const { error } = await supabase.from('registro_asistencias').update({ hora_salida: horaSalidaISO }).eq('id', asistenciaHoy.id)
       if (error) throw error
 
       setAsistenciaHoy({ ...asistenciaHoy, hora_salida: horaSalidaISO })
+      
+      const nuevosLogros = await evaluarLogrosDeSalida(perfil.dni);
+      
       alert("¡Salida marcada exitosamente!")
+
+      if (nuevosLogros.length > 0) {
+        setUnlockedLogros(prev => [...prev, ...nuevosLogros])
+        const logroObj = TODOS_LOS_LOGROS.find(l => l.id === nuevosLogros[0])
+        if (logroObj) setTimeout(() => setAchievementToAnimate(logroObj), 500)
+      }
 
     } catch (error: any) {
       if (error.code === 1) alert("Enciende tu GPS para marcar salida.")
@@ -354,15 +467,18 @@ export default function EscanerIOS() {
     }
   }
 
+  // --- GUARDAR NOTA ---
   const handleGuardarNota = async () => {
     if (notaTexto.trim() === '') {
       alert(isRemoteExit ? "Debes ingresar tu ubicación." : "El motivo no puede estar vacío")
       return
     }
-    if (!asistenciaHoy) return
+    if (!asistenciaHoy || !perfil) return
 
     setGuardandoNota(true)
     try {
+      let nuevaAsistenciaData = { ...asistenciaHoy }
+
       if (isRemoteExit) {
         const notaNueva = `${notaTexto.trim()} [GPS: ${currentLatLon}]`
         const notaFinal = asistenciaHoy.notas ? `${asistenciaHoy.notas}\n${notaNueva}` : notaNueva
@@ -370,18 +486,38 @@ export default function EscanerIOS() {
         
         await supabase.from('registro_asistencias').update({ notas: notaFinal, hora_salida: horaSalidaISO }).eq('id', asistenciaHoy.id)
         
-        setAsistenciaHoy({ ...asistenciaHoy, hora_salida: horaSalidaISO, notas: notaFinal })
+        nuevaAsistenciaData = { ...asistenciaHoy, hora_salida: horaSalidaISO, notas: notaFinal }
+        setAsistenciaHoy(nuevaAsistenciaData)
         alert("¡Salida remota registrada exitosamente!")
-        setMostrarDialogoNota(false)
+        
+        // Evaluar logro de salida si corresponde
+        const logrosSalida = await evaluarLogrosDeSalida(perfil.dni);
+        if (logrosSalida.length > 0) {
+             setUnlockedLogros(prev => [...prev, ...logrosSalida])
+             const logroObj = TODOS_LOS_LOGROS.find(l => l.id === logrosSalida[0])
+             if (logroObj) setTimeout(() => setAchievementToAnimate(logroObj), 500)
+        }
+
       } else {
         const notaFinal = asistenciaHoy.notas ? `${asistenciaHoy.notas}\n${notaTexto}` : notaTexto
         await supabase.from('registro_asistencias').update({ notas: notaFinal }).eq('id', asistenciaHoy.id)
         
-        setAsistenciaHoy({ ...asistenciaHoy, notas: notaFinal })
+        nuevaAsistenciaData = { ...asistenciaHoy, notas: notaFinal }
+        setAsistenciaHoy(nuevaAsistenciaData)
         alert("¡Motivo guardado correctamente!")
-        setMostrarDialogoNota(false)
-        setNotaTexto('')
       }
+
+      setMostrarDialogoNota(false)
+      setNotaTexto('')
+
+      // Evaluar logro de notas
+      const nuevosLogrosNotas = await evaluarLogrosDeNotas(perfil.dni);
+      if (nuevosLogrosNotas.length > 0 && !isRemoteExit) { // Evitamos solapar modales si ganó el de salida remota
+          setUnlockedLogros(prev => [...prev, ...nuevosLogrosNotas])
+          const logroObj = TODOS_LOS_LOGROS.find(l => l.id === nuevosLogrosNotas[0])
+          if (logroObj) setTimeout(() => setAchievementToAnimate(logroObj), 500)
+      }
+
     } catch (error: any) {
       alert(`Error: ${error.message}`)
     } finally {
@@ -390,6 +526,7 @@ export default function EscanerIOS() {
     }
   }
 
+  // --- FOTO ---
   const handleImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file || !perfil || !asistenciaHoy) return
@@ -411,20 +548,13 @@ export default function EscanerIOS() {
       localStorage.setItem('RUAG_FOTO', nuevaFotoUrl)
       setPerfil({ ...perfil, foto_url: nuevaFotoUrl })
 
-      // --- LOGRO CÁMARA CORREGIDO ---
       const seDesbloqueo = await desbloquearLogro(perfil.dni, 3)
-      
-      alert("¡Foto actualizada!") // Mostramos el mensaje primero
+      alert("¡Foto actualizada!")
 
       if (seDesbloqueo) {
-        // 1. Lo agregamos a la lista visual para quitar el candado
         setUnlockedLogros(prev => [...prev, 3]) 
-        
-        // 2. Disparamos la animación épica a pantalla completa
         const logroObj = TODOS_LOS_LOGROS.find(l => l.id === 3)
-        if (logroObj) {
-          setTimeout(() => setAchievementToAnimate(logroObj), 500)
-        }
+        if (logroObj) setTimeout(() => setAchievementToAnimate(logroObj), 500)
       }
 
     } catch (error: any) {
@@ -434,6 +564,50 @@ export default function EscanerIOS() {
     }
   }
 
+  // --- FUNCIONES RENDER CALENDARIO ---
+  const renderCalendarGrid = () => {
+    const year = targetDate.getFullYear()
+    const month = targetDate.getMonth()
+    const daysInMonth = new Date(year, month + 1, 0).getDate()
+    const firstDay = new Date(year, month, 1).getDay()
+    const startingBlanks = firstDay === 0 ? 6 : firstDay - 1 // Lunes = 0
+
+    const blanks = Array.from({ length: startingBlanks })
+    const days = Array.from({ length: daysInMonth }, (_, i) => i + 1)
+
+    return (
+      <div className="grid grid-cols-7 gap-2 mt-4">
+        {['L', 'M', 'M', 'J', 'V', 'S', 'D'].map(day => (
+          <div key={day} className="text-slate-400 font-black text-sm text-center">{day}</div>
+        ))}
+        {blanks.map((_, i) => <div key={`blank-${i}`} className="h-10" />)}
+        
+        {days.map(day => {
+          const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+          const entryForDay = historialMes.find(e => e.fecha === dateStr)
+          
+          const isPuntual = entryForDay?.estado_ingreso === 'PUNTUAL'
+          const isTardanza = entryForDay?.estado_ingreso === 'TARDANZA'
+
+          let bgClass = "bg-slate-950 border-slate-800 text-slate-400"
+          if (isPuntual) bgClass = "bg-emerald-500/15 border-emerald-500/60 text-emerald-500 font-bold"
+          if (isTardanza) bgClass = "bg-red-500/15 border-red-500/60 text-red-500 font-bold"
+
+          return (
+            <button
+              key={day}
+              disabled={!entryForDay}
+              onClick={() => entryForDay && setSelectedDayInfo(entryForDay)}
+              className={`aspect-square rounded-xl border flex items-center justify-center transition-all ${bgClass} ${entryForDay ? 'cursor-pointer hover:scale-105 hover:shadow-lg' : 'cursor-default opacity-50'}`}
+            >
+              {day}
+            </button>
+          )
+        })}
+      </div>
+    )
+  }
+
   const mostrarError = (msg: string) => { setMensaje(msg); setEstadoEscaner('ERROR'); setTimeout(() => setEstadoEscaner('ESCANEO'), 3500) }
   const mostrarExito = (msg: string) => { setMensaje(msg); setEstadoEscaner('EXITO') }
 
@@ -441,320 +615,362 @@ export default function EscanerIOS() {
     return <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center"><Loader2 className="animate-spin text-blue-600 mb-4" size={48} /><p className="text-white font-medium">Verificando estado...</p></div>
   }
 
-  // ============================================================================================
-  // VISTA 2: EL FOTOCHECK DIGITAL WEB (DISEÑO CYBERPUNK)
-  // ============================================================================================
-  if (asistenciaHoy) {
-    const isPuntual = asistenciaHoy.estado_ingreso === "PUNTUAL"
-    const gradientFrom = isPuntual ? 'from-[#047857]' : 'from-[#991B1B]'
-    const gradientTo = isPuntual ? 'to-[#34D399]' : 'to-[#F87171]'
-    const statusTextColor = isPuntual ? 'text-emerald-500' : 'text-red-500'
-    const statusBorderColor = isPuntual ? 'border-emerald-500' : 'border-red-500'
-    const yaMarcoSalida = asistenciaHoy.hora_salida !== null
+  return (
+    <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 relative overflow-hidden">
+      
+      {/* ========================================================================= */}
+      {/* VISTA 1: ESCÁNER QR */}
+      {/* ========================================================================= */}
+      {!asistenciaHoy && (
+        <>
+          <div className="absolute top-0 left-0 w-full p-6 z-20 flex flex-col items-start bg-gradient-to-b from-black/80 to-transparent pointer-events-none">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><path d="M7 7h.01M18 7h.01M7 18h.01M18 18h.01"/>
+            </svg>
+            <h1 className="text-lg font-bold text-white mt-4">Escanea el QR de Ingreso</h1>
+            <p className="text-xs text-emerald-400 mt-1">Se verificará tu GPS</p>
+          </div>
 
-    let horaIngresoFormateada = "--:--"
-    if (asistenciaHoy.hora_ingreso) horaIngresoFormateada = format(new Date(asistenciaHoy.hora_ingreso), 'hh:mm a')
-
-    return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 relative overflow-hidden">
-        
-        {/* BOTONES SUPERIORES */}
-        <div className="absolute top-6 right-6 flex gap-3 z-40">
-          <button onClick={() => setMostrarLogros(true)} className="text-yellow-400 bg-slate-800/80 p-3 rounded-full hover:bg-slate-700 transition backdrop-blur-md">
-            <Trophy size={24} />
-          </button>
-          <button className="text-white bg-slate-800/80 p-3 rounded-full hover:bg-slate-700 transition backdrop-blur-md">
+          <button onClick={() => setMostrarCalendario(true)} className="absolute top-6 right-6 text-white bg-slate-800/80 p-3 rounded-full hover:bg-slate-700 transition z-40 backdrop-blur-md">
             <History size={24} />
           </button>
-        </div>
 
-        <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageChange} className="hidden" />
-
-        <div className="w-full max-w-sm mb-10 relative">
-          <div className={`absolute -inset-1 bg-gradient-to-tr ${gradientFrom} via-transparent ${gradientTo} rounded-[26px] blur-xl opacity-70 animate-pulse`} />
-          <div className={`absolute -inset-0.5 bg-gradient-to-tr ${gradientFrom} ${gradientTo} rounded-[24px] opacity-100`} />
-          
-          <div className="relative bg-[#050505] rounded-[22px] shadow-2xl p-8 flex flex-col items-center z-10">
-            <div className="relative mb-6 mt-2">
-              <div className={`w-32 h-32 rounded-full border-[3px] ${statusBorderColor} p-1 relative overflow-hidden`}>
-                <img src={perfil.foto_url || 'https://via.placeholder.com/150'} alt="Foto" className="w-full h-full rounded-full object-cover" />
-                {isUploadingPhoto && <div className="absolute inset-0 bg-black/60 flex items-center justify-center"><Loader2 className="animate-spin text-white" size={32} /></div>}
+          <div className="flex-1 w-full relative bg-black flex items-center justify-center">
+            {estadoEscaner === 'ESCANEO' && !mostrarModalIngresoObra && (
+              <div className="absolute inset-0 z-10 opacity-80 pointer-events-none">
+                <Scanner onScan={(result) => { if (result && result.length > 0) procesarQR(result[0].rawValue) }} components={{ finder: false }} />
               </div>
-              {!isUploadingPhoto && (
-                <button onClick={() => fileInputRef.current?.click()} className="absolute bottom-0 right-0 w-10 h-10 bg-blue-600 rounded-full border-[3px] border-[#050505] flex items-center justify-center text-white hover:bg-blue-500 transition-colors">
-                  <Edit2 size={16} />
-                </button>
-              )}
-            </div>
-            
-            <h2 className="text-white text-[22px] leading-tight font-black text-center">{perfil.nombres}</h2>
-            <p className="text-slate-400 text-[15px] mt-1">{perfil.dni}</p>
+            )}
 
-            <div className="mt-4 bg-slate-900 border border-slate-800 rounded-lg px-4 py-1.5">
-              <span className="text-blue-400 text-xs font-bold tracking-widest uppercase">{perfil.area}</span>
-            </div>
-
-            <div className="w-full h-px bg-slate-900 my-6" />
-
-            <div className="w-full flex justify-between items-center">
-              <div className="flex flex-col">
-                <span className="text-slate-400 text-xs font-bold mb-1">INGRESO HOY</span>
-                <span className="text-white text-2xl font-black tabular-nums">{horaIngresoFormateada}</span>
+            {estadoEscaner === 'ESCANEO' && !mostrarModalIngresoObra && (
+              <div className="z-20 w-64 h-64 border-4 border-blue-400 rounded-[24px] relative overflow-hidden pointer-events-none">
+                <div className="absolute top-0 left-0 w-full h-[2px] bg-gradient-to-r from-transparent via-blue-400 to-transparent shadow-[0_0_15px_#60A5FA] animate-[scan_2s_linear_infinite_alternate]" />
               </div>
-              <div className="flex flex-col items-end">
-                <span className="text-slate-400 text-xs font-bold mb-1">ESTADO</span>
-                <span className={`${statusTextColor} text-xl font-black`}>{asistenciaHoy.estado_ingreso}</span>
+            )}
+
+            {estadoEscaner !== 'ESCANEO' && (
+              <div className="z-30 absolute inset-0 flex flex-col items-center justify-center p-6 backdrop-blur-xl bg-slate-950/90">
+                {estadoEscaner === 'CARGANDO' && (
+                  <><Loader2 size={64} className="text-white animate-spin mb-6" /><p className="text-white text-lg font-medium text-center">{mensaje}</p></>
+                )}
+                {estadoEscaner === 'EXITO' && (
+                  <div className="flex flex-col items-center animate-in zoom-in duration-300">
+                    <CheckCircle size={100} className="text-emerald-500 mb-6" />
+                    <h2 className="text-2xl font-black text-white text-center mb-2">¡INGRESO REGISTRADO!</h2>
+                    <p className="text-emerald-500 font-medium whitespace-pre-line text-center">{mensaje}</p>
+                  </div>
+                )}
+                {estadoEscaner === 'ERROR' && (
+                  <div className="flex flex-col items-center">
+                    <AlertTriangle size={80} className="text-red-500 mb-6" />
+                    <h2 className="text-2xl font-black text-white text-center mb-6">ACCESO DENEGADO</h2>
+                    <p className="text-red-500 text-center whitespace-pre-line">{mensaje}</p>
+                  </div>
+                )}
               </div>
-            </div>
+            )}
           </div>
-        </div>
 
-        {/* ZONA DE BOTONES DE SALIDA */}
-        {yaMarcoSalida ? (
-          <div className="text-center">
-            <p className="text-slate-400 text-base">Ya marcaste tu salida hoy.</p>
-            <p className="text-white text-xl font-bold mt-2">Hasta mañana.</p>
-          </div>
-        ) : (
-          <div className="w-full max-w-sm flex flex-col gap-3">
-            <button
-              onClick={() => { setIsRemoteExit(false); setNotaTexto(''); setMostrarDialogoNota(true); }}
-              className="w-full py-4 border border-slate-800 rounded-[16px] flex items-center justify-center text-slate-400 font-semibold hover:bg-slate-900 transition-colors"
-            >
-              <Edit3 size={20} className="mr-2" /> Añadir motivo de salida (Opcional)
-            </button>
-
-            {/* UIVERSE MODERN EXIT BUTTON COMPONENT REPLICA PARA REACT */}
-            <button 
-              disabled={isMarkingExit}
-              onClick={handleMarcarSalidaClick}
-              className="group relative w-full h-[68px] rounded-[14px] flex items-center justify-center font-sans text-lg font-bold transition-all duration-300 disabled:opacity-70 disabled:cursor-not-allowed hover:scale-[1.02] active:scale-95 border-none"
-              style={{
-                background: 'linear-gradient(#f7f8f7, #e7e7e7) padding-box, linear-gradient(to bottom, rgba(0,0,0,0.1), rgba(0,0,0,0.45)) border-box',
-                boxShadow: '0 0.5px 0.5px 1px rgba(255, 255, 255, 0.2), 0 10px 20px rgba(0, 0, 0, 0.2), 0 4px 5px 0px rgba(0, 0, 0, 0.05)',
-                textShadow: '0 1px 1px rgba(0,0,0,0.3)',
-                color: 'black'
-              }}
-            >
-              <div className="absolute inset-[2px] rounded-[12px] border border-white opacity-80 pointer-events-none" />
-              {isMarkingExit ? (
-                <div className="flex items-center text-[#ff5569]">
-                  <Loader2 className="animate-spin mr-2" size={24} /> PROCESANDO...
-                </div>
-              ) : (
-                <div className="flex items-center">
-                  <LogOut size={26} className="mr-3" /> MARCAR SALIDA
-                </div>
-              )}
-            </button>
-          </div>
-        )}
-
-        {/* MODAL INTELIGENTE (UIVERSE ADAPTADO PARA REACT) */}
-        {mostrarDialogoNota && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-            <div className="w-full max-w-sm bg-gradient-to-br from-white to-slate-50 border border-slate-200 rounded-2xl p-5 shadow-2xl relative">
-              <h2 className={`text-center text-xl font-bold mb-4 ${isRemoteExit ? 'text-red-600' : 'bg-gradient-to-r from-slate-600 to-slate-800 bg-clip-text text-transparent'}`}>
-                {isRemoteExit ? "Salida Remota Detectada" : "Añadir Motivo"}
-              </h2>
-              
-              <textarea 
-                className={`w-full bg-slate-50/80 text-slate-700 h-32 placeholder:text-slate-400 border col-span-6 resize-none outline-none rounded-xl p-4 duration-300 focus:ring-2 focus:shadow-inner ${isRemoteExit ? 'border-red-200 focus:border-red-500 focus:ring-red-100' : 'border-slate-200 focus:border-slate-600 focus:ring-slate-200'}`} 
-                placeholder={isRemoteExit ? "Obligatorio: Escribe tu ubicación u obra..." : "Ej: Permiso por cita médica..."}
-                value={notaTexto}
-                onChange={(e) => setNotaTexto(e.target.value)}
-              />
-              
-              <div className="grid grid-cols-2 gap-3 mt-4">
-                <button onClick={() => {setMostrarDialogoNota(false); setIsRemoteExit(false)}} className="w-full py-3 rounded-xl font-semibold text-slate-500 hover:bg-slate-100 transition">
-                  Cancelar
-                </button>
-                <button 
-                  onClick={handleGuardarNota}
-                  disabled={guardandoNota}
-                  className="w-full flex items-center justify-center gap-2 rounded-xl py-3 bg-slate-100 border border-slate-200 text-slate-700 font-bold hover:bg-slate-200 active:scale-95 transition-all shadow-sm"
-                >
-                  {guardandoNota ? <Loader2 className="animate-spin" size={20}/> : (
-                    <>
-                      <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5 stroke-slate-700"><path d="M7.4 6.3L15.9 3.5C19.7 2.2 21.8 4.3 20.5 8.1L17.7 16.6C15.8 22.3 12.7 22.3 10.8 16.6L9.9 14.1L7.4 13.2C1.7 11.3 1.7 8.2 7.4 6.3Z" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /><path d="M10.1 13.7L13.7 10.1" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                      Enviar
-                    </>
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* BOTTOM SHEET DE LOGROS */}
-        {mostrarLogros && (
-          <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/80 backdrop-blur-sm animate-in fade-in" onClick={() => setMostrarLogros(false)}>
-            <div className="w-full max-w-md h-[85vh] bg-slate-900 rounded-t-[32px] p-6 pb-0 flex flex-col" onClick={e => e.stopPropagation()}>
-              <div className="w-12 h-1.5 bg-slate-700 rounded-full mx-auto mb-6" />
-              <div className="flex items-center gap-3 mb-6">
-                <Trophy size={40} className="text-yellow-400" />
-                <div>
-                  <h2 className="text-2xl font-black text-white">Tus Logros</h2>
-                  <p className="text-slate-400 font-bold text-sm">{unlockedLogros.length} de {TODOS_LOS_LOGROS.length} desbloqueados</p>
-                </div>
-              </div>
-              <div className="w-full h-2 bg-slate-800 rounded-full mb-6 overflow-hidden">
-                <div className="h-full bg-yellow-400" style={{ width: `${(unlockedLogros.length / TODOS_LOS_LOGROS.length) * 100}%` }} />
-              </div>
-              <div className="flex-1 overflow-y-auto pb-6 space-y-3 pr-2 scrollbar-hide">
-                {TODOS_LOS_LOGROS.map(logro => {
-                  const unlocked = unlockedLogros.includes(logro.id);
-                  return (
-                    <div key={logro.id} className={`flex items-center p-4 rounded-2xl border ${unlocked ? 'bg-slate-800 border-yellow-400/50' : 'bg-slate-950 border-slate-800'}`}>
-                      <div className={`w-14 h-14 rounded-full flex items-center justify-center text-3xl shrink-0 ${unlocked ? 'bg-yellow-400/20' : 'bg-slate-800'}`}>
-                        {unlocked ? logro.emoji : <Lock size={20} className="text-slate-500" />}
-                      </div>
-                      <div className={`ml-4 ${unlocked ? 'opacity-100' : 'opacity-50'}`}>
-                        <h4 className={`font-black text-lg ${unlocked ? 'text-yellow-400' : 'text-slate-400'}`}>{logro.titulo}</h4>
-                        <p className="text-sm text-slate-300 leading-tight">{logro.desc}</p>
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* MODAL ANIMADO DE "LOGRO DESBLOQUEADO" A PANTALLA COMPLETA */}
-        {achievementToAnimate && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-md animate-in fade-in zoom-in duration-300" onClick={() => setAchievementToAnimate(null)}>
-            <div className="flex flex-col items-center p-8 text-center" onClick={e => e.stopPropagation()}>
-              <div className="relative w-48 h-48 flex items-center justify-center mb-8">
-                <div className="absolute inset-0 bg-yellow-400/30 rounded-full blur-2xl animate-pulse" />
-                <span className="text-[120px] relative z-10 animate-bounce">{achievementToAnimate.emoji}</span>
-              </div>
-              <h3 className="text-yellow-400 font-black tracking-widest uppercase text-sm mb-2">¡LOGRO DESBLOQUEADO!</h3>
-              <h1 className="text-4xl font-black text-white mb-4">{achievementToAnimate.titulo}</h1>
-              <p className="text-slate-400 text-lg max-w-xs mb-10">{achievementToAnimate.desc}</p>
-              <button onClick={() => setAchievementToAnimate(null)} className="bg-yellow-400 text-slate-900 font-black text-lg py-4 px-12 rounded-2xl active:scale-95 transition-transform">
-                ¡Genial!
-              </button>
-            </div>
-          </div>
-        )}
-
-      </div>
-    )
-  }
-
-  // ============================================================================================
-  // VISTA 1 (UI ESCÁNER) CON BOTÓN DE INGRESO EN OBRA
-  // ============================================================================================
-  return (
-    <div className="min-h-screen bg-slate-950 flex flex-col relative overflow-hidden">
-      <div className="absolute top-0 left-0 w-full p-6 z-20 flex flex-col items-start bg-gradient-to-b from-black/80 to-transparent pointer-events-none">
-        <IconoQR />
-        <h1 className="text-lg font-bold text-white mt-4">Escanea el QR de Ingreso</h1>
-        <p className="text-xs text-emerald-400 mt-1">Se verificará tu GPS</p>
-      </div>
-
-      {/* BOTÓN HISTORIAL */}
-      <button className="absolute top-6 right-6 text-white bg-slate-800/80 p-3 rounded-full hover:bg-slate-700 transition z-40 backdrop-blur-md">
-        <History size={24} />
-      </button>
-
-      {/* MODAL MANUAL INGRESO OBRA */}
-      {mostrarModalIngresoObra && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-sm bg-gradient-to-br from-white to-slate-50 border border-slate-200 rounded-2xl p-5 shadow-2xl relative">
-            <h2 className="text-center text-xl font-bold mb-4 text-blue-600">
-              Ingreso desde Obra
-            </h2>
-            <textarea 
-              className="w-full bg-slate-50/80 text-slate-700 h-32 placeholder:text-slate-400 border border-blue-200 resize-none outline-none rounded-xl p-4 duration-300 focus:ring-2 focus:ring-blue-100 focus:border-blue-500 focus:shadow-inner" 
-              placeholder="Obligatorio: Escribe el nombre de la obra..."
-              value={notaTexto}
-              onChange={(e) => setNotaTexto(e.target.value)}
-            />
-            <div className="grid grid-cols-2 gap-3 mt-4">
-              <button onClick={() => {setMostrarModalIngresoObra(false); setNotaTexto('')}} className="w-full py-3 rounded-xl font-semibold text-slate-500 hover:bg-slate-100 transition">
-                Cancelar
-              </button>
+          {estadoEscaner === 'ESCANEO' && !mostrarModalIngresoObra && (
+            <div className="absolute bottom-10 left-0 right-0 px-6 z-20">
               <button 
-                onClick={handleIngresoObra}
-                disabled={guardandoNota}
-                className="w-full flex items-center justify-center gap-2 rounded-xl py-3 bg-slate-100 border border-slate-200 text-slate-700 font-bold hover:bg-slate-200 active:scale-95 transition-all shadow-sm"
+                onClick={() => { setNotaTexto(''); setMostrarModalIngresoObra(true); }}
+                className="w-full flex items-center justify-center py-4 bg-slate-950/80 backdrop-blur-md border border-slate-800 rounded-2xl text-white font-semibold transition hover:bg-slate-900 shadow-xl"
               >
-                {guardandoNota ? <Loader2 className="animate-spin" size={20}/> : (
-                  <>
-                    <svg viewBox="0 0 24 24" fill="none" className="w-5 h-5 stroke-slate-700"><path d="M7.4 6.3L15.9 3.5C19.7 2.2 21.8 4.3 20.5 8.1L17.7 16.6C15.8 22.3 12.7 22.3 10.8 16.6L9.9 14.1L7.4 13.2C1.7 11.3 1.7 8.2 7.4 6.3Z" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /><path d="M10.1 13.7L13.7 10.1" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>
-                    Enviar
-                  </>
+                <Map className="mr-2 text-blue-400" size={20} />
+                ¿Fuiste directo a Obra?
+              </button>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ========================================================================= */}
+      {/* VISTA 2: EL FOTOCHECK DIGITAL */}
+      {/* ========================================================================= */}
+      {asistenciaHoy && (
+        <>
+          <div className="absolute top-6 right-6 flex gap-3 z-40">
+            <button onClick={() => setMostrarLogros(true)} className="text-yellow-400 bg-slate-800/80 p-3 rounded-full hover:bg-slate-700 transition backdrop-blur-md">
+              <Trophy size={24} />
+            </button>
+            <button onClick={() => setMostrarCalendario(true)} className="text-white bg-slate-800/80 p-3 rounded-full hover:bg-slate-700 transition backdrop-blur-md">
+              <History size={24} />
+            </button>
+          </div>
+
+          <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageChange} className="hidden" />
+
+          <div className="w-full max-w-sm mb-10 relative mt-16">
+            <div className={`absolute -inset-1 bg-gradient-to-tr ${asistenciaHoy.estado_ingreso === 'PUNTUAL' ? 'from-[#047857] to-[#34D399]' : 'from-[#991B1B] to-[#F87171]'} via-transparent rounded-[26px] blur-xl opacity-70 animate-pulse`} />
+            <div className={`absolute -inset-0.5 bg-gradient-to-tr ${asistenciaHoy.estado_ingreso === 'PUNTUAL' ? 'from-[#047857] to-[#34D399]' : 'from-[#991B1B] to-[#F87171]'} rounded-[24px] opacity-100`} />
+            
+            <div className="relative bg-[#050505] rounded-[22px] shadow-2xl p-8 flex flex-col items-center z-10">
+              <div className="relative mb-6 mt-2">
+                <div className={`w-32 h-32 rounded-full border-[3px] ${asistenciaHoy.estado_ingreso === 'PUNTUAL' ? 'border-emerald-500' : 'border-red-500'} p-1 relative overflow-hidden`}>
+                  <img src={perfil.foto_url || 'https://via.placeholder.com/150'} alt="Foto" className="w-full h-full rounded-full object-cover" />
+                  {isUploadingPhoto && <div className="absolute inset-0 bg-black/60 flex items-center justify-center"><Loader2 className="animate-spin text-white" size={32} /></div>}
+                </div>
+                {!isUploadingPhoto && (
+                  <button onClick={() => fileInputRef.current?.click()} className="absolute bottom-0 right-0 w-10 h-10 bg-blue-600 rounded-full border-[3px] border-[#050505] flex items-center justify-center text-white hover:bg-blue-500 transition-colors">
+                    <Edit2 size={16} />
+                  </button>
+                )}
+              </div>
+              
+              <h2 className="text-white text-[22px] leading-tight font-black text-center">{perfil.nombres}</h2>
+              <p className="text-slate-400 text-[15px] mt-1">{perfil.dni}</p>
+
+              <div className="mt-4 bg-slate-900 border border-slate-800 rounded-lg px-4 py-1.5">
+                <span className="text-blue-400 text-xs font-bold tracking-widest uppercase">{perfil.area}</span>
+              </div>
+
+              <div className="w-full h-px bg-slate-900 my-6" />
+
+              <div className="w-full flex justify-between items-center">
+                <div className="flex flex-col">
+                  <span className="text-slate-400 text-xs font-bold mb-1">INGRESO HOY</span>
+                  <span className="text-white text-2xl font-black tabular-nums">{asistenciaHoy.hora_ingreso ? format(new Date(asistenciaHoy.hora_ingreso), 'hh:mm a') : '--:--'}</span>
+                </div>
+                <div className="flex flex-col items-end">
+                  <span className="text-slate-400 text-xs font-bold mb-1">ESTADO</span>
+                  <span className={`${asistenciaHoy.estado_ingreso === 'PUNTUAL' ? 'text-emerald-500' : 'text-red-500'} text-xl font-black`}>{asistenciaHoy.estado_ingreso}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {asistenciaHoy.hora_salida !== null ? (
+            <div className="text-center">
+              <p className="text-slate-400 text-base">Ya marcaste tu salida hoy.</p>
+              <p className="text-white text-xl font-bold mt-2">Hasta mañana.</p>
+            </div>
+          ) : (
+            <div className="w-full max-w-sm flex flex-col gap-3">
+              <button onClick={() => { setIsRemoteExit(false); setNotaTexto(''); setMostrarDialogoNota(true); }} className="w-full py-4 border border-slate-800 rounded-[16px] flex items-center justify-center text-slate-400 font-semibold hover:bg-slate-900 transition-colors">
+                <Edit3 size={20} className="mr-2" /> Añadir motivo de salida (Opcional)
+              </button>
+
+              <button 
+                disabled={isMarkingExit}
+                onClick={handleMarcarSalidaClick}
+                className="group relative w-full h-[68px] rounded-[14px] flex items-center justify-center font-sans text-lg font-bold transition-all duration-300 disabled:opacity-70 disabled:cursor-not-allowed hover:scale-[1.02] active:scale-95 border-none"
+                style={{ background: 'linear-gradient(#f7f8f7, #e7e7e7) padding-box, linear-gradient(to bottom, rgba(0,0,0,0.1), rgba(0,0,0,0.45)) border-box', boxShadow: '0 0.5px 0.5px 1px rgba(255, 255, 255, 0.2), 0 10px 20px rgba(0, 0, 0, 0.2), 0 4px 5px 0px rgba(0, 0, 0, 0.05)', color: 'black' }}
+              >
+                <div className="absolute inset-[2px] rounded-[12px] border border-white opacity-80 pointer-events-none" />
+                {isMarkingExit ? (
+                  <div className="flex items-center text-[#ff5569]"><Loader2 className="animate-spin mr-2" size={24} /> PROCESANDO...</div>
+                ) : (
+                  <div className="flex items-center"><LogOut size={26} className="mr-3" /> MARCAR SALIDA</div>
                 )}
               </button>
             </div>
-          </div>
-        </div>
+          )}
+        </>
       )}
 
-      <div className="flex-1 relative bg-black flex items-center justify-center">
-        {estadoEscaner === 'ESCANEO' && !mostrarModalIngresoObra && (
-          <div className="absolute inset-0 z-10 opacity-80">
-            <Scanner onScan={(result) => { if (result && result.length > 0) procesarQR(result[0].rawValue) }} components={{ finder: false }} />
-          </div>
-        )}
-
-        {estadoEscaner === 'ESCANEO' && !mostrarModalIngresoObra && (
-          <div className="z-20 w-64 h-64 border-4 border-blue-400 rounded-3xl relative">
-            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-blue-400 to-transparent shadow-[0_0_15px_#60A5FA] animate-[scan_2s_linear_infinite_alternate]" />
-          </div>
-        )}
-
-        {estadoEscaner !== 'ESCANEO' && (
-          <div className="z-30 absolute inset-0 flex flex-col items-center justify-center p-6 backdrop-blur-xl bg-slate-950/90">
-            {estadoEscaner === 'CARGANDO' && (
-              <><Loader2 size={64} className="text-white animate-spin mb-6" /><p className="text-white text-lg font-medium">{mensaje}</p></>
-            )}
-            {estadoEscaner === 'EXITO' && (
-              <div className="flex flex-col items-center animate-[pop_0.5s_ease-out_forwards]">
-                <CheckCircle size={100} className="text-emerald-500 mb-6" />
-                <h2 className="text-2xl font-black text-white text-center mb-2">¡INGRESO REGISTRADO!</h2>
-                <p className="text-emerald-500 font-medium whitespace-pre-line text-center">{mensaje}</p>
-              </div>
-            )}
-            {estadoEscaner === 'ERROR' && (
-              <div className="flex flex-col items-center">
-                <AlertTriangle size={80} className="text-red-500 mb-6" />
-                <h2 className="text-2xl font-black text-white text-center mb-6">ACCESO DENEGADO</h2>
-                <p className="text-red-500 text-center whitespace-pre-line">{mensaje}</p>
-              </div>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* BOTÓN DE INGRESO EN OBRA (EN LA PARTE INFERIOR) */}
-      {estadoEscaner === 'ESCANEO' && !mostrarModalIngresoObra && (
-        <div className="absolute bottom-10 left-0 right-0 px-6 z-20">
-          <button 
-            onClick={() => { setNotaTexto(''); setMostrarModalIngresoObra(true); }}
-            className="w-full flex items-center justify-center py-4 bg-slate-950/80 backdrop-blur-md border border-slate-800 rounded-2xl text-white font-semibold transition hover:bg-slate-900"
-          >
-            <Map className="mr-2 text-blue-400" size={20} />
-            ¿Fuiste directo a Obra?
-          </button>
-        </div>
-      )}
+      {/* ========================================================================= */}
+      {/* MODALES GLOBALES */}
+      {/* ========================================================================= */}
       
-      <style dangerouslySetInnerHTML={{__html: `@keyframes scan { 0% { top: 0%; } 100% { top: 100%; } } @keyframes pop { 0% { transform: scale(0.8); opacity: 0; } 100% { transform: scale(1); opacity: 1; } }`}} />
+      {/* MODAL MANUAL INGRESO OBRA */}
+      {mostrarModalIngresoObra && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-sm bg-gradient-to-br from-white to-slate-50 border border-slate-200 rounded-2xl p-5 shadow-2xl relative">
+            <h2 className="text-center text-xl font-bold mb-4 text-blue-600">Ingreso desde Obra</h2>
+            <textarea 
+              className="w-full bg-slate-50/80 text-slate-700 h-32 placeholder:text-slate-400 border border-blue-200 resize-none outline-none rounded-xl p-4 duration-300 focus:ring-2 focus:ring-blue-100 focus:border-blue-500 focus:shadow-inner" 
+              placeholder="Obligatorio: Escribe el nombre de la obra..."
+              value={notaTexto} onChange={(e) => setNotaTexto(e.target.value)}
+            />
+            <div className="grid grid-cols-2 gap-3 mt-4">
+              <button onClick={() => {setMostrarModalIngresoObra(false); setNotaTexto('')}} className="w-full py-3 rounded-xl font-semibold text-slate-500 hover:bg-slate-100 transition">Cancelar</button>
+              <button onClick={handleIngresoObra} disabled={guardandoNota} className="w-full flex items-center justify-center gap-2 rounded-xl py-3 bg-slate-100 border border-slate-200 text-slate-700 font-bold hover:bg-slate-200 active:scale-95 transition-all shadow-sm">
+                {guardandoNota ? <Loader2 className="animate-spin" size={20}/> : <>Enviar</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL NOTAS SALIDA */}
+      {mostrarDialogoNota && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="w-full max-w-sm bg-gradient-to-br from-white to-slate-50 border border-slate-200 rounded-2xl p-5 shadow-2xl relative">
+            <h2 className={`text-center text-xl font-bold mb-4 ${isRemoteExit ? 'text-red-600' : 'bg-gradient-to-r from-slate-600 to-slate-800 bg-clip-text text-transparent'}`}>
+              {isRemoteExit ? "Salida Remota Detectada" : "Añadir Motivo"}
+            </h2>
+            <textarea 
+              className={`w-full bg-slate-50/80 text-slate-700 h-32 placeholder:text-slate-400 border col-span-6 resize-none outline-none rounded-xl p-4 duration-300 focus:ring-2 focus:shadow-inner ${isRemoteExit ? 'border-red-200 focus:border-red-500 focus:ring-red-100' : 'border-slate-200 focus:border-slate-600 focus:ring-slate-200'}`} 
+              placeholder={isRemoteExit ? "Obligatorio: Escribe tu ubicación u obra..." : "Ej: Permiso por cita médica..."}
+              value={notaTexto} onChange={(e) => setNotaTexto(e.target.value)}
+            />
+            <div className="grid grid-cols-2 gap-3 mt-4">
+              <button onClick={() => {setMostrarDialogoNota(false); setIsRemoteExit(false)}} className="w-full py-3 rounded-xl font-semibold text-slate-500 hover:bg-slate-100 transition">Cancelar</button>
+              <button onClick={handleGuardarNota} disabled={guardandoNota} className="w-full flex items-center justify-center gap-2 rounded-xl py-3 bg-slate-100 border border-slate-200 text-slate-700 font-bold hover:bg-slate-200 active:scale-95 transition-all shadow-sm">
+                {guardandoNota ? <Loader2 className="animate-spin" size={20}/> : <>Enviar</>}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* CALENDARIO MODAL (HISTORIAL) */}
+      {mostrarCalendario && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/80 backdrop-blur-sm animate-in fade-in" onClick={() => setMostrarCalendario(false)}>
+          <div className="w-full max-w-md h-[85vh] bg-slate-900 rounded-t-[32px] p-6 flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="w-12 h-1.5 bg-slate-700 rounded-full mx-auto mb-6" />
+            
+            <div className="flex items-center justify-between mb-8">
+              <div className="flex items-center gap-4">
+                <div className="w-12 h-12 bg-blue-600/20 rounded-full flex items-center justify-center text-blue-400">
+                  <Calendar size={24} />
+                </div>
+                <div>
+                  <h2 className="text-2xl font-black text-white">Historial</h2>
+                  <p className="text-slate-400 font-bold text-sm capitalize">{format(targetDate, 'MMMM yyyy')}</p>
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <button onClick={() => setTargetDate(new Date(targetDate.getFullYear(), targetDate.getMonth() - 1))} className="w-9 h-9 bg-slate-800 rounded-full flex items-center justify-center text-white hover:bg-slate-700"><ChevronLeft size={20}/></button>
+                <button 
+                  onClick={() => {
+                    const nextMonth = new Date(targetDate.getFullYear(), targetDate.getMonth() + 1)
+                    if (nextMonth <= new Date()) setTargetDate(nextMonth)
+                  }} 
+                  className="w-9 h-9 bg-slate-800 rounded-full flex items-center justify-center text-white hover:bg-slate-700"
+                ><ChevronRight size={20}/></button>
+              </div>
+            </div>
+
+            {loadingCalendar ? (
+              <div className="flex-1 flex items-center justify-center"><Loader2 className="animate-spin text-blue-500" size={40}/></div>
+            ) : (
+              <>
+                {renderCalendarGrid()}
+                
+                <div className="flex justify-center items-center gap-6 mt-8">
+                  <div className="flex items-center gap-2"><div className="w-3 h-3 bg-emerald-500 rounded-full"></div><span className="text-slate-400 text-xs font-bold">Puntual</span></div>
+                  <div className="flex items-center gap-2"><div className="w-3 h-3 bg-red-500 rounded-full"></div><span className="text-slate-400 text-xs font-bold">Tardanza</span></div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* DETALLE DEL DÍA SELECCIONADO (POPUP GLASSMORPHISM) */}
+      {selectedDayInfo && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-6 bg-black/60 backdrop-blur-sm animate-in fade-in zoom-in duration-200" onClick={() => setSelectedDayInfo(null)}>
+          <div className="w-full max-w-sm bg-slate-900/90 backdrop-blur-md border border-slate-700 rounded-[28px] p-6 shadow-2xl relative overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className={`absolute top-0 left-0 w-full h-24 bg-gradient-to-b ${selectedDayInfo.estado_ingreso === 'PUNTUAL' ? 'from-emerald-500/20' : 'from-red-500/20'} to-transparent`} />
+            
+            <div className="flex flex-col items-center relative z-10">
+              <div className={`w-16 h-16 rounded-full flex items-center justify-center mb-4 ${selectedDayInfo.estado_ingreso === 'PUNTUAL' ? 'bg-emerald-500/20 text-emerald-500' : 'bg-red-500/20 text-red-500'}`}>
+                {selectedDayInfo.estado_ingreso === 'PUNTUAL' ? <CheckCircle2 size={40}/> : <AlertTriangle size={40}/>}
+              </div>
+              <h3 className="text-2xl font-black text-white">{selectedDayInfo.fecha}</h3>
+              <div className={`mt-2 px-3 py-1 rounded-md border text-xs font-bold tracking-wider ${selectedDayInfo.estado_ingreso === 'PUNTUAL' ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-500' : 'bg-red-500/10 border-red-500/30 text-red-500'}`}>
+                {selectedDayInfo.estado_ingreso}
+              </div>
+
+              <div className="w-full flex gap-3 mt-6">
+                <div className="flex-1 bg-slate-950 border border-slate-800 rounded-2xl p-4 flex flex-col items-center">
+                  <span className="text-[10px] text-slate-400 font-bold tracking-widest mb-1">INGRESO</span>
+                  <span className="text-white font-black text-lg">{format(new Date(selectedDayInfo.hora_ingreso), 'hh:mm a')}</span>
+                </div>
+                <div className="flex-1 bg-slate-950 border border-slate-800 rounded-2xl p-4 flex flex-col items-center">
+                  <span className="text-[10px] text-slate-400 font-bold tracking-widest mb-1">SALIDA</span>
+                  <span className="text-white font-black text-lg">{selectedDayInfo.hora_salida ? format(new Date(selectedDayInfo.hora_salida), 'hh:mm a') : '--:--'}</span>
+                </div>
+              </div>
+
+              {selectedDayInfo.notas && (
+                <div className="w-full mt-4 bg-slate-800/50 border border-slate-700 rounded-xl p-4">
+                  <div className="flex items-center gap-2 mb-2">
+                    <EditNoteIcon color={selectedDayInfo.estado_ingreso === 'PUNTUAL' ? '#10B981' : '#EF4444'} />
+                    <span className="text-xs font-bold text-slate-300">Notas Registradas:</span>
+                  </div>
+                  <p className="text-sm text-slate-400 leading-relaxed whitespace-pre-line">{selectedDayInfo.notas}</p>
+                </div>
+              )}
+
+              <button onClick={() => setSelectedDayInfo(null)} className="w-full mt-6 py-4 bg-slate-800 rounded-xl text-white font-bold hover:bg-slate-700 transition">
+                Cerrar Detalles
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* LOGROS BOTTOM SHEET (REDISEÑO MODERN DARK/GOLD) */}
+      {mostrarLogros && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/80 backdrop-blur-sm animate-in fade-in" onClick={() => setMostrarLogros(false)}>
+          <div className="w-full max-w-md h-[85vh] bg-slate-900 rounded-t-[32px] p-6 pb-0 flex flex-col" onClick={e => e.stopPropagation()}>
+            <div className="w-12 h-1.5 bg-slate-700 rounded-full mx-auto mb-6" />
+            <div className="flex items-center gap-4 mb-6">
+              <div className="w-12 h-12 bg-yellow-400/20 rounded-full flex items-center justify-center">
+                <Trophy size={28} className="text-yellow-400" />
+              </div>
+              <div>
+                <h2 className="text-2xl font-black text-white">Mis Trofeos</h2>
+                <p className="text-slate-400 font-bold text-sm">{unlockedLogros.length} de {TODOS_LOS_LOGROS.length} desbloqueados</p>
+              </div>
+            </div>
+            
+            <div className="w-full h-2 bg-slate-950 rounded-full mb-6 overflow-hidden">
+              <div className="h-full bg-yellow-400 rounded-full transition-all duration-1000" style={{ width: `${(unlockedLogros.length / TODOS_LOS_LOGROS.length) * 100}%` }} />
+            </div>
+            
+            <div className="flex-1 overflow-y-auto pb-6 space-y-4 pr-2 scrollbar-hide">
+              {TODOS_LOS_LOGROS.map(logro => {
+                const unlocked = unlockedLogros.includes(logro.id);
+                return (
+                  <div key={logro.id} className={`flex items-center p-4 rounded-[20px] border transition-all ${unlocked ? 'bg-gradient-to-r from-slate-800 to-slate-800/60 border-yellow-400/40 shadow-lg shadow-yellow-400/5' : 'bg-[#020617] border-slate-900'}`}>
+                    <div className={`w-14 h-14 rounded-2xl flex items-center justify-center text-3xl shrink-0 border ${unlocked ? 'bg-yellow-400/10 border-yellow-400/30' : 'bg-slate-900 border-slate-800'}`}>
+                      {unlocked ? logro.emoji : <Lock size={20} className="text-slate-600" />}
+                    </div>
+                    <div className={`ml-4 flex-1 ${unlocked ? 'opacity-100' : 'opacity-40'}`}>
+                      <h4 className={`font-black text-[17px] tracking-wide ${unlocked ? 'text-yellow-400' : 'text-slate-400'}`}>{logro.titulo}</h4>
+                      <p className="text-[13px] text-slate-300 leading-tight mt-1">{logro.desc}</p>
+                    </div>
+                    {unlocked && <CheckCircle size={22} className="text-emerald-500/80 ml-2" />}
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* LOGRO DESBLOQUEADO (PANTALLA COMPLETA ANIMADA) */}
+      {achievementToAnimate && (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/90 backdrop-blur-md animate-in fade-in zoom-in duration-300" onClick={() => setAchievementToAnimate(null)}>
+          <div className="flex flex-col items-center p-8 text-center" onClick={e => e.stopPropagation()}>
+            <div className="relative w-40 h-40 flex items-center justify-center mb-8">
+              <div className="absolute inset-0 bg-yellow-400/30 rounded-full blur-2xl animate-pulse" />
+              <span className="text-[100px] relative z-10 animate-bounce">{achievementToAnimate.emoji}</span>
+            </div>
+            <h3 className="text-yellow-400 font-black tracking-widest uppercase text-sm mb-2">¡LOGRO DESBLOQUEADO!</h3>
+            <h1 className="text-4xl font-black text-white mb-4">{achievementToAnimate.titulo}</h1>
+            <p className="text-slate-400 text-lg max-w-xs mb-10">{achievementToAnimate.desc}</p>
+            <button onClick={() => setAchievementToAnimate(null)} className="bg-yellow-400 text-slate-900 font-black text-lg py-4 px-12 rounded-2xl active:scale-95 transition-transform">
+              ¡Genial!
+            </button>
+          </div>
+        </div>
+      )}
+
+      <style dangerouslySetInnerHTML={{__html: `@keyframes scan { 0% { top: 0%; } 100% { top: 100%; } } .scrollbar-hide::-webkit-scrollbar { display: none; } .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }`}} />
     </div>
   )
 }
 
-function IconoQR() {
+function EditNoteIcon({ color }: { color: string }) {
   return (
-    <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <rect x="3" y="3" width="7" height="7" rx="1"/>
-      <rect x="14" y="3" width="7" height="7" rx="1"/>
-      <rect x="14" y="14" width="7" height="7" rx="1"/>
-      <rect x="3" y="14" width="7" height="7" rx="1"/>
-      <path d="M7 7h.01M18 7h.01M7 18h.01M18 18h.01"/>
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/>
+      <path d="m15 5 4 4"/>
     </svg>
   )
 }
