@@ -12,7 +12,7 @@ const supabase = createClient(supabaseUrl, supabaseKey)
 
 const AREAS_LIST = [
   "Operaciones/Proyectos", "Presupuesto", "Contabilidad",
-  "Ssoma", "Rrhh", "Logística", "Finanzas", "Área comercial", "Software"
+  "Ssoma", "Rrhh", "Logística", "Finanzas", "Área comercial", "Software", "Almacén"
 ]
 
 export default function SetupProfileWeb() {
