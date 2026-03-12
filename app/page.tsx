@@ -11,7 +11,7 @@ import {
   CheckCircle2, AlertCircle, LogOut, Activity, UserCircle2,
   Unlock, MessageSquareText, X, UserPlus, Loader2, Search, Filter,
   FileSpreadsheet, SlidersHorizontal, Users, ShieldCheck, AlignLeft,
-  MapPin, Map, Download, HardHat // <-- Nuevo icono importado para Ingreso en Obra
+  MapPin, Map, Download, HardHat, Trash2 // <-- Importado Trash2 para borrar
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 
@@ -183,7 +183,6 @@ export default function DualDashboardAsistencias() {
   const [modoEdicion, setModoEdicion] = useState(false)
 
   // Modales
-  // --- ACTUALIZADO TIPO DE NOTA SELECCIONADA PARA INCLUIR TIPO_OBRA ---
   const [notaSeleccionada, setNotaSeleccionada] = useState<{nombre: string, nota: string, hora: string, tipoObra: 'ninguna' | 'ingreso' | 'salida', coordenadas?: string} | null>(null)
   const [mostrarModalManual, setMostrarModalManual] = useState(false)
   const [mostrarModalExportar, setMostrarModalExportar] = useState(false)
@@ -308,7 +307,7 @@ export default function DualDashboardAsistencias() {
   }, [asistencias, busqueda, filtroArea, filtroEstado]);
 
 
-  // --- NUEVA LÓGICA DE EXPORTACIÓN (DIA O RANGO) ---
+  // --- NUEVA LÓGICA DE EXPORTACIÓN CON ENLACES GPS Y NOTAS LIMPIAS ---
   const procesarYDescargarExcel = (data: any[], nombreArchivo: string) => {
     if (data.length === 0) {
       toast.error("No hay registros en estas fechas para exportar");
@@ -327,7 +326,7 @@ export default function DualDashboardAsistencias() {
     const styleCenter = { alignment: { horizontal: "center" } };
 
     const ws_data: any[][] = [
-      ["FECHA", "DNI", "APELLIDOS Y NOMBRES", "ÁREA", "INGRESO", "ESTADO", "SALIDA", "MOTIVO / NOTA"]
+      ["FECHA", "DNI", "APELLIDOS Y NOMBRES", "ÁREA", "INGRESO", "ESTADO", "SALIDA", "MOTIVO / NOTA", "UBICACIÓN (MAPS)"]
     ];
 
     const ordenarApellidosNombres = (nombreCompleto: string) => {
@@ -344,6 +343,24 @@ export default function DualDashboardAsistencias() {
     };
 
     data.forEach((registro) => {
+      let textoLimpio = registro.notas || '-';
+      let linkMaps = '-';
+      
+      // Separar las notas de las coordenadas para el Excel
+      if (registro.notas && registro.notas.includes('[GPS:')) {
+        const startIdx = registro.notas.indexOf('[GPS:');
+        const endIdx = registro.notas.indexOf(']', startIdx);
+        if (startIdx !== -1 && endIdx !== -1) {
+          const coords = registro.notas.substring(startIdx + 5, endIdx).trim();
+          textoLimpio = registro.notas.substring(0, startIdx).trim();
+          // Quitar prefijos si existen para que se vea más limpio en excel
+          textoLimpio = textoLimpio.replace('Ingreso en: ', '').replace('Salida de obra: ', '').trim();
+          if (textoLimpio === '') textoLimpio = 'Marcación en Obra';
+          
+          linkMaps = `https://www.google.com/maps?q=${coords}`;
+        }
+      }
+
       ws_data.push([
         registro.fecha,
         registro.dni,
@@ -352,27 +369,35 @@ export default function DualDashboardAsistencias() {
         new Date(registro.hora_ingreso).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute:'2-digit' }),
         registro.estado_ingreso,
         registro.hora_salida ? new Date(registro.hora_salida).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute:'2-digit' }) : 'Sin marcar',
-        registro.notas || '-'
+        textoLimpio,
+        linkMaps
       ]);
     });
 
     const ws = XLSX.utils.aoa_to_sheet(ws_data);
 
     for (let R = 0; R < ws_data.length; R++) {
-      for (let C = 0; C < 8; C++) {
+      for (let C = 0; C < 9; C++) {
         const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
         if (!ws[cellAddress]) continue;
         if (R === 0) ws[cellAddress].s = headerStyle;
         else {
           if (C === 5) ws[cellAddress].s = ws[cellAddress].v === 'PUNTUAL' ? stylePuntual : styleTardanza;
           else if ([0, 1, 3, 4, 6].includes(C)) ws[cellAddress].s = styleCenter;
+          
+          // Darle formato de Link a la columna de MAPS
+          if (C === 8 && ws[cellAddress].v !== '-') {
+            ws[cellAddress].l = { Target: ws[cellAddress].v }; // Asigna el hipervínculo
+            ws[cellAddress].v = "📍 Ver Mapa"; // Texto visible en la celda
+            ws[cellAddress].s = { font: { color: { rgb: "2563EB" }, underline: true }, alignment: { horizontal: "center" } };
+          }
         }
       }
     }
 
     ws['!cols'] = [
       { wpx: 80 }, { wpx: 80 }, { wpx: 240 }, { wpx: 130 }, 
-      { wpx: 80 }, { wpx: 90 }, { wpx: 80 }, { wpx: 280 }
+      { wpx: 80 }, { wpx: 90 }, { wpx: 80 }, { wpx: 280 }, { wpx: 120 }
     ];
 
     const libro = XLSX.utils.book_new();
@@ -432,27 +457,34 @@ export default function DualDashboardAsistencias() {
   };
 
 
-  const actualizarHora = async (id: string, campo: 'hora_ingreso' | 'hora_salida', nuevaHora: string, fechaBase: string) => {
-    if (!nuevaHora) return
+  // --- ACTUALIZADO PARA PERMITIR BORRAR HORA (NUEVA HORA PUEDE SER NULL) ---
+  const actualizarHora = async (id: string, campo: 'hora_ingreso' | 'hora_salida', nuevaHora: string | null, fechaBase: string) => {
     try {
-      const [horas, minutos] = nuevaHora.split(':')
-      const fechaObj = new Date(fechaBase)
-      fechaObj.setHours(parseInt(horas), parseInt(minutos), 0)
+      let datosAActualizar: any = {};
       
-      const timestampISO = fechaObj.toISOString()
-      let datosAActualizar: any = { [campo]: timestampISO }
+      if (nuevaHora === null) {
+        // Borramos la hora de salida si se manda null
+        datosAActualizar[campo] = null;
+      } else {
+        const [horas, minutos] = nuevaHora.split(':')
+        const fechaObj = new Date(fechaBase)
+        fechaObj.setHours(parseInt(horas), parseInt(minutos), 0)
+        
+        const timestampISO = fechaObj.toISOString()
+        datosAActualizar[campo] = timestampISO
 
-      if (campo === 'hora_ingreso') {
-        const h = parseInt(horas)
-        const m = parseInt(minutos)
-        const isPuntual = h < 9 || (h === 9 && m <= 5)
-        datosAActualizar.estado_ingreso = isPuntual ? 'PUNTUAL' : 'TARDANZA'
+        if (campo === 'hora_ingreso') {
+          const h = parseInt(horas)
+          const m = parseInt(minutos)
+          const isPuntual = h < 9 || (h === 9 && m <= 5)
+          datosAActualizar.estado_ingreso = isPuntual ? 'PUNTUAL' : 'TARDANZA'
+        }
       }
 
       const { error } = await supabase.from('registro_asistencias').update(datosAActualizar).eq('id', id)
       if (error) throw error
 
-      toast.success('Registro actualizado correctamente')
+      toast.success(nuevaHora === null ? 'Hora eliminada' : 'Registro actualizado correctamente')
       setAsistencias(prev => prev.map(a => a.id === id ? { ...a, ...datosAActualizar } : a))
     } catch (error) {
       console.error(error)
@@ -460,22 +492,32 @@ export default function DualDashboardAsistencias() {
     }
   }
 
+  // --- FUNCIÓN PARA BORRAR NOTA EN MODO EDICIÓN ---
+  const borrarNota = async (id: string) => {
+    try {
+      const { error } = await supabase.from('registro_asistencias').update({ notas: null }).eq('id', id)
+      if (error) throw error
+      toast.success('Nota eliminada correctamente')
+      setAsistencias(prev => prev.map(a => a.id === id ? { ...a, notas: null } : a))
+    } catch (error) {
+      toast.error('Error al eliminar la nota')
+    }
+  }
+
   const puntuales = asistencias.filter(a => a.estado_ingreso === 'PUNTUAL').length
   const tardanzas = asistencias.filter(a => a.estado_ingreso === 'TARDANZA').length
   const salidas = asistencias.filter(a => a.hora_salida !== null).length
 
-  // Variantes de Animación del Contenedor de la Lista
   const listContainerVariants: Variants = {
     hidden: { opacity: 0 },
     show: {
       opacity: 1,
       transition: {
-        staggerChildren: 0.05 // Tiempo entre cada fila que aparece
+        staggerChildren: 0.05 
       }
     }
   };
 
-  // --- PANTALLA DE CARGA INICIAL (SPLASH SCREEN LIMPIO) ---
   if (!mounted || isInitialLoad) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center bg-[#f8f9fa] dark:bg-slate-950 transition-colors duration-500">
@@ -488,7 +530,6 @@ export default function DualDashboardAsistencias() {
     <div className={`min-h-screen flex flex-col ${modoEdicion ? 'bg-blue-50/50 dark:bg-slate-900' : 'bg-[#f8f9fa] dark:bg-slate-950'} text-slate-900 dark:text-slate-100 font-sans transition-colors duration-500`}>
       <Toaster position="top-center" richColors />
       
-      {/* HEADER SUPERIOR */}
       <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-50 shadow-sm transition-colors duration-500">
         <div className="max-w-[1600px] mx-auto w-full px-6 h-20 flex items-center justify-between">
           
@@ -515,18 +556,14 @@ export default function DualDashboardAsistencias() {
         </div>
       </header>
 
-      {/* CONTENIDO PRINCIPAL Y BARRA DE HERRAMIENTAS */}
       <main className="flex-1 w-full max-w-[1600px] mx-auto px-6 py-8 flex flex-col xl:flex-row gap-8">
         
-        {/* COLUMNA IZQUIERDA: CONTROLES Y FILTROS */}
         <div className="w-full xl:w-80 shrink-0 flex flex-col gap-6">
           
-          {/* Reloj móvil */}
           <div className="sm:hidden w-full flex justify-center mb-2">
             <LiveClock />
           </div>
 
-          {/* Tarjeta de Calendario */}
           <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors duration-500">
             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Fecha de Consulta</p>
             <div className="flex items-center justify-between bg-slate-50 dark:bg-slate-950 p-1.5 rounded-xl border border-slate-200 dark:border-slate-800 transition-colors duration-500">
@@ -546,7 +583,6 @@ export default function DualDashboardAsistencias() {
             </div>
           </div>
 
-          {/* Tarjeta de Filtros */}
           <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors duration-500">
             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
               <SlidersHorizontal size={14}/> Filtros
@@ -581,7 +617,6 @@ export default function DualDashboardAsistencias() {
             </div>
           </div>
 
-          {/* Tarjeta de Acciones Rápida */}
           <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm space-y-3 transition-colors duration-500">
             <button onClick={() => setMostrarModalExportar(true)} className="w-full flex items-center justify-center gap-2 p-3 rounded-xl bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20 text-sm font-bold transition-all active:scale-95">
               <FileSpreadsheet size={18} /> Exportar Reporte Excel
@@ -596,10 +631,8 @@ export default function DualDashboardAsistencias() {
 
         </div>
 
-        {/* COLUMNA DERECHA: TABLA Y ESTADÍSTICAS */}
         <div className="flex-1 flex flex-col min-w-0">
           
-          {/* Estadísticas */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
             <StatCard title="Ingresos" value={asistencias.length} icon={<Users size={20}/>} color="bg-blue-500" />
             <StatCard title="Puntuales" value={puntuales} icon={<CheckCircle2 size={20}/>} color="bg-emerald-500" />
@@ -607,10 +640,8 @@ export default function DualDashboardAsistencias() {
             <StatCard title="Salidas" value={salidas} icon={<LogOut size={20}/>} color="bg-slate-500" />
           </div>
 
-          {/* CONTENEDOR DE LA LISTA TIPO TABLA */}
           <div className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm flex flex-col overflow-hidden transition-colors duration-500">
             
-            {/* Header de la Tabla */}
             <div className="bg-slate-50 dark:bg-slate-950/50 border-b border-slate-200 dark:border-slate-800 p-4 flex items-center justify-between transition-colors duration-500">
               <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
                 <AlignLeft size={18} />
@@ -621,7 +652,6 @@ export default function DualDashboardAsistencias() {
               </span>
             </div>
 
-            {/* Cuerpo de la Tabla con Scroll Independiente */}
             <div className="flex-1 overflow-y-auto p-3 bg-slate-50/50 dark:bg-slate-900/50 transition-colors duration-500">
               {loading ? (
                 <div className="flex h-64 justify-center items-center">
@@ -638,7 +668,6 @@ export default function DualDashboardAsistencias() {
                    <h3 className="text-lg font-bold">No hay coincidencias</h3>
                  </div>
               ) : (
-                // Lista de animaciones controlada por Framer Motion
                 <motion.div 
                   variants={listContainerVariants}
                   initial="hidden"
@@ -654,6 +683,7 @@ export default function DualDashboardAsistencias() {
                         modoEdicion={modoEdicion} 
                         onActualizar={actualizarHora}
                         onAbrirNota={(notaData) => setNotaSeleccionada(notaData)}
+                        onBorrarNota={borrarNota}
                       />
                     ))}
                   </AnimatePresence>
@@ -666,8 +696,6 @@ export default function DualDashboardAsistencias() {
       </main>
 
       {/* MODALES SUPERPUESTOS */}
-
-      {/* MODAL EXPORTAR EXCEL */}
       {mostrarModalExportar && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-700 relative animate-in zoom-in-95 duration-200">
@@ -717,11 +745,9 @@ export default function DualDashboardAsistencias() {
         <ModalRegistroManual onClose={() => setMostrarModalManual(false)} fechaBase={format(fechaActual, 'yyyy-MM-dd')} onSuccess={(nuevoRegistro) => { if (isToday(fechaActual) || nuevoRegistro.fecha === format(fechaActual, 'yyyy-MM-dd')) { setAsistencias(prev => [nuevoRegistro, ...prev]) }; setMostrarModalManual(false) }} />
       )}
 
-      {/* --- MODAL DE NOTAS ACTUALIZADO PARA DIFERENCIAR INGRESO Y SALIDA DE OBRA --- */}
       {notaSeleccionada && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-700 animate-in zoom-in-95 duration-200 transition-colors duration-500">
-            {/* Color de barra superior dependiendo del tipo de nota */}
             <div className={`${notaSeleccionada.tipoObra === 'ingreso' ? 'bg-blue-500' : notaSeleccionada.tipoObra === 'salida' ? 'bg-red-500' : 'bg-amber-500'} h-1.5 w-full`} />
             <div className="p-6 relative">
               <button onClick={() => setNotaSeleccionada(null)} className="absolute top-4 right-4 p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"><X size={20} /></button>
@@ -735,8 +761,8 @@ export default function DualDashboardAsistencias() {
                  <MessageSquareText size={28} />}
                 
                 <h3 className="text-xl font-black text-slate-900 dark:text-white">
-                  {notaSeleccionada.tipoObra === 'ingreso' ? 'Ingreso desde Obra' : 
-                   notaSeleccionada.tipoObra === 'salida' ? 'Salida desde Obra' : 'Motivo Guardado'}
+                  {notaSeleccionada.tipoObra === 'ingreso' ? 'Ingreso en Obra' : 
+                   notaSeleccionada.tipoObra === 'salida' ? 'Salida de Obra' : 'Motivo Guardado'}
                 </h3>
               </div>
               
@@ -753,10 +779,9 @@ export default function DualDashboardAsistencias() {
                 {notaSeleccionada.nota}
               </div>
 
-              {/* BOTÓN VER EN MAPA SI ES CUALQUIER TIPO DE OBRA */}
               {notaSeleccionada.tipoObra !== 'ninguna' && notaSeleccionada.coordenadas && (
                 <a 
-                  href={`https://www.google.com/maps/search/?api=1&query=${notaSeleccionada.coordenadas}`} 
+                  href={`https://www.google.com/maps?q=${notaSeleccionada.coordenadas}`} 
                   target="_blank" 
                   rel="noreferrer"
                   className={`w-full mt-4 flex items-center justify-center gap-2 font-bold py-3 rounded-xl transition-all border
@@ -871,8 +896,8 @@ function ModalRegistroManual({ onClose, fechaBase, onSuccess }: { onClose: () =>
   )
 }
 
-// --- FILA DE TABLA (INTELIGENTE: DIFERENCIA INGRESO VS SALIDA DE OBRA) ---
-function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota }: { data: any, index: number, modoEdicion: boolean, onActualizar: Function, onAbrirNota: (nota: {nombre: string, nota: string, hora: string, tipoObra: 'ninguna'|'ingreso'|'salida', coordenadas?: string}) => void }) {
+// --- FILA DE TABLA ---
+function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota, onBorrarNota }: { data: any, index: number, modoEdicion: boolean, onActualizar: Function, onAbrirNota: (nota: {nombre: string, nota: string, hora: string, tipoObra: 'ninguna'|'ingreso'|'salida', coordenadas?: string}) => void, onBorrarNota: (id: string) => void }) {
   const isPuntual = data.estado_ingreso === 'PUNTUAL'
   const justAdded = index === 0 && isToday(new Date(data.hora_ingreso))
   
@@ -885,7 +910,6 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota }: {
     return (words[0][0] + words[1][0]).toUpperCase();
   };
 
-  // Lógica para extraer la coordenada y determinar si es Ingreso o Salida de obra
   const tieneNota = !!data.notas;
   const contieneGPS = tieneNota && data.notas.includes('[GPS:');
   const esIngresoObra = contieneGPS && data.notas.startsWith('Ingreso en:');
@@ -901,6 +925,8 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota }: {
     if (startIdx !== -1 && endIdx !== -1) {
       coordenadas = data.notas.substring(startIdx + 5, endIdx).trim(); 
       textoLimpio = data.notas.substring(0, startIdx).trim(); 
+      textoLimpio = textoLimpio.replace('Ingreso en: ', '').replace('Salida de obra: ', '').trim();
+      if (textoLimpio === '') textoLimpio = 'Marcación en Obra';
     }
   }
 
@@ -962,7 +988,14 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota }: {
         <div className="flex flex-col items-end min-w-[70px]">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Salida</span>
           {modoEdicion ? (
-            <input type="time" defaultValue={data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm') : ''} className="bg-transparent border-b border-blue-500 text-base font-bold text-slate-700 dark:text-slate-300 outline-none w-20 text-right" onBlur={(e) => { const currentValue = data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm') : ''; if(e.target.value && e.target.value !== currentValue) onActualizar(data.id, 'hora_salida', e.target.value, data.hora_salida || data.hora_ingreso) }} />
+            <div className="flex items-center gap-1">
+              <input type="time" defaultValue={data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm') : ''} className="bg-transparent border-b border-blue-500 text-base font-bold text-slate-700 dark:text-slate-300 outline-none w-20 text-right" onBlur={(e) => { const currentValue = data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm') : ''; if(e.target.value && e.target.value !== currentValue) onActualizar(data.id, 'hora_salida', e.target.value, data.hora_salida || data.hora_ingreso) }} />
+              {data.hora_salida && (
+                <button onClick={() => onActualizar(data.id, 'hora_salida', null, data.hora_ingreso)} className="text-red-400 hover:text-red-600 transition-colors p-1" title="Borrar Salida">
+                  <X size={14}/>
+                </button>
+              )}
+            </div>
           ) : (
             data.hora_salida ? (
               <div className="font-bold text-lg leading-none text-slate-700 dark:text-slate-300">
@@ -976,31 +1009,38 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota }: {
           )}
         </div>
 
-        {/* BOTÓN INTELIGENTE (Azul = Ingreso Obra, Rojo = Salida Obra, Ambar = Nota Normal) */}
-        <div className="w-10 flex justify-center">
-          {tieneNota ? (
-            <button 
-              onClick={() => onAbrirNota({ 
-                nombre: data.nombres_completos, 
-                nota: textoLimpio,
-                hora: tipoObra === 'ingreso' ? format(new Date(data.hora_ingreso), 'HH:mm a') : (data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm a') : 'Desconocida'),
-                tipoObra: tipoObra,
-                coordenadas: coordenadas 
-              })} 
-              className={`p-2 rounded-full border transition-all shadow-sm hover:scale-110 
-                ${tipoObra === 'ingreso'
-                  ? 'bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100 dark:bg-blue-500/10 dark:border-blue-500/30' 
-                  : tipoObra === 'salida' 
-                  ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100 dark:bg-red-500/10 dark:border-red-500/30' 
-                  : 'bg-amber-50 text-amber-600 border-amber-200 hover:bg-amber-100 dark:bg-amber-500/10 dark:border-amber-500/30'}`} 
-              title={tipoObra === 'ingreso' ? "Ver ingreso de obra" : tipoObra === 'salida' ? "Ver salida de obra" : "Ver motivo"}
-            >
-              {tipoObra === 'ingreso' ? <HardHat size={18} /> : 
-               tipoObra === 'salida' ? <MapPin size={18} /> : 
-               <MessageSquareText size={18} />}
-            </button>
-          ) : (
-            <div className="w-10"></div> 
+        {/* BOTONES ACCIÓN NOTA/OBRA Y BORRAR (MODO ADMIN) */}
+        <div className="w-auto flex justify-center items-center gap-1 min-w-[40px]">
+          {tieneNota && (
+            <>
+              <button 
+                onClick={() => onAbrirNota({ 
+                  nombre: data.nombres_completos, 
+                  nota: textoLimpio,
+                  hora: tipoObra === 'ingreso' ? format(new Date(data.hora_ingreso), 'HH:mm a') : (data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm a') : 'Desconocida'),
+                  tipoObra: tipoObra,
+                  coordenadas: coordenadas 
+                })} 
+                className={`p-2 rounded-full border transition-all shadow-sm hover:scale-110 
+                  ${tipoObra === 'ingreso'
+                    ? 'bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100 dark:bg-blue-500/10 dark:border-blue-500/30' 
+                    : tipoObra === 'salida' 
+                    ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100 dark:bg-red-500/10 dark:border-red-500/30' 
+                    : 'bg-amber-50 text-amber-600 border-amber-200 hover:bg-amber-100 dark:bg-amber-500/10 dark:border-amber-500/30'}`} 
+                title={tipoObra === 'ingreso' ? "Ver ingreso de obra" : tipoObra === 'salida' ? "Ver salida de obra" : "Ver motivo"}
+              >
+                {tipoObra === 'ingreso' ? <HardHat size={18} /> : 
+                 tipoObra === 'salida' ? <MapPin size={18} /> : 
+                 <MessageSquareText size={18} />}
+              </button>
+
+              {/* Botón Borrar Nota (Solo en Modo Edición) */}
+              {modoEdicion && (
+                <button onClick={() => onBorrarNota(data.id)} className="p-2 ml-1 rounded-full border border-red-200 text-red-500 hover:bg-red-50 dark:bg-red-500/10 dark:border-red-500/30 transition-all shadow-sm hover:scale-110" title="Eliminar Nota/Ubicación">
+                  <Trash2 size={16} />
+                </button>
+              )}
+            </>
           )}
         </div>
 
