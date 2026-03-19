@@ -1,24 +1,218 @@
 'use client'
 
 import * as XLSX from 'xlsx-js-style';
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { supabase } from '@/utils/supabase/client'
 import { motion, AnimatePresence, Variants } from 'framer-motion'
-import { format, isToday, subDays, addDays, parseISO } from 'date-fns'
+import { format, isToday, subDays, addDays } from 'date-fns'
 import { es } from 'date-fns/locale'
-import { 
-  CalendarDays, ChevronLeft, ChevronRight, 
-  CheckCircle2, AlertCircle, LogOut, Activity, UserCircle2,
-  Unlock, MessageSquareText, X, UserPlus, Loader2, Search, Filter,
+import {
+  CalendarDays, ChevronLeft, ChevronRight,
+  CheckCircle2, AlertCircle, LogOut, UserPlus, Loader2, Search, Filter,
   FileSpreadsheet, SlidersHorizontal, Users, ShieldCheck, AlignLeft,
-  MapPin, Map, Download, HardHat, Trash2 // <-- Importado Trash2 para borrar
+  MapPin, Map as MapIcon, Download, HardHat, Trash2, MessageSquareText, X,
+  Sunrise, Sun, Sunset, MoonStar
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 
-// --- COMPONENTE SWITCH DE TEMA (UIVERSE) ---
+import Map, {
+  Marker,
+  NavigationControl,
+  FullscreenControl,
+  type MapRef
+} from 'react-map-gl/mapbox'
+import 'mapbox-gl/dist/mapbox-gl.css'
+
+type TimeOfDay = 'dawn' | 'day' | 'dusk' | 'night'
+type TipoMarcacion = 'ninguna' | 'ingreso' | 'salida' | 'nota'
+
+function getLimaTimeParts() {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Lima',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  }).formatToParts(new Date())
+
+  const hour = Number(parts.find(p => p.type === 'hour')?.value ?? '0')
+  const minute = Number(parts.find(p => p.type === 'minute')?.value ?? '0')
+  const second = Number(parts.find(p => p.type === 'second')?.value ?? '0')
+
+  return { hour, minute, second }
+}
+
+function getTimeOfDayFromLima(): TimeOfDay {
+  const { hour } = getLimaTimeParts()
+  if (hour >= 6 && hour < 8) return 'dawn'
+  if (hour >= 8 && hour < 17) return 'day'
+  if (hour >= 17 && hour < 19) return 'dusk'
+  return 'night'
+}
+
+function getTimeCycleMeta(timeOfDay: TimeOfDay) {
+  switch (timeOfDay) {
+    case 'dawn':
+      return {
+        title: 'Amanecer',
+        subtitle: 'Luz suave de inicio',
+        icon: Sunrise,
+        chipClass: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/20'
+      }
+    case 'day':
+      return {
+        title: 'Día',
+        subtitle: 'Sol alto y sombras activas',
+        icon: Sun,
+        chipClass: 'bg-sky-50 text-sky-700 border-sky-200 dark:bg-sky-500/10 dark:text-sky-300 dark:border-sky-500/20'
+      }
+    case 'dusk':
+      return {
+        title: 'Atardecer',
+        subtitle: 'Luz cálida del cierre',
+        icon: Sunset,
+        chipClass: 'bg-orange-50 text-orange-700 border-orange-200 dark:bg-orange-500/10 dark:text-orange-300 dark:border-orange-500/20'
+      }
+    case 'night':
+    default:
+      return {
+        title: 'Noche',
+        subtitle: 'Entorno nocturno activo',
+        icon: MoonStar,
+        chipClass: 'bg-indigo-50 text-indigo-700 border-indigo-200 dark:bg-indigo-500/10 dark:text-indigo-300 dark:border-indigo-500/20'
+      }
+  }
+}
+
+function extraerDetalleNota(notas?: string | null) {
+  const textoOriginal = notas ?? ''
+  const tieneNota = textoOriginal.trim().length > 0
+  const contieneGPS = textoOriginal.includes('[GPS:')
+
+  let textoLimpio = textoOriginal
+  let coordenadas = ''
+  let lat: number | null = null
+  let lng: number | null = null
+  let tipoMarcacion: TipoMarcacion = 'ninguna'
+
+  if (!tieneNota) {
+    return {
+      tieneNota: false,
+      contieneGPS: false,
+      textoLimpio: '',
+      coordenadas: '',
+      lat: null,
+      lng: null,
+      tipoMarcacion: 'ninguna' as TipoMarcacion
+    }
+  }
+
+  if (textoOriginal.startsWith('Ingreso en:')) tipoMarcacion = 'ingreso'
+  else if (textoOriginal.startsWith('Salida de obra:') || textoOriginal.startsWith('Salida en:')) tipoMarcacion = 'salida'
+  else tipoMarcacion = 'nota'
+
+  if (contieneGPS) {
+    const startIdx = textoOriginal.indexOf('[GPS:')
+    const endIdx = textoOriginal.indexOf(']', startIdx)
+
+    if (startIdx !== -1 && endIdx !== -1) {
+      coordenadas = textoOriginal.substring(startIdx + 5, endIdx).trim()
+      textoLimpio = textoOriginal.substring(0, startIdx).trim()
+
+      textoLimpio = textoLimpio
+        .replace('Ingreso en: ', '')
+        .replace('Salida de obra: ', '')
+        .replace('Salida en: ', '')
+        .trim()
+
+      if (textoLimpio === '') {
+        textoLimpio =
+          tipoMarcacion === 'ingreso'
+            ? 'Ingreso en obra'
+            : tipoMarcacion === 'salida'
+              ? 'Salida de obra'
+              : 'Nota con ubicación'
+      }
+
+      const [latStr, lngStr] = coordenadas.split(',')
+      const parsedLat = parseFloat((latStr ?? '').trim())
+      const parsedLng = parseFloat((lngStr ?? '').trim())
+
+      lat = Number.isNaN(parsedLat) ? null : parsedLat
+      lng = Number.isNaN(parsedLng) ? null : parsedLng
+    }
+  } else {
+    textoLimpio = textoOriginal.trim()
+  }
+
+  return {
+    tieneNota,
+    contieneGPS,
+    textoLimpio,
+    coordenadas,
+    lat,
+    lng,
+    tipoMarcacion
+  }
+}
+
+function aplicarEstiloMapa(map: any, timeOfDay: TimeOfDay) {
+  try {
+    map.setConfigProperty('basemap', 'lightPreset', timeOfDay)
+  } catch {}
+
+  try {
+    map.setConfigProperty('basemap', 'show3dObjects', true)
+  } catch {}
+
+  try {
+    map.setConfigProperty('basemap', 'showPointOfInterestLabels', false)
+  } catch {}
+
+  try {
+    map.setConfigProperty('basemap', 'showTransitLabels', false)
+  } catch {}
+
+  const fogByTime: Record<TimeOfDay, any> = {
+    dawn: {
+      color: 'rgb(255, 211, 170)',
+      'high-color': 'rgb(87, 133, 221)',
+      'horizon-blend': 0.08,
+      'space-color': 'rgb(39, 53, 95)',
+      'star-intensity': 0.15
+    },
+    day: {
+      color: 'rgb(186, 210, 235)',
+      'high-color': 'rgb(36, 92, 223)',
+      'horizon-blend': 0.04,
+      'space-color': 'rgb(11, 11, 25)',
+      'star-intensity': 0
+    },
+    dusk: {
+      color: 'rgb(255, 183, 148)',
+      'high-color': 'rgb(88, 74, 169)',
+      'horizon-blend': 0.1,
+      'space-color': 'rgb(28, 22, 54)',
+      'star-intensity': 0.25
+    },
+    night: {
+      color: 'rgb(30, 40, 72)',
+      'high-color': 'rgb(17, 24, 39)',
+      'horizon-blend': 0.08,
+      'space-color': 'rgb(7, 10, 22)',
+      'star-intensity': 0.7
+    }
+  }
+
+  try {
+    map.setFog(fogByTime[timeOfDay] as any)
+  } catch {}
+}
+
+// --- COMPONENTE SWITCH DE TEMA ---
 const ThemeSwitch = ({ isDarkMode, onToggle }: { isDarkMode: boolean, onToggle: () => void }) => (
   <div className="relative transform scale-[0.6] sm:scale-75 origin-right">
-    <style dangerouslySetInnerHTML={{__html: `
+    <style dangerouslySetInnerHTML={{ __html: `
       .theme-switch {
         --toggle-size: 20px;
         --container-width: 5.625em;
@@ -100,7 +294,7 @@ const ThemeSwitch = ({ isDarkMode, onToggle }: { isDarkMode: boolean, onToggle: 
       .theme-switch__checkbox:checked + .theme-switch__container .theme-switch__moon { transform: translate(0); }
       .theme-switch__checkbox:checked + .theme-switch__container .theme-switch__clouds { bottom: -4.062em; }
       .theme-switch__checkbox:checked + .theme-switch__container .theme-switch__stars-container { top: 50%; transform: translateY(-50%); }
-    `}} />
+    ` }} />
     <label className="theme-switch">
       <input type="checkbox" className="theme-switch__checkbox" checked={isDarkMode} onChange={onToggle} />
       <div className="theme-switch__container">
@@ -124,10 +318,9 @@ const ThemeSwitch = ({ isDarkMode, onToggle }: { isDarkMode: boolean, onToggle: 
   </div>
 )
 
-// --- COMPONENTE LOADER MODERNO (UIVERSE) ---
 const CustomLoader = ({ text = "Sincronizando..." }: { text?: string }) => (
   <div className="flex flex-col items-center justify-center h-full">
-    <style dangerouslySetInnerHTML={{__html: `
+    <style dangerouslySetInnerHTML={{ __html: `
       .pl { width: 6em; height: 6em; }
       .pl__ring { animation: ringA 2s linear infinite; }
       .pl__ring--a { stroke: currentColor; }
@@ -138,7 +331,7 @@ const CustomLoader = ({ text = "Sincronizando..." }: { text?: string }) => (
       @keyframes ringB { from, 12% { stroke-dasharray: 0 220; stroke-width: 20; stroke-dashoffset: -110; } 20% { stroke-dasharray: 20 200; stroke-width: 30; stroke-dashoffset: -115; } 40% { stroke-dasharray: 20 200; stroke-width: 30; stroke-dashoffset: -195; } 48%, 62% { stroke-dasharray: 0 220; stroke-width: 20; stroke-dashoffset: -220; } 70% { stroke-dasharray: 20 200; stroke-width: 30; stroke-dashoffset: -225; } 90% { stroke-dasharray: 20 200; stroke-width: 30; stroke-dashoffset: -305; } 98%, to { stroke-dasharray: 0 220; stroke-width: 20; stroke-dashoffset: -330; } }
       @keyframes ringC { from { stroke-dasharray: 0 440; stroke-width: 20; stroke-dashoffset: 0; } 8% { stroke-dasharray: 40 400; stroke-width: 30; stroke-dashoffset: -5; } 28% { stroke-dasharray: 40 400; stroke-width: 30; stroke-dashoffset: -175; } 36%, 58% { stroke-dasharray: 0 440; stroke-width: 20; stroke-dashoffset: -220; } 66% { stroke-dasharray: 40 400; stroke-width: 30; stroke-dashoffset: -225; } 86% { stroke-dasharray: 40 400; stroke-width: 30; stroke-dashoffset: -395; } 94%, to { stroke-dasharray: 0 440; stroke-width: 20; stroke-dashoffset: -440; } }
       @keyframes ringD { from, 8% { stroke-dasharray: 0 440; stroke-width: 20; stroke-dashoffset: 0; } 16% { stroke-dasharray: 40 400; stroke-width: 30; stroke-dashoffset: -5; } 36% { stroke-dasharray: 40 400; stroke-width: 30; stroke-dashoffset: -175; } 44%, 50% { stroke-dasharray: 0 440; stroke-width: 20; stroke-dashoffset: -220; } 58% { stroke-dasharray: 40 400; stroke-width: 30; stroke-dashoffset: -225; } 78% { stroke-dasharray: 40 400; stroke-width: 30; stroke-dashoffset: -395; } 86%, to { stroke-dasharray: 0 440; stroke-width: 20; stroke-dashoffset: -440; } }
-    `}} />
+    ` }} />
     <div className="loader-wrapper drop-shadow-md">
       <svg viewBox="0 0 240 240" height="120" width="120" className="pl">
         <circle strokeLinecap="round" strokeDashoffset="-330" strokeDasharray="0 660" strokeWidth="20" stroke="currentColor" fill="none" r="105" cy="120" cx="120" className="pl__ring pl__ring--a text-blue-600 dark:text-blue-500" />
@@ -153,21 +346,45 @@ const CustomLoader = ({ text = "Sincronizando..." }: { text?: string }) => (
   </div>
 );
 
-// Componente para el reloj en vivo
 function LiveClock() {
   const [time, setTime] = useState(new Date())
+
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000)
     return () => clearInterval(timer)
   }, [])
+
+  const timeText = new Intl.DateTimeFormat('es-PE', {
+    timeZone: 'America/Lima',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  }).format(time)
+
   return (
     <div className="flex flex-col items-end">
       <span className="text-3xl lg:text-4xl font-black text-slate-900 dark:text-white tracking-tighter tabular-nums drop-shadow-sm transition-colors">
-        {format(time, 'HH:mm:ss')}
+        {timeText}
       </span>
       <span className="text-emerald-600 dark:text-emerald-400 font-bold tracking-widest uppercase text-[10px] mt-0.5 transition-colors">
-        Hora Oficial
+        Hora Oficial Lima
       </span>
+    </div>
+  )
+}
+
+function TimeCycleBadge({ timeOfDay }: { timeOfDay: TimeOfDay }) {
+  const meta = getTimeCycleMeta(timeOfDay)
+  const Icon = meta.icon
+
+  return (
+    <div className={`inline-flex items-center gap-2 border px-3 py-2 rounded-xl ${meta.chipClass}`}>
+      <Icon size={16} />
+      <div className="flex flex-col leading-none">
+        <span className="text-[11px] font-black uppercase tracking-wider">{meta.title}</span>
+        <span className="text-[10px] opacity-80 font-semibold">{meta.subtitle}</span>
+      </div>
     </div>
   )
 }
@@ -175,30 +392,39 @@ function LiveClock() {
 export default function DualDashboardAsistencias() {
   const [asistencias, setAsistencias] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
-  const [isInitialLoad, setIsInitialLoad] = useState(true) 
+  const [isInitialLoad, setIsInitialLoad] = useState(true)
   const [fechaActual, setFechaActual] = useState(new Date())
-  
+
   const [isDarkMode, setIsDarkMode] = useState(false)
   const [mounted, setMounted] = useState(false)
   const [modoEdicion, setModoEdicion] = useState(false)
 
-  // Modales
-  const [notaSeleccionada, setNotaSeleccionada] = useState<{nombre: string, nota: string, hora: string, tipoObra: 'ninguna' | 'ingreso' | 'salida', coordenadas?: string} | null>(null)
+  const [vistaActual, setVistaActual] = useState<'lista' | 'mapa'>('lista')
+
+  const mapRef = useRef<MapRef | null>(null)
+  const [timeOfDay, setTimeOfDay] = useState<TimeOfDay>('day')
+
+  const [notaSeleccionada, setNotaSeleccionada] = useState<{
+    nombre: string,
+    nota: string,
+    hora: string,
+    tipoObra: TipoMarcacion,
+    coordenadas?: string,
+    estadoIngreso?: string
+  } | null>(null)
+
   const [mostrarModalManual, setMostrarModalManual] = useState(false)
   const [mostrarModalExportar, setMostrarModalExportar] = useState(false)
 
-  // Filtros
   const [busqueda, setBusqueda] = useState('')
   const [filtroArea, setFiltroArea] = useState('TODAS')
   const [filtroEstado, setFiltroEstado] = useState('TODOS')
 
-  // Exportar Fechas
   const [exportarDesde, setExportarDesde] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [exportarHasta, setExportarHasta] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [exportando, setExportando] = useState(false)
-  const [tipoExportacion, setTipoExportacion] = useState<'dia'|'rango'>('dia')
+  const [tipoExportacion, setTipoExportacion] = useState<'dia' | 'rango'>('dia')
 
-  // Cargar preferencia de tema 
   useEffect(() => {
     setMounted(true)
     const savedTheme = localStorage.getItem('ruag_theme')
@@ -210,6 +436,25 @@ export default function DualDashboardAsistencias() {
       document.documentElement.classList.remove('dark')
     }
   }, [])
+
+  useEffect(() => {
+    const updateTimePreset = () => {
+      setTimeOfDay(getTimeOfDayFromLima())
+    }
+
+    updateTimePreset()
+    const interval = setInterval(updateTimePreset, 30000)
+    return () => clearInterval(interval)
+  }, [])
+
+  useEffect(() => {
+    if (mapRef.current) {
+      const map = mapRef.current.getMap()
+      if (map && map.isStyleLoaded()) {
+        aplicarEstiloMapa(map, timeOfDay)
+      }
+    }
+  }, [timeOfDay])
 
   useEffect(() => {
     let teclado = ''
@@ -226,7 +471,7 @@ export default function DualDashboardAsistencias() {
           else toast.error('Modo Admin Bloqueado 🔒')
           return nuevoEstado
         })
-        teclado = '' 
+        teclado = ''
       }
     }
 
@@ -248,7 +493,7 @@ export default function DualDashboardAsistencias() {
   const fetchAsistencias = async (fecha: Date) => {
     setLoading(true)
     const fechaString = format(fecha, 'yyyy-MM-dd')
-    
+
     const { data, error } = await supabase
       .from('registro_asistencias')
       .select('*')
@@ -256,9 +501,9 @@ export default function DualDashboardAsistencias() {
       .order('hora_ingreso', { ascending: false })
 
     if (!error && data) setAsistencias(data)
-    
+
     setLoading(false)
-    
+
     if (isInitialLoad) {
       setTimeout(() => setIsInitialLoad(false), 500)
     }
@@ -272,7 +517,7 @@ export default function DualDashboardAsistencias() {
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'registro_asistencias' }, (payload) => {
           setAsistencias(prev => [payload.new, ...prev])
           const audio = new Audio('/notification.mp3')
-          audio.play().catch(() => {})
+          audio.play().catch(() => { })
           toast.success(`INGRESO: ${payload.new.nombres_completos}`, {
             style: { background: '#10B981', color: 'white', border: 'none' }
           })
@@ -286,7 +531,6 @@ export default function DualDashboardAsistencias() {
     }
   }, [fechaActual])
 
-  // --- LÓGICA DE FILTRADO (Optimizada) ---
   const areasDisponibles = useMemo(() => {
     const areasSet = new Set(asistencias.map(a => a.area).filter(Boolean));
     return ['TODAS', ...Array.from(areasSet)].sort();
@@ -294,11 +538,11 @@ export default function DualDashboardAsistencias() {
 
   const asistenciasFiltradas = useMemo(() => {
     return asistencias.filter(item => {
-      const coincideBusqueda = 
-        busqueda === '' || 
-        item.nombres_completos.toLowerCase().includes(busqueda.toLowerCase()) ||
-        item.dni.includes(busqueda);
-      
+      const coincideBusqueda =
+        busqueda === '' ||
+        item.nombres_completos?.toLowerCase().includes(busqueda.toLowerCase()) ||
+        item.dni?.includes(busqueda);
+
       const coincideArea = filtroArea === 'TODAS' || item.area === filtroArea;
       const coincideEstado = filtroEstado === 'TODOS' || item.estado_ingreso === filtroEstado;
 
@@ -306,8 +550,70 @@ export default function DualDashboardAsistencias() {
     });
   }, [asistencias, busqueda, filtroArea, filtroEstado]);
 
+  const marcacionesConGPS = useMemo(() => {
+    return asistenciasFiltradas
+      .map(a => {
+        const detalle = extraerDetalleNota(a.notas)
+        if (!detalle.contieneGPS || detalle.lat === null || detalle.lng === null) return null
 
-  // --- NUEVA LÓGICA DE EXPORTACIÓN CON ENLACES GPS Y NOTAS LIMPIAS ---
+        return {
+          ...a,
+          ...detalle
+        }
+      })
+      .filter(Boolean) as any[]
+  }, [asistenciasFiltradas])
+
+  const centroMapa = useMemo(() => {
+    if (marcacionesConGPS.length === 0) {
+      return { longitude: -77.0428, latitude: -12.0464 }
+    }
+
+    const avgLng = marcacionesConGPS.reduce((acc, item) => acc + item.lng, 0) / marcacionesConGPS.length
+    const avgLat = marcacionesConGPS.reduce((acc, item) => acc + item.lat, 0) / marcacionesConGPS.length
+
+    return { longitude: avgLng, latitude: avgLat }
+  }, [marcacionesConGPS])
+
+  useEffect(() => {
+    if (vistaActual !== 'mapa') return
+    if (!mapRef.current) return
+    if (marcacionesConGPS.length === 0) return
+
+    const map = mapRef.current.getMap()
+    if (!map || !map.isStyleLoaded()) return
+
+    if (marcacionesConGPS.length === 1) {
+      map.flyTo({
+        center: [marcacionesConGPS[0].lng, marcacionesConGPS[0].lat],
+        zoom: 16,
+        pitch: 65,
+        bearing: -20,
+        duration: 1200
+      })
+      return
+    }
+
+    let minLng = marcacionesConGPS[0].lng
+    let maxLng = marcacionesConGPS[0].lng
+    let minLat = marcacionesConGPS[0].lat
+    let maxLat = marcacionesConGPS[0].lat
+
+    marcacionesConGPS.forEach(item => {
+      if (item.lng < minLng) minLng = item.lng
+      if (item.lng > maxLng) maxLng = item.lng
+      if (item.lat < minLat) minLat = item.lat
+      if (item.lat > maxLat) maxLat = item.lat
+    })
+
+    map.fitBounds([[minLng, minLat], [maxLng, maxLat]], {
+      padding: 90,
+      duration: 1200,
+      pitch: 60,
+      bearing: -20
+    })
+  }, [vistaActual, marcacionesConGPS])
+
   const procesarYDescargarExcel = (data: any[], nombreArchivo: string) => {
     if (data.length === 0) {
       toast.error("No hay registros en estas fechas para exportar");
@@ -316,7 +622,7 @@ export default function DualDashboardAsistencias() {
 
     const headerStyle = {
       font: { bold: true, color: { rgb: "FFFFFF" }, sz: 12 },
-      fill: { fgColor: { rgb: "1E293B" } }, 
+      fill: { fgColor: { rgb: "1E293B" } },
       alignment: { horizontal: "center", vertical: "center" },
       border: { bottom: { style: "medium", color: { rgb: "000000" } } }
     };
@@ -343,22 +649,12 @@ export default function DualDashboardAsistencias() {
     };
 
     data.forEach((registro) => {
-      let textoLimpio = registro.notas || '-';
-      let linkMaps = '-';
-      
-      // Separar las notas de las coordenadas para el Excel
-      if (registro.notas && registro.notas.includes('[GPS:')) {
-        const startIdx = registro.notas.indexOf('[GPS:');
-        const endIdx = registro.notas.indexOf(']', startIdx);
-        if (startIdx !== -1 && endIdx !== -1) {
-          const coords = registro.notas.substring(startIdx + 5, endIdx).trim();
-          textoLimpio = registro.notas.substring(0, startIdx).trim();
-          // Quitar prefijos si existen para que se vea más limpio en excel
-          textoLimpio = textoLimpio.replace('Ingreso en: ', '').replace('Salida de obra: ', '').trim();
-          if (textoLimpio === '') textoLimpio = 'Marcación en Obra';
-          
-          linkMaps = `https://www.google.com/maps?q=${coords}`;
-        }
+      const detalle = extraerDetalleNota(registro.notas)
+      let textoLimpio = detalle.tieneNota ? detalle.textoLimpio : '-'
+      let linkMaps = '-'
+
+      if (detalle.contieneGPS && detalle.coordenadas) {
+        linkMaps = `http://googleusercontent.com/maps.google.com/?q=${detalle.coordenadas}`
       }
 
       ws_data.push([
@@ -366,9 +662,9 @@ export default function DualDashboardAsistencias() {
         registro.dni,
         ordenarApellidosNombres(registro.nombres_completos),
         registro.area,
-        new Date(registro.hora_ingreso).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute:'2-digit' }),
+        new Date(registro.hora_ingreso).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit' }),
         registro.estado_ingreso,
-        registro.hora_salida ? new Date(registro.hora_salida).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute:'2-digit' }) : 'Sin marcar',
+        registro.hora_salida ? new Date(registro.hora_salida).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit' }) : 'Sin marcar',
         textoLimpio,
         linkMaps
       ]);
@@ -384,11 +680,10 @@ export default function DualDashboardAsistencias() {
         else {
           if (C === 5) ws[cellAddress].s = ws[cellAddress].v === 'PUNTUAL' ? stylePuntual : styleTardanza;
           else if ([0, 1, 3, 4, 6].includes(C)) ws[cellAddress].s = styleCenter;
-          
-          // Darle formato de Link a la columna de MAPS
+
           if (C === 8 && ws[cellAddress].v !== '-') {
-            ws[cellAddress].l = { Target: ws[cellAddress].v }; // Asigna el hipervínculo
-            ws[cellAddress].v = "📍 Ver Mapa"; // Texto visible en la celda
+            ws[cellAddress].l = { Target: ws[cellAddress].v };
+            ws[cellAddress].v = "📍 Ver Mapa";
             ws[cellAddress].s = { font: { color: { rgb: "2563EB" }, underline: true }, alignment: { horizontal: "center" } };
           }
         }
@@ -396,7 +691,7 @@ export default function DualDashboardAsistencias() {
     }
 
     ws['!cols'] = [
-      { wpx: 80 }, { wpx: 80 }, { wpx: 240 }, { wpx: 130 }, 
+      { wpx: 80 }, { wpx: 80 }, { wpx: 240 }, { wpx: 130 },
       { wpx: 80 }, { wpx: 90 }, { wpx: 80 }, { wpx: 280 }, { wpx: 120 }
     ];
 
@@ -417,7 +712,7 @@ export default function DualDashboardAsistencias() {
           toast.success(`¡Reporte descargado!`);
           setMostrarModalExportar(false);
         }
-      } 
+      }
       else {
         if (!exportarDesde || !exportarHasta) {
           toast.error("Selecciona ambas fechas"); return;
@@ -441,7 +736,7 @@ export default function DualDashboardAsistencias() {
 
         toast.dismiss('descargando');
         const exito = procesarYDescargarExcel(data, `Reporte_RUAG_RANGO_${exportarDesde}_AL_${exportarHasta}`);
-        
+
         if (exito) {
           toast.success(`¡Reporte múltiple descargado! (${data.length} registros)`);
           setMostrarModalExportar(false);
@@ -456,20 +751,17 @@ export default function DualDashboardAsistencias() {
     }
   };
 
-
-  // --- ACTUALIZADO PARA PERMITIR BORRAR HORA (NUEVA HORA PUEDE SER NULL) ---
   const actualizarHora = async (id: string, campo: 'hora_ingreso' | 'hora_salida', nuevaHora: string | null, fechaBase: string) => {
     try {
       let datosAActualizar: any = {};
-      
+
       if (nuevaHora === null) {
-        // Borramos la hora de salida si se manda null
         datosAActualizar[campo] = null;
       } else {
         const [horas, minutos] = nuevaHora.split(':')
         const fechaObj = new Date(fechaBase)
         fechaObj.setHours(parseInt(horas), parseInt(minutos), 0)
-        
+
         const timestampISO = fechaObj.toISOString()
         datosAActualizar[campo] = timestampISO
 
@@ -492,7 +784,6 @@ export default function DualDashboardAsistencias() {
     }
   }
 
-  // --- FUNCIÓN PARA BORRAR NOTA EN MODO EDICIÓN ---
   const borrarNota = async (id: string) => {
     try {
       const { error } = await supabase.from('registro_asistencias').update({ notas: null }).eq('id', id)
@@ -508,14 +799,14 @@ export default function DualDashboardAsistencias() {
   const tardanzas = asistencias.filter(a => a.estado_ingreso === 'TARDANZA').length
   const salidas = asistencias.filter(a => a.hora_salida !== null).length
 
+  const totalNotas = asistenciasFiltradas.filter(a => !!a.notas).length
+  const ingresosObra = marcacionesConGPS.filter(m => m.tipoMarcacion === 'ingreso').length
+  const salidasObra = marcacionesConGPS.filter(m => m.tipoMarcacion === 'salida').length
+  const notasConGPS = marcacionesConGPS.filter(m => m.tipoMarcacion === 'nota').length
+
   const listContainerVariants: Variants = {
     hidden: { opacity: 0 },
-    show: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.05 
-      }
-    }
+    show: { opacity: 1, transition: { staggerChildren: 0.05 } }
   };
 
   if (!mounted || isInitialLoad) {
@@ -529,10 +820,10 @@ export default function DualDashboardAsistencias() {
   return (
     <div className={`min-h-screen flex flex-col ${modoEdicion ? 'bg-blue-50/50 dark:bg-slate-900' : 'bg-[#f8f9fa] dark:bg-slate-950'} text-slate-900 dark:text-slate-100 font-sans transition-colors duration-500`}>
       <Toaster position="top-center" richColors />
-      
+
       <header className="bg-white dark:bg-slate-900 border-b border-slate-200 dark:border-slate-800 sticky top-0 z-50 shadow-sm transition-colors duration-500">
         <div className="max-w-[1600px] mx-auto w-full px-6 h-20 flex items-center justify-between">
-          
+
           <div className="flex items-center gap-4">
             <div className={`w-12 h-12 rounded-xl flex items-center justify-center text-white font-bold shadow-md ${modoEdicion ? 'bg-blue-600' : 'bg-gradient-to-br from-blue-600 to-indigo-600'}`}>
               <ShieldCheck size={28} />
@@ -548,8 +839,9 @@ export default function DualDashboardAsistencias() {
           <div className="flex items-center gap-6">
             <ThemeSwitch isDarkMode={isDarkMode} onToggle={toggleTheme} />
             <div className="h-8 w-px bg-slate-200 dark:bg-slate-800 hidden sm:block"></div>
-            <div className="hidden sm:block">
-               <LiveClock />
+            <div className="hidden sm:flex items-center gap-3">
+              <TimeCycleBadge timeOfDay={timeOfDay} />
+              <LiveClock />
             </div>
           </div>
 
@@ -557,10 +849,11 @@ export default function DualDashboardAsistencias() {
       </header>
 
       <main className="flex-1 w-full max-w-[1600px] mx-auto px-6 py-8 flex flex-col xl:flex-row gap-8">
-        
+
         <div className="w-full xl:w-80 shrink-0 flex flex-col gap-6">
-          
-          <div className="sm:hidden w-full flex justify-center mb-2">
+
+          <div className="sm:hidden w-full flex flex-col items-center gap-3 mb-2">
+            <TimeCycleBadge timeOfDay={timeOfDay} />
             <LiveClock />
           </div>
 
@@ -585,13 +878,13 @@ export default function DualDashboardAsistencias() {
 
           <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm transition-colors duration-500">
             <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4 flex items-center gap-2">
-              <SlidersHorizontal size={14}/> Filtros
+              <SlidersHorizontal size={14} /> Filtros
             </p>
-            
+
             <div className="space-y-4">
               <div className="relative">
                 <Search size={18} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input 
+                <input
                   type="text" placeholder="Buscar por DNI o Nombre..." value={busqueda} onChange={(e) => setBusqueda(e.target.value)}
                   className="w-full bg-slate-50 dark:bg-slate-950 pl-10 pr-4 py-3 rounded-xl border border-slate-200 dark:border-slate-800 outline-none focus:ring-2 focus:ring-blue-500 text-sm font-medium transition-all"
                 />
@@ -621,7 +914,7 @@ export default function DualDashboardAsistencias() {
             <button onClick={() => setMostrarModalExportar(true)} className="w-full flex items-center justify-center gap-2 p-3 rounded-xl bg-emerald-50 text-emerald-700 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-500/20 text-sm font-bold transition-all active:scale-95">
               <FileSpreadsheet size={18} /> Exportar Reporte Excel
             </button>
-            
+
             {modoEdicion && (
               <button onClick={() => setMostrarModalManual(true)} className="w-full flex items-center justify-center gap-2 p-3 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-sm font-bold transition-all shadow-lg shadow-blue-600/20 active:scale-95">
                 <UserPlus size={18} /> Añadir Registro Manual
@@ -632,62 +925,202 @@ export default function DualDashboardAsistencias() {
         </div>
 
         <div className="flex-1 flex flex-col min-w-0">
-          
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-            <StatCard title="Ingresos" value={asistencias.length} icon={<Users size={20}/>} color="bg-blue-500" />
-            <StatCard title="Puntuales" value={puntuales} icon={<CheckCircle2 size={20}/>} color="bg-emerald-500" />
-            <StatCard title="Tardanzas" value={tardanzas} icon={<AlertCircle size={20}/>} color="bg-red-500" />
-            <StatCard title="Salidas" value={salidas} icon={<LogOut size={20}/>} color="bg-slate-500" />
+
+          <div className="grid grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+            <StatCard title="Ingresos" value={asistencias.length} icon={<Users size={20} />} color="bg-blue-500" />
+            <StatCard title="Puntuales" value={puntuales} icon={<CheckCircle2 size={20} />} color="bg-emerald-500" />
+            <StatCard title="Tardanzas" value={tardanzas} icon={<AlertCircle size={20} />} color="bg-red-500" />
+            <StatCard title="Salidas" value={salidas} icon={<LogOut size={20} />} color="bg-slate-500" />
+            <StatCard title="Notas" value={totalNotas} icon={<MessageSquareText size={20} />} color="bg-amber-500" />
           </div>
 
           <div className="flex-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl shadow-sm flex flex-col overflow-hidden transition-colors duration-500">
-            
-            <div className="bg-slate-50 dark:bg-slate-950/50 border-b border-slate-200 dark:border-slate-800 p-4 flex items-center justify-between transition-colors duration-500">
-              <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
-                <AlignLeft size={18} />
-                <h3 className="font-bold text-sm uppercase tracking-widest">Registros del Día</h3>
+
+            <div className="bg-slate-50 dark:bg-slate-950/50 border-b border-slate-200 dark:border-slate-800 p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between transition-colors duration-500 gap-3 sm:gap-0">
+              <div className="flex items-center gap-4">
+                <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300">
+                  <AlignLeft size={18} />
+                  <h3 className="font-bold text-sm uppercase tracking-widest">Registros del Día</h3>
+                </div>
+                <span className="text-xs font-bold text-slate-500 bg-slate-200 dark:bg-slate-800 px-2.5 py-1 rounded-lg">
+                  {asistenciasFiltradas.length} encontrados
+                </span>
               </div>
-              <span className="text-xs font-bold text-slate-500 bg-slate-200 dark:bg-slate-800 px-2.5 py-1 rounded-lg">
-                {asistenciasFiltradas.length} encontrados
-              </span>
+
+              <div className="flex bg-slate-200/50 dark:bg-slate-800 p-1 rounded-xl w-full sm:w-fit">
+                <button
+                  onClick={() => setVistaActual('lista')}
+                  className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${vistaActual === 'lista' ? 'bg-white dark:bg-slate-700 text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                >
+                  <AlignLeft size={14} /> Lista
+                </button>
+                <button
+                  onClick={() => setVistaActual('mapa')}
+                  className={`flex-1 sm:flex-none flex items-center justify-center gap-2 px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${vistaActual === 'mapa' ? 'bg-white dark:bg-slate-700 text-blue-600 shadow-sm' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'}`}
+                >
+                  <MapIcon size={14} /> Mapa 3D
+                </button>
+              </div>
             </div>
 
-            <div className="flex-1 overflow-y-auto p-3 bg-slate-50/50 dark:bg-slate-900/50 transition-colors duration-500">
+            <div className="flex-1 overflow-hidden relative bg-slate-50/50 dark:bg-slate-900/50 transition-colors duration-500 rounded-b-2xl md:rounded-none">
+
               {loading ? (
-                <div className="flex h-64 justify-center items-center">
+                <div className="flex h-full justify-center items-center">
                   <CustomLoader text="Buscando..." />
                 </div>
               ) : asistencias.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-64 text-slate-400">
+                <div className="flex flex-col items-center justify-center h-full text-slate-400">
                   <CalendarDays size={60} className="mb-4 opacity-50" />
                   <h3 className="text-lg font-bold">Esperando registros...</h3>
                 </div>
               ) : asistenciasFiltradas.length === 0 ? (
-                 <div className="flex flex-col items-center justify-center h-64 text-slate-400">
-                   <Search size={50} className="mb-4 opacity-50" />
-                   <h3 className="text-lg font-bold">No hay coincidencias</h3>
-                 </div>
+                <div className="flex flex-col items-center justify-center h-full text-slate-400">
+                  <Search size={50} className="mb-4 opacity-50" />
+                  <h3 className="text-lg font-bold">No hay coincidencias</h3>
+                </div>
+              ) : vistaActual === 'lista' ? (
+
+                <div className="h-full overflow-y-auto p-3">
+                  <motion.div variants={listContainerVariants} initial="hidden" animate="show" className="flex flex-col gap-2.5 pb-4">
+                    <AnimatePresence>
+                      {asistenciasFiltradas.map((asistencia, idx) => (
+                        <FotocheckRow
+                          key={asistencia.id}
+                          data={asistencia}
+                          index={idx}
+                          modoEdicion={modoEdicion}
+                          onActualizar={actualizarHora}
+                          onAbrirNota={(notaData) => setNotaSeleccionada(notaData)}
+                          onBorrarNota={borrarNota}
+                        />
+                      ))}
+                    </AnimatePresence>
+                  </motion.div>
+                </div>
+
               ) : (
-                <motion.div 
-                  variants={listContainerVariants}
-                  initial="hidden"
-                  animate="show"
-                  className="flex flex-col gap-2.5 pb-4"
-                >
-                  <AnimatePresence>
-                    {asistenciasFiltradas.map((asistencia, idx) => (
-                      <FotocheckRow 
-                        key={asistencia.id} 
-                        data={asistencia} 
-                        index={idx} 
-                        modoEdicion={modoEdicion} 
-                        onActualizar={actualizarHora}
-                        onAbrirNota={(notaData) => setNotaSeleccionada(notaData)}
-                        onBorrarNota={borrarNota}
-                      />
-                    ))}
-                  </AnimatePresence>
-                </motion.div>
+
+                <div className="w-full h-full min-h-[60vh] lg:min-h-[560px] relative">
+                  {process.env.NEXT_PUBLIC_MAPBOX_TOKEN ? (
+                    <Map
+                      ref={mapRef}
+                      mapboxAccessToken={process.env.NEXT_PUBLIC_MAPBOX_TOKEN ?? ''}
+                      initialViewState={{
+                        longitude: centroMapa.longitude,
+                        latitude: centroMapa.latitude,
+                        zoom: marcacionesConGPS.length > 1 ? 14.5 : 15.8,
+                        pitch: 65,
+                        bearing: -20
+                      }}
+                      mapStyle="mapbox://styles/mapbox/standard"
+                      style={{ width: '100%', height: '100%' }}
+                      onLoad={() => {
+                        const map = mapRef.current?.getMap()
+                        if (!map) return
+                        aplicarEstiloMapa(map, timeOfDay)
+                      }}
+                    >
+                      {marcacionesConGPS.map((m) => {
+                        const markerColor =
+                          m.tipoMarcacion === 'ingreso'
+                            ? 'bg-blue-500'
+                            : m.tipoMarcacion === 'salida'
+                              ? 'bg-red-500'
+                              : 'bg-amber-500'
+
+                        const markerBorder =
+                          m.estado_ingreso === 'PUNTUAL'
+                            ? 'ring-4 ring-emerald-400/30'
+                            : 'ring-4 ring-red-400/30'
+
+                        const notePreview =
+                          m.textoLimpio && m.textoLimpio.length > 44
+                            ? `${m.textoLimpio.slice(0, 44)}...`
+                            : (m.textoLimpio || 'Sin detalle')
+
+                        return (
+                          <Marker key={m.id} latitude={m.lat} longitude={m.lng} anchor="bottom">
+                            <div className="flex flex-col items-center group cursor-pointer">
+                              <div className="px-3 py-2 bg-white/95 dark:bg-slate-900/95 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 text-[10px] font-bold whitespace-nowrap mb-2 opacity-0 group-hover:opacity-100 transition-all translate-y-1 group-hover:translate-y-0 backdrop-blur-sm max-w-[240px]">
+                                <div className="flex items-center gap-2 mb-1">
+                                  <span className="font-black text-slate-800 dark:text-slate-100">{m.nombres_completos}</span>
+                                  <span className={`px-1.5 py-0.5 rounded-md text-[9px] ${m.estado_ingreso === 'PUNTUAL'
+                                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
+                                      : 'bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-300'
+                                    }`}>
+                                    {m.estado_ingreso}
+                                  </span>
+                                </div>
+                                <div className="text-slate-500 dark:text-slate-400 font-semibold">
+                                  {m.tipoMarcacion === 'ingreso'
+                                    ? 'Ingreso en obra'
+                                    : m.tipoMarcacion === 'salida'
+                                      ? 'Salida de obra'
+                                      : 'Nota con GPS'}
+                                </div>
+                                <div className="mt-1 text-slate-700 dark:text-slate-300 whitespace-normal break-words">
+                                  {notePreview}
+                                </div>
+                              </div>
+
+                              <div className={`w-10 h-10 rounded-2xl flex items-center justify-center text-white shadow-2xl border-2 border-white dark:border-slate-900 ${markerColor} ${markerBorder}`}>
+                                {m.tipoMarcacion === 'ingreso'
+                                  ? <HardHat size={17} />
+                                  : m.tipoMarcacion === 'salida'
+                                    ? <MapPin size={17} />
+                                    : <MessageSquareText size={17} />}
+                              </div>
+                            </div>
+                          </Marker>
+                        )
+                      })}
+
+                      <FullscreenControl position="top-right" />
+                      <NavigationControl position="top-right" visualizePitch={true} />
+                    </Map>
+                  ) : (
+                    <div className="h-full flex flex-col items-center justify-center text-slate-500 dark:text-slate-400">
+                      <MapIcon size={52} className="mb-4 opacity-50" />
+                      <h3 className="text-lg font-black mb-2">Falta tu token de Mapbox</h3>
+                      <p className="text-sm">Agrega NEXT_PUBLIC_MAPBOX_TOKEN en tu .env.local</p>
+                    </div>
+                  )}
+
+                  <div className="absolute top-4 left-4 right-20 flex flex-wrap items-start gap-3 pointer-events-none">
+                    <div className="pointer-events-auto bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm p-3 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-md">
+                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Mapa de Obras</p>
+                      <div className="flex flex-col gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300">
+                        <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-blue-500 shadow-sm"></div> Ingresos en Obra</div>
+                        <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-red-500 shadow-sm"></div> Salidas de Obra</div>
+                        <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-amber-500 shadow-sm"></div> Notas con GPS</div>
+                        <div className="mt-1 pt-2 border-t border-slate-200 dark:border-slate-700 flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full bg-emerald-400/70 ring-4 ring-emerald-400/30"></div>
+                          <span>Anillo verde = Puntual</span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <div className="w-3 h-3 rounded-full bg-red-400/70 ring-4 ring-red-400/30"></div>
+                          <span>Anillo rojo = Tardanza</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="pointer-events-auto">
+                      <TimeCycleBadge timeOfDay={timeOfDay} />
+                    </div>
+                  </div>
+
+                  <div className="absolute bottom-4 left-4 right-4 pointer-events-none">
+                    <div className="pointer-events-auto grid grid-cols-2 md:grid-cols-5 gap-3">
+                      <MiniMapStat title="Obras" value={ingresosObra} tone="blue" />
+                      <MiniMapStat title="Salidas" value={salidasObra} tone="red" />
+                      <MiniMapStat title="Notas GPS" value={notasConGPS} tone="amber" />
+                      <MiniMapStat title="Puntuales" value={asistenciasFiltradas.filter(a => a.estado_ingreso === 'PUNTUAL').length} tone="emerald" />
+                      <MiniMapStat title="Tardanzas" value={asistenciasFiltradas.filter(a => a.estado_ingreso === 'TARDANZA').length} tone="rose" />
+                    </div>
+                  </div>
+                </div>
+
               )}
             </div>
           </div>
@@ -695,7 +1128,6 @@ export default function DualDashboardAsistencias() {
 
       </main>
 
-      {/* MODALES SUPERPUESTOS */}
       {mostrarModalExportar && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-700 relative animate-in zoom-in-95 duration-200">
@@ -706,7 +1138,7 @@ export default function DualDashboardAsistencias() {
                 <div className="p-2.5 bg-emerald-100 dark:bg-emerald-900/30 rounded-xl"><FileSpreadsheet size={20} /></div>
                 <h3 className="text-lg font-black text-slate-900 dark:text-white">Exportar a Excel</h3>
               </div>
-              
+
               <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl mb-6">
                 <button onClick={() => setTipoExportacion('dia')} className={`flex-1 py-2 text-sm font-bold rounded-lg transition-all ${tipoExportacion === 'dia' ? 'bg-white dark:bg-slate-700 text-emerald-600 shadow-sm' : 'text-slate-500'}`}>
                   Día Actual
@@ -734,7 +1166,7 @@ export default function DualDashboardAsistencias() {
               )}
 
               <button onClick={ejecutarExportacion} disabled={exportando} className="w-full mt-8 bg-emerald-600 hover:bg-emerald-700 text-white font-bold py-3.5 rounded-xl flex justify-center items-center transition-transform active:scale-95 shadow-md disabled:opacity-70">
-                {exportando ? <Loader2 className="animate-spin" size={20}/> : <><Download size={18} className="mr-2"/> Descargar Excel</>}
+                {exportando ? <Loader2 className="animate-spin" size={20} /> : <><Download size={18} className="mr-2" /> Descargar Excel</>}
               </button>
             </div>
           </div>
@@ -750,49 +1182,47 @@ export default function DualDashboardAsistencias() {
           <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-700 animate-in zoom-in-95 duration-200 transition-colors duration-500">
             <div className={`${notaSeleccionada.tipoObra === 'ingreso' ? 'bg-blue-500' : notaSeleccionada.tipoObra === 'salida' ? 'bg-red-500' : 'bg-amber-500'} h-1.5 w-full`} />
             <div className="p-6 relative">
-              <button onClick={() => setNotaSeleccionada(null)} className="absolute top-4 right-4 p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors"><X size={20} /></button>
-              
+              <button onClick={() => setNotaSeleccionada(null)} className="absolute top-4 right-4 p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors z-10"><X size={20} /></button>
+
               <div className={`flex items-center gap-3 mb-4 
-                ${notaSeleccionada.tipoObra === 'ingreso' ? 'text-blue-500' : 
+                ${notaSeleccionada.tipoObra === 'ingreso' ? 'text-blue-500' :
                   notaSeleccionada.tipoObra === 'salida' ? 'text-red-500' : 'text-amber-500'}`}
               >
-                {notaSeleccionada.tipoObra === 'ingreso' ? <HardHat size={28} /> : 
-                 notaSeleccionada.tipoObra === 'salida' ? <MapPin size={28} /> : 
-                 <MessageSquareText size={28} />}
-                
+                {notaSeleccionada.tipoObra === 'ingreso' ? <HardHat size={28} /> :
+                  notaSeleccionada.tipoObra === 'salida' ? <MapIcon size={28} /> :
+                    <MessageSquareText size={28} />}
+
                 <h3 className="text-xl font-black text-slate-900 dark:text-white">
-                  {notaSeleccionada.tipoObra === 'ingreso' ? 'Ingreso en Obra' : 
-                   notaSeleccionada.tipoObra === 'salida' ? 'Salida de Obra' : 'Motivo Guardado'}
+                  {notaSeleccionada.tipoObra === 'ingreso' ? 'Ingreso en Obra' :
+                    notaSeleccionada.tipoObra === 'salida' ? 'Salida de Obra' : 'Nota Guardada'}
                 </h3>
               </div>
-              
+
               <p className="text-sm font-bold text-slate-500 dark:text-slate-400 mb-4 pb-4 border-b border-slate-100 dark:border-slate-800">
-                {notaSeleccionada.nombre} <br/>
+                {notaSeleccionada.nombre} <br />
                 <span className="font-normal opacity-70">
-                  {notaSeleccionada.tipoObra === 'ingreso' ? `Ingresó a las ${notaSeleccionada.hora}` : 
-                   notaSeleccionada.tipoObra === 'salida' ? `Salió a las ${notaSeleccionada.hora}` : 
-                   'Dejó una nota'}
+                  {notaSeleccionada.tipoObra === 'ingreso' ? `Ingresó a las ${notaSeleccionada.hora}` :
+                    notaSeleccionada.tipoObra === 'salida' ? `Salió a las ${notaSeleccionada.hora}` :
+                      'Dejó una nota'}
                 </span>
               </p>
-              
-              <div className="bg-slate-50 dark:bg-slate-950/50 p-4 rounded-xl border border-slate-100 dark:border-slate-800 text-slate-700 dark:text-slate-300 min-h-[100px] whitespace-pre-wrap text-sm leading-relaxed transition-colors duration-500">
+
+              {notaSeleccionada.estadoIngreso && (
+                <div className="mb-4">
+                  <span className={`inline-flex items-center px-3 py-1 rounded-lg text-xs font-black tracking-wider
+                    ${notaSeleccionada.estadoIngreso === 'PUNTUAL'
+                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
+                      : 'bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-300'
+                    }`}>
+                    {notaSeleccionada.estadoIngreso}
+                  </span>
+                </div>
+              )}
+
+              <div className="bg-slate-50 dark:bg-slate-950/50 p-4 rounded-xl border border-slate-100 dark:border-slate-800 text-slate-700 dark:text-slate-300 whitespace-pre-wrap text-sm leading-relaxed transition-colors duration-500">
                 {notaSeleccionada.nota}
               </div>
 
-              {notaSeleccionada.tipoObra !== 'ninguna' && notaSeleccionada.coordenadas && (
-                <a 
-                  href={`https://www.google.com/maps?q=${notaSeleccionada.coordenadas}`} 
-                  target="_blank" 
-                  rel="noreferrer"
-                  className={`w-full mt-4 flex items-center justify-center gap-2 font-bold py-3 rounded-xl transition-all border
-                    ${notaSeleccionada.tipoObra === 'ingreso' 
-                      ? 'bg-blue-50 hover:bg-blue-100 text-blue-600 border-blue-200 dark:bg-blue-500/10 dark:hover:bg-blue-500/20 dark:border-blue-500/30' 
-                      : 'bg-red-50 hover:bg-red-100 text-red-600 border-red-200 dark:bg-red-500/10 dark:hover:bg-red-500/20 dark:border-red-500/30'}`}
-                >
-                  <Map size={18} /> Ver ubicación en Maps
-                </a>
-              )}
-              
               <button onClick={() => setNotaSeleccionada(null)} className="w-full mt-4 bg-slate-900 dark:bg-white text-white dark:text-slate-900 font-bold py-3 rounded-xl transition-transform active:scale-95">
                 Cerrar
               </button>
@@ -801,12 +1231,12 @@ export default function DualDashboardAsistencias() {
         </div>
       )}
 
-      <style dangerouslySetInnerHTML={{__html: `
+      <style dangerouslySetInnerHTML={{ __html: `
         .marquee-container { overflow: hidden; white-space: nowrap; position: relative; width: 100%; mask-image: linear-gradient(to right, black 85%, transparent 100%); }
         .marquee-text { display: inline-block; animation: marquee 8s linear infinite; }
         .marquee-text:hover { animation-play-state: paused; }
         @keyframes marquee { 0% { transform: translateX(0); } 15% { transform: translateX(0); } 100% { transform: translateX(calc(-100% + 150px)); } }
-      `}} />
+      ` }} />
 
     </div>
   )
@@ -822,6 +1252,23 @@ function StatCard({ title, value, icon, color }: any) {
         <p className="text-[10px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-widest truncate">{title}</p>
         <p className="text-2xl font-black text-slate-800 dark:text-white leading-none mt-1">{value}</p>
       </div>
+    </div>
+  )
+}
+
+function MiniMapStat({ title, value, tone }: { title: string, value: number, tone: 'blue' | 'red' | 'amber' | 'emerald' | 'rose' }) {
+  const toneClasses = {
+    blue: 'bg-blue-50/90 text-blue-700 border-blue-200 dark:bg-blue-500/10 dark:text-blue-300 dark:border-blue-500/20',
+    red: 'bg-red-50/90 text-red-700 border-red-200 dark:bg-red-500/10 dark:text-red-300 dark:border-red-500/20',
+    amber: 'bg-amber-50/90 text-amber-700 border-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/20',
+    emerald: 'bg-emerald-50/90 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:border-emerald-500/20',
+    rose: 'bg-rose-50/90 text-rose-700 border-rose-200 dark:bg-rose-500/10 dark:text-rose-300 dark:border-rose-500/20'
+  }
+
+  return (
+    <div className={`backdrop-blur-sm border rounded-2xl px-4 py-3 shadow-md ${toneClasses[tone]}`}>
+      <p className="text-[10px] font-black uppercase tracking-widest opacity-80">{title}</p>
+      <p className="text-xl font-black leading-none mt-1">{value}</p>
     </div>
   )
 }
@@ -846,11 +1293,11 @@ function ModalRegistroManual({ onClose, fechaBase, onSuccess }: { onClose: () =>
       const [horas, minutos] = horaIngreso.split(':')
       const fechaObj = new Date(fechaBase)
       fechaObj.setHours(parseInt(horas), parseInt(minutos), 0)
-      
+
       const isPuntual = parseInt(horas) < 9 || (parseInt(horas) === 9 && parseInt(minutos) <= 5)
-      
+
       const nuevoRegistro = {
-        dni, nombres_completos: nombres.toUpperCase(), area, fecha: fechaBase, hora_ingreso: fechaObj.toISOString(), estado_ingreso: isPuntual ? 'PUNTUAL' : 'TARDANZA', foto_url: '' 
+        dni, nombres_completos: nombres.toUpperCase(), area, fecha: fechaBase, hora_ingreso: fechaObj.toISOString(), estado_ingreso: isPuntual ? 'PUNTUAL' : 'TARDANZA', foto_url: ''
       }
 
       const { data, error } = await supabase.from('registro_asistencias').insert(nuevoRegistro).select().single()
@@ -877,7 +1324,7 @@ function ModalRegistroManual({ onClose, fechaBase, onSuccess }: { onClose: () =>
           <div className="space-y-4">
             <div><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Nombres y Apellidos</label><input type="text" value={nombres} onChange={(e) => setNombres(e.target.value)} className="w-full mt-1 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 px-4 py-2.5 rounded-xl outline-none focus:border-blue-500 text-sm transition-colors" placeholder="Ej: Juan Perez" /></div>
             <div className="grid grid-cols-2 gap-4">
-              <div><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">DNI</label><input type="number" value={dni} onChange={(e) => {if(e.target.value.length <=8) setDni(e.target.value)}} className="w-full mt-1 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 px-4 py-2.5 rounded-xl outline-none focus:border-blue-500 text-sm transition-colors" placeholder="12345678" /></div>
+              <div><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">DNI</label><input type="number" value={dni} onChange={(e) => { if (e.target.value.length <= 8) setDni(e.target.value) }} className="w-full mt-1 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 px-4 py-2.5 rounded-xl outline-none focus:border-blue-500 text-sm transition-colors" placeholder="12345678" /></div>
               <div><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest ml-1">Hora Ingreso</label><input type="time" value={horaIngreso} onChange={(e) => setHoraIngreso(e.target.value)} className="w-full mt-1 bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 px-4 py-2.5 rounded-xl outline-none focus:border-blue-500 text-sm transition-colors" /></div>
             </div>
             <div>
@@ -888,7 +1335,7 @@ function ModalRegistroManual({ onClose, fechaBase, onSuccess }: { onClose: () =>
             </div>
           </div>
           <button onClick={handleGuardar} disabled={guardando} className="w-full mt-8 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl flex justify-center items-center transition-transform active:scale-95 shadow-md">
-            {guardando ? <Loader2 className="animate-spin" size={20}/> : "Registrar Asistencia"}
+            {guardando ? <Loader2 className="animate-spin" size={20} /> : "Registrar Asistencia"}
           </button>
         </div>
       </div>
@@ -896,12 +1343,26 @@ function ModalRegistroManual({ onClose, fechaBase, onSuccess }: { onClose: () =>
   )
 }
 
-// --- FILA DE TABLA ---
-function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota, onBorrarNota }: { data: any, index: number, modoEdicion: boolean, onActualizar: Function, onAbrirNota: (nota: {nombre: string, nota: string, hora: string, tipoObra: 'ninguna'|'ingreso'|'salida', coordenadas?: string}) => void, onBorrarNota: (id: string) => void }) {
+function FotocheckRow({
+  data,
+  index,
+  modoEdicion,
+  onActualizar,
+  onAbrirNota,
+  onBorrarNota
+}: {
+  data: any,
+  index: number,
+  modoEdicion: boolean,
+  onActualizar: Function,
+  onAbrirNota: (nota: { nombre: string, nota: string, hora: string, tipoObra: TipoMarcacion, coordenadas?: string, estadoIngreso?: string }) => void,
+  onBorrarNota: (id: string) => void
+}) {
   const isPuntual = data.estado_ingreso === 'PUNTUAL'
   const justAdded = index === 0 && isToday(new Date(data.hora_ingreso))
-  
+
   const statusColor = isPuntual ? 'bg-emerald-500' : 'bg-red-500';
+  const detalleNota = extraerDetalleNota(data.notas)
 
   const getInitials = (name: string) => {
     if (!name) return '??';
@@ -910,43 +1371,23 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota, onB
     return (words[0][0] + words[1][0]).toUpperCase();
   };
 
-  const tieneNota = !!data.notas;
-  const contieneGPS = tieneNota && data.notas.includes('[GPS:');
-  const esIngresoObra = contieneGPS && data.notas.startsWith('Ingreso en:');
-  
-  let textoLimpio = data.notas || '';
-  let coordenadas = '';
-  let tipoObra: 'ninguna' | 'ingreso' | 'salida' = 'ninguna';
-
-  if (contieneGPS) {
-    tipoObra = esIngresoObra ? 'ingreso' : 'salida';
-    const startIdx = data.notas.indexOf('[GPS:');
-    const endIdx = data.notas.indexOf(']', startIdx);
-    if (startIdx !== -1 && endIdx !== -1) {
-      coordenadas = data.notas.substring(startIdx + 5, endIdx).trim(); 
-      textoLimpio = data.notas.substring(0, startIdx).trim(); 
-      textoLimpio = textoLimpio.replace('Ingreso en: ', '').replace('Salida de obra: ', '').trim();
-      if (textoLimpio === '') textoLimpio = 'Marcación en Obra';
-    }
-  }
-
   const rowVariants: Variants = {
     hidden: { opacity: 0, x: -20 },
-    show: { 
-      opacity: 1, 
+    show: {
+      opacity: 1,
       x: 0,
       transition: { type: "spring" as const, stiffness: 300, damping: 24 }
     }
   };
 
   return (
-    <motion.div 
+    <motion.div
       variants={rowVariants}
       whileHover={{ scale: 1.005 }}
       className={`group flex items-center justify-between p-4 rounded-xl bg-white dark:bg-slate-900 border transition-colors hover:shadow-md
         ${justAdded ? 'border-blue-400 ring-1 ring-blue-100 shadow-sm' : 'border-slate-200 dark:border-slate-800'}`}
     >
-      
+
       <div className="flex items-center gap-5 flex-1 min-w-0 pr-4">
         <div className="relative shrink-0">
           <div className="w-14 h-14 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 flex items-center justify-center">
@@ -958,15 +1399,21 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota, onB
           </div>
           <div className={`absolute bottom-0 right-0 w-4 h-4 rounded-full border-2 border-white dark:border-slate-900 ${statusColor}`} />
         </div>
-        
+
         <div className="flex flex-col min-w-0">
           <h4 className="font-bold text-slate-800 dark:text-slate-100 text-[17px] truncate uppercase tracking-tight">
             {data.nombres_completos}
           </h4>
-          <div className="flex items-center gap-3 mt-1">
+          <div className="flex flex-wrap items-center gap-3 mt-1">
             <span className="text-sm font-mono text-slate-500 font-medium">{data.dni}</span>
             <span className="text-slate-300 dark:text-slate-700">•</span>
             <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">{data.area}</span>
+            <span className={`px-2 py-0.5 rounded-md text-[10px] font-black tracking-wider ${isPuntual
+                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
+                : 'bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-300'
+              }`}>
+              {data.estado_ingreso}
+            </span>
           </div>
         </div>
       </div>
@@ -975,24 +1422,24 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota, onB
         <div className="flex flex-col items-end">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Ingreso</span>
           {modoEdicion ? (
-            <input type="time" defaultValue={format(new Date(data.hora_ingreso), 'HH:mm')} className="bg-transparent border-b border-blue-500 text-base font-black text-blue-600 outline-none w-20 text-right" onBlur={(e) => { if(e.target.value !== format(new Date(data.hora_ingreso), 'HH:mm')) onActualizar(data.id, 'hora_ingreso', e.target.value, data.hora_ingreso) }} />
+            <input type="time" defaultValue={format(new Date(data.hora_ingreso), 'HH:mm')} className="bg-transparent border-b border-blue-500 text-base font-black text-blue-600 outline-none w-20 text-right" onBlur={(e) => { if (e.target.value !== format(new Date(data.hora_ingreso), 'HH:mm')) onActualizar(data.id, 'hora_ingreso', e.target.value, data.hora_ingreso) }} />
           ) : (
             <div className={`font-black text-lg leading-none ${isPuntual ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
               {format(new Date(data.hora_ingreso), 'HH:mm')}
             </div>
           )}
         </div>
-        
+
         <div className="w-px h-8 bg-slate-200 dark:bg-slate-700 hidden sm:block"></div>
-        
+
         <div className="flex flex-col items-end min-w-[70px]">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Salida</span>
           {modoEdicion ? (
             <div className="flex items-center gap-1">
-              <input type="time" defaultValue={data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm') : ''} className="bg-transparent border-b border-blue-500 text-base font-bold text-slate-700 dark:text-slate-300 outline-none w-20 text-right" onBlur={(e) => { const currentValue = data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm') : ''; if(e.target.value && e.target.value !== currentValue) onActualizar(data.id, 'hora_salida', e.target.value, data.hora_salida || data.hora_ingreso) }} />
+              <input type="time" defaultValue={data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm') : ''} className="bg-transparent border-b border-blue-500 text-base font-bold text-slate-700 dark:text-slate-300 outline-none w-20 text-right" onBlur={(e) => { const currentValue = data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm') : ''; if (e.target.value && e.target.value !== currentValue) onActualizar(data.id, 'hora_salida', e.target.value, data.hora_salida || data.hora_ingreso) }} />
               {data.hora_salida && (
                 <button onClick={() => onActualizar(data.id, 'hora_salida', null, data.hora_ingreso)} className="text-red-400 hover:text-red-600 transition-colors p-1" title="Borrar Salida">
-                  <X size={14}/>
+                  <X size={14} />
                 </button>
               )}
             </div>
@@ -1009,32 +1456,33 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota, onB
           )}
         </div>
 
-        {/* BOTONES ACCIÓN NOTA/OBRA Y BORRAR (MODO ADMIN) */}
         <div className="w-auto flex justify-center items-center gap-1 min-w-[40px]">
-          {tieneNota && (
+          {detalleNota.tieneNota && (
             <>
-              <button 
-                onClick={() => onAbrirNota({ 
-                  nombre: data.nombres_completos, 
-                  nota: textoLimpio,
-                  hora: tipoObra === 'ingreso' ? format(new Date(data.hora_ingreso), 'HH:mm a') : (data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm a') : 'Desconocida'),
-                  tipoObra: tipoObra,
-                  coordenadas: coordenadas 
-                })} 
+              <button
+                onClick={() => onAbrirNota({
+                  nombre: data.nombres_completos,
+                  nota: detalleNota.textoLimpio,
+                  hora: detalleNota.tipoMarcacion === 'ingreso'
+                    ? format(new Date(data.hora_ingreso), 'HH:mm a')
+                    : (data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm a') : 'Desconocida'),
+                  tipoObra: detalleNota.tipoMarcacion,
+                  coordenadas: detalleNota.coordenadas,
+                  estadoIngreso: data.estado_ingreso
+                })}
                 className={`p-2 rounded-full border transition-all shadow-sm hover:scale-110 
-                  ${tipoObra === 'ingreso'
-                    ? 'bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100 dark:bg-blue-500/10 dark:border-blue-500/30' 
-                    : tipoObra === 'salida' 
-                    ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100 dark:bg-red-500/10 dark:border-red-500/30' 
-                    : 'bg-amber-50 text-amber-600 border-amber-200 hover:bg-amber-100 dark:bg-amber-500/10 dark:border-amber-500/30'}`} 
-                title={tipoObra === 'ingreso' ? "Ver ingreso de obra" : tipoObra === 'salida' ? "Ver salida de obra" : "Ver motivo"}
+                  ${detalleNota.tipoMarcacion === 'ingreso'
+                    ? 'bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100 dark:bg-blue-500/10 dark:border-blue-500/30'
+                    : detalleNota.tipoMarcacion === 'salida'
+                      ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100 dark:bg-red-500/10 dark:border-red-500/30'
+                      : 'bg-amber-50 text-amber-600 border-amber-200 hover:bg-amber-100 dark:bg-amber-500/10 dark:border-amber-500/30'}`}
+                title={detalleNota.tipoMarcacion === 'ingreso' ? "Ver ingreso de obra" : detalleNota.tipoMarcacion === 'salida' ? "Ver salida de obra" : "Ver nota"}
               >
-                {tipoObra === 'ingreso' ? <HardHat size={18} /> : 
-                 tipoObra === 'salida' ? <MapPin size={18} /> : 
-                 <MessageSquareText size={18} />}
+                {detalleNota.tipoMarcacion === 'ingreso' ? <HardHat size={18} /> :
+                  detalleNota.tipoMarcacion === 'salida' ? <MapIcon size={18} /> :
+                    <MessageSquareText size={18} />}
               </button>
 
-              {/* Botón Borrar Nota (Solo en Modo Edición) */}
               {modoEdicion && (
                 <button onClick={() => onBorrarNota(data.id)} className="p-2 ml-1 rounded-full border border-red-200 text-red-500 hover:bg-red-50 dark:bg-red-500/10 dark:border-red-500/30 transition-all shadow-sm hover:scale-110" title="Eliminar Nota/Ubicación">
                   <Trash2 size={16} />
