@@ -84,6 +84,13 @@ function getTimeCycleMeta(timeOfDay: TimeOfDay) {
   }
 }
 
+function getInitialsFromName(name: string) {
+  if (!name) return '??'
+  const words = name.trim().split(' ').filter(w => w.length > 0)
+  if (words.length === 1) return words[0].substring(0, 2).toUpperCase()
+  return (words[0][0] + words[1][0]).toUpperCase()
+}
+
 function extraerDetalleNota(notas?: string | null) {
   const textoOriginal = notas ?? ''
   const tieneNota = textoOriginal.trim().length > 0
@@ -802,7 +809,6 @@ export default function DualDashboardAsistencias() {
   const totalNotas = asistenciasFiltradas.filter(a => !!a.notas).length
   const ingresosObra = marcacionesConGPS.filter(m => m.tipoMarcacion === 'ingreso').length
   const salidasObra = marcacionesConGPS.filter(m => m.tipoMarcacion === 'salida').length
-  const notasConGPS = marcacionesConGPS.filter(m => m.tipoMarcacion === 'nota').length
 
   const listContainerVariants: Variants = {
     hidden: { opacity: 0 },
@@ -1022,54 +1028,130 @@ export default function DualDashboardAsistencias() {
                       }}
                     >
                       {marcacionesConGPS.map((m) => {
-                        const markerColor =
+                        const markerTone =
                           m.tipoMarcacion === 'ingreso'
-                            ? 'bg-blue-500'
+                            ? {
+                                badgeBg: 'bg-blue-500',
+                                badgeText: 'text-white',
+                                cardAccent: 'from-blue-500 to-cyan-400',
+                                typeText: 'Ingreso en obra'
+                              }
                             : m.tipoMarcacion === 'salida'
-                              ? 'bg-red-500'
-                              : 'bg-amber-500'
+                              ? {
+                                  badgeBg: 'bg-red-500',
+                                  badgeText: 'text-white',
+                                  cardAccent: 'from-red-500 to-rose-400',
+                                  typeText: 'Salida de obra'
+                                }
+                              : {
+                                  badgeBg: 'bg-amber-500',
+                                  badgeText: 'text-white',
+                                  cardAccent: 'from-amber-500 to-orange-400',
+                                  typeText: 'Nota con GPS'
+                                }
 
-                        const markerBorder =
+                        const statusRing =
                           m.estado_ingreso === 'PUNTUAL'
-                            ? 'ring-4 ring-emerald-400/30'
-                            : 'ring-4 ring-red-400/30'
+                            ? 'ring-[5px] ring-emerald-400/35'
+                            : 'ring-[5px] ring-red-400/35'
+
+                        const statusChip =
+                          m.estado_ingreso === 'PUNTUAL'
+                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
+                            : 'bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-300'
 
                         const notePreview =
-                          m.textoLimpio && m.textoLimpio.length > 44
-                            ? `${m.textoLimpio.slice(0, 44)}...`
-                            : (m.textoLimpio || 'Sin detalle')
+                          m.textoLimpio && m.textoLimpio.length > 110
+                            ? `${m.textoLimpio.slice(0, 110)}...`
+                            : (m.textoLimpio || 'Sin detalle adicional')
+
+                        const horaMarcacion =
+                          m.tipoMarcacion === 'ingreso'
+                            ? format(new Date(m.hora_ingreso), 'HH:mm')
+                            : m.hora_salida
+                              ? format(new Date(m.hora_salida), 'HH:mm')
+                              : '--:--'
 
                         return (
                           <Marker key={m.id} latitude={m.lat} longitude={m.lng} anchor="bottom">
-                            <div className="flex flex-col items-center group cursor-pointer">
-                              <div className="px-3 py-2 bg-white/95 dark:bg-slate-900/95 rounded-xl shadow-xl border border-slate-200 dark:border-slate-700 text-[10px] font-bold whitespace-nowrap mb-2 opacity-0 group-hover:opacity-100 transition-all translate-y-1 group-hover:translate-y-0 backdrop-blur-sm max-w-[240px]">
-                                <div className="flex items-center gap-2 mb-1">
-                                  <span className="font-black text-slate-800 dark:text-slate-100">{m.nombres_completos}</span>
-                                  <span className={`px-1.5 py-0.5 rounded-md text-[9px] ${m.estado_ingreso === 'PUNTUAL'
-                                      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
-                                      : 'bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-300'
-                                    }`}>
-                                    {m.estado_ingreso}
-                                  </span>
-                                </div>
-                                <div className="text-slate-500 dark:text-slate-400 font-semibold">
-                                  {m.tipoMarcacion === 'ingreso'
-                                    ? 'Ingreso en obra'
-                                    : m.tipoMarcacion === 'salida'
-                                      ? 'Salida de obra'
-                                      : 'Nota con GPS'}
-                                </div>
-                                <div className="mt-1 text-slate-700 dark:text-slate-300 whitespace-normal break-words">
-                                  {notePreview}
+                            <div className="relative flex flex-col items-center group cursor-pointer">
+                              <div className="pointer-events-none absolute left-1/2 bottom-full mb-5 -translate-x-1/2 opacity-0 scale-95 translate-y-3 group-hover:opacity-100 group-hover:scale-100 group-hover:translate-y-0 transition-all duration-300 z-30">
+                                <div className="w-[340px] overflow-hidden rounded-[28px] border border-white/70 dark:border-slate-700/70 bg-white/95 dark:bg-slate-900/95 backdrop-blur-xl shadow-[0_24px_80px_-20px_rgba(15,23,42,0.45)]">
+                                  <div className={`h-1.5 w-full bg-gradient-to-r ${markerTone.cardAccent}`} />
+                                  <div className="p-4">
+                                    <div className="flex items-start gap-3">
+                                      <div className={`relative shrink-0 w-14 h-14 rounded-2xl overflow-hidden bg-slate-100 dark:bg-slate-800 border border-white dark:border-slate-700 shadow-md ${statusRing}`}>
+                                        {m.foto_url ? (
+                                          <img
+                                            src={m.foto_url}
+                                            alt={m.nombres_completos}
+                                            className="w-full h-full object-cover"
+                                          />
+                                        ) : (
+                                          <div className="w-full h-full flex items-center justify-center text-slate-500 dark:text-slate-300 font-black text-lg bg-slate-100 dark:bg-slate-800">
+                                            {getInitialsFromName(m.nombres_completos)}
+                                          </div>
+                                        )}
+                                      </div>
+
+                                      <div className="min-w-0 flex-1">
+                                        <div className="flex items-start justify-between gap-2">
+                                          <div className="min-w-0">
+                                            <h4 className="text-[15px] font-black text-slate-900 dark:text-white truncate uppercase tracking-tight">
+                                              {m.nombres_completos}
+                                            </h4>
+                                            <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400 mt-0.5 truncate">
+                                              {m.area} • DNI {m.dni}
+                                            </p>
+                                          </div>
+                                          <span className={`shrink-0 px-2 py-1 rounded-lg text-[10px] font-black tracking-wider ${statusChip}`}>
+                                            {m.estado_ingreso}
+                                          </span>
+                                        </div>
+
+                                        <div className="flex flex-wrap items-center gap-2 mt-3">
+                                          <span className={`px-2.5 py-1 rounded-lg text-[10px] font-black tracking-wider ${markerTone.badgeBg} ${markerTone.badgeText}`}>
+                                            {markerTone.typeText}
+                                          </span>
+                                          <span className="px-2.5 py-1 rounded-lg text-[10px] font-bold bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                                            Hora {horaMarcacion}
+                                          </span>
+                                        </div>
+                                      </div>
+                                    </div>
+
+                                    <div className="mt-4 rounded-2xl border border-slate-200/80 dark:border-slate-700/80 bg-slate-50/90 dark:bg-slate-950/70 p-3">
+                                      <p className="text-[10px] font-black tracking-[0.18em] uppercase text-slate-400 dark:text-slate-500 mb-2">
+                                        Detalle
+                                      </p>
+                                      <p className="text-[13px] leading-relaxed font-medium text-slate-700 dark:text-slate-300 break-words">
+                                        {notePreview}
+                                      </p>
+                                    </div>
+                                  </div>
                                 </div>
                               </div>
 
-                              <div className={`w-10 h-10 rounded-2xl flex items-center justify-center text-white shadow-2xl border-2 border-white dark:border-slate-900 ${markerColor} ${markerBorder}`}>
-                                {m.tipoMarcacion === 'ingreso'
-                                  ? <HardHat size={17} />
-                                  : m.tipoMarcacion === 'salida'
-                                    ? <MapPin size={17} />
-                                    : <MessageSquareText size={17} />}
+                              <div className={`relative w-[54px] h-[54px] rounded-full overflow-hidden border-[3px] border-white dark:border-slate-900 shadow-[0_14px_30px_-12px_rgba(15,23,42,0.6)] ${statusRing}`}>
+                                {m.foto_url ? (
+                                  <img
+                                    src={m.foto_url}
+                                    alt={m.nombres_completos}
+                                    className="w-full h-full object-cover"
+                                  />
+                                ) : (
+                                  <div className="w-full h-full flex items-center justify-center text-slate-600 dark:text-slate-200 font-black text-base bg-slate-100 dark:bg-slate-800">
+                                    {getInitialsFromName(m.nombres_completos)}
+                                  </div>
+                                )}
+
+                                <div className={`absolute -bottom-0.5 -right-0.5 w-6 h-6 rounded-full border-2 border-white dark:border-slate-900 flex items-center justify-center shadow-lg ${markerTone.badgeBg}`}>
+                                  {m.tipoMarcacion === 'ingreso'
+                                    ? <HardHat size={12} className="text-white" />
+                                    : m.tipoMarcacion === 'salida'
+                                      ? <MapPin size={12} className="text-white" />
+                                      : <MessageSquareText size={12} className="text-white" />}
+                                </div>
                               </div>
                             </div>
                           </Marker>
@@ -1111,10 +1193,9 @@ export default function DualDashboardAsistencias() {
                   </div>
 
                   <div className="absolute bottom-4 left-4 right-4 pointer-events-none">
-                    <div className="pointer-events-auto grid grid-cols-2 md:grid-cols-5 gap-3">
+                    <div className="pointer-events-auto grid grid-cols-2 md:grid-cols-4 gap-3">
                       <MiniMapStat title="Obras" value={ingresosObra} tone="blue" />
                       <MiniMapStat title="Salidas" value={salidasObra} tone="red" />
-                      <MiniMapStat title="Notas GPS" value={notasConGPS} tone="amber" />
                       <MiniMapStat title="Puntuales" value={asistenciasFiltradas.filter(a => a.estado_ingreso === 'PUNTUAL').length} tone="emerald" />
                       <MiniMapStat title="Tardanzas" value={asistenciasFiltradas.filter(a => a.estado_ingreso === 'TARDANZA').length} tone="rose" />
                     </div>
@@ -1364,13 +1445,6 @@ function FotocheckRow({
   const statusColor = isPuntual ? 'bg-emerald-500' : 'bg-red-500';
   const detalleNota = extraerDetalleNota(data.notas)
 
-  const getInitials = (name: string) => {
-    if (!name) return '??';
-    const words = name.trim().split(' ').filter(w => w.length > 0);
-    if (words.length === 1) return words[0].substring(0, 2).toUpperCase();
-    return (words[0][0] + words[1][0]).toUpperCase();
-  };
-
   const rowVariants: Variants = {
     hidden: { opacity: 0, x: -20 },
     show: {
@@ -1394,7 +1468,7 @@ function FotocheckRow({
             {data.foto_url ? (
               <img src={data.foto_url} alt="Foto" className="w-full h-full object-cover" />
             ) : (
-              <span className="font-black text-slate-400 dark:text-slate-500 text-lg">{getInitials(data.nombres_completos)}</span>
+              <span className="font-black text-slate-400 dark:text-slate-500 text-lg">{getInitialsFromName(data.nombres_completos)}</span>
             )}
           </div>
           <div className={`absolute bottom-0 right-0 w-4 h-4 rounded-full border-2 border-white dark:border-slate-900 ${statusColor}`} />
