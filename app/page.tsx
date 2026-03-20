@@ -11,7 +11,7 @@ import {
   CheckCircle2, AlertCircle, LogOut, UserPlus, Loader2, Search, Filter,
   FileSpreadsheet, SlidersHorizontal, Users, ShieldCheck, AlignLeft,
   MapPin, Map as MapIcon, Download, HardHat, Trash2, MessageSquareText, X,
-  Sunrise, Sun, Sunset, MoonStar
+  Sunrise, Sun, Sunset, MoonStar, Store // <-- Añadido Store para marcación externa
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 
@@ -19,12 +19,13 @@ import Map, {
   Marker,
   NavigationControl,
   FullscreenControl,
+  GeolocateControl, // <-- Añadido para el control del mapa
   type MapRef
 } from 'react-map-gl/mapbox'
 import 'mapbox-gl/dist/mapbox-gl.css'
 
 type TimeOfDay = 'dawn' | 'day' | 'dusk' | 'night'
-type TipoMarcacion = 'ninguna' | 'ingreso' | 'salida' | 'nota'
+type TipoMarcacion = 'ninguna' | 'ingreso_obra' | 'salida_obra' | 'externo' | 'nota'
 
 function getLimaTimeParts() {
   const parts = new Intl.DateTimeFormat('en-US', {
@@ -91,6 +92,7 @@ function getInitialsFromName(name: string) {
   return (words[0][0] + words[1][0]).toUpperCase()
 }
 
+// LÓGICA DE EXTRACCIÓN ACTUALIZADA
 function extraerDetalleNota(notas?: string | null) {
   const textoOriginal = notas ?? ''
   const tieneNota = textoOriginal.trim().length > 0
@@ -114,8 +116,10 @@ function extraerDetalleNota(notas?: string | null) {
     }
   }
 
-  if (textoOriginal.startsWith('Ingreso en:')) tipoMarcacion = 'ingreso'
-  else if (textoOriginal.startsWith('Salida de obra:') || textoOriginal.startsWith('Salida en:')) tipoMarcacion = 'salida'
+  // Clasificación inteligente basada en prefijos
+  if (textoOriginal.startsWith('Ingreso en:')) tipoMarcacion = 'ingreso_obra'
+  else if (textoOriginal.startsWith('Salida de obra:') || textoOriginal.startsWith('Salida en:')) tipoMarcacion = 'salida_obra'
+  else if (textoOriginal.startsWith('Marcación Externa:') || textoOriginal.startsWith('Salida Externa:')) tipoMarcacion = 'externo'
   else tipoMarcacion = 'nota'
 
   if (contieneGPS) {
@@ -126,19 +130,24 @@ function extraerDetalleNota(notas?: string | null) {
       coordenadas = textoOriginal.substring(startIdx + 5, endIdx).trim()
       textoLimpio = textoOriginal.substring(0, startIdx).trim()
 
+      // Limpiamos los prefijos para que en la tabla/excel se vea más bonito
       textoLimpio = textoLimpio
         .replace('Ingreso en: ', '')
         .replace('Salida de obra: ', '')
         .replace('Salida en: ', '')
+        .replace('Marcación Externa: ', '')
+        .replace('Salida Externa: ', '')
         .trim()
 
       if (textoLimpio === '') {
         textoLimpio =
-          tipoMarcacion === 'ingreso'
+          tipoMarcacion === 'ingreso_obra'
             ? 'Ingreso en obra'
-            : tipoMarcacion === 'salida'
+            : tipoMarcacion === 'salida_obra'
               ? 'Salida de obra'
-              : 'Nota con ubicación'
+              : tipoMarcacion === 'externo'
+                ? 'Marcación Externa'
+                : 'Nota con ubicación'
       }
 
       const [latStr, lngStr] = coordenadas.split(',')
@@ -807,8 +816,9 @@ export default function DualDashboardAsistencias() {
   const salidas = asistencias.filter(a => a.hora_salida !== null).length
 
   const totalNotas = asistenciasFiltradas.filter(a => !!a.notas).length
-  const ingresosObra = marcacionesConGPS.filter(m => m.tipoMarcacion === 'ingreso').length
-  const salidasObra = marcacionesConGPS.filter(m => m.tipoMarcacion === 'salida').length
+  const ingresosObra = marcacionesConGPS.filter(m => m.tipoMarcacion === 'ingreso_obra').length
+  const salidasObra = marcacionesConGPS.filter(m => m.tipoMarcacion === 'salida_obra').length
+  const marcacionesExternas = marcacionesConGPS.filter(m => m.tipoMarcacion === 'externo').length
 
   const listContainerVariants: Variants = {
     hidden: { opacity: 0 },
@@ -1029,26 +1039,37 @@ export default function DualDashboardAsistencias() {
                     >
                       {marcacionesConGPS.map((m) => {
                         const markerTone =
-                          m.tipoMarcacion === 'ingreso'
+                          m.tipoMarcacion === 'ingreso_obra'
                             ? {
                                 badgeBg: 'bg-blue-500',
                                 badgeText: 'text-white',
                                 cardAccent: 'from-blue-500 to-cyan-400',
-                                typeText: 'Ingreso en obra'
+                                typeText: 'Ingreso en obra',
+                                icon: HardHat
                               }
-                            : m.tipoMarcacion === 'salida'
+                            : m.tipoMarcacion === 'salida_obra'
                               ? {
                                   badgeBg: 'bg-red-500',
                                   badgeText: 'text-white',
                                   cardAccent: 'from-red-500 to-rose-400',
-                                  typeText: 'Salida de obra'
+                                  typeText: 'Salida de obra',
+                                  icon: MapPin
                                 }
-                              : {
-                                  badgeBg: 'bg-amber-500',
-                                  badgeText: 'text-white',
-                                  cardAccent: 'from-amber-500 to-orange-400',
-                                  typeText: 'Nota con GPS'
-                                }
+                              : m.tipoMarcacion === 'externo'
+                                ? {
+                                    badgeBg: 'bg-purple-500',
+                                    badgeText: 'text-white',
+                                    cardAccent: 'from-purple-500 to-fuchsia-400',
+                                    typeText: 'Externo',
+                                    icon: Store
+                                  }
+                                : {
+                                    badgeBg: 'bg-amber-500',
+                                    badgeText: 'text-white',
+                                    cardAccent: 'from-amber-500 to-orange-400',
+                                    typeText: 'Nota GPS',
+                                    icon: MessageSquareText
+                                  }
 
                         const statusRing =
                           m.estado_ingreso === 'PUNTUAL'
@@ -1066,11 +1087,13 @@ export default function DualDashboardAsistencias() {
                             : (m.textoLimpio || 'Sin detalle adicional')
 
                         const horaMarcacion =
-                          m.tipoMarcacion === 'ingreso'
+                          m.tipoMarcacion === 'ingreso_obra'
                             ? format(new Date(m.hora_ingreso), 'HH:mm')
                             : m.hora_salida
                               ? format(new Date(m.hora_salida), 'HH:mm')
                               : '--:--'
+                              
+                        const MIcon = markerTone.icon
 
                         return (
                           <Marker key={m.id} latitude={m.lat} longitude={m.lng} anchor="bottom">
@@ -1146,11 +1169,7 @@ export default function DualDashboardAsistencias() {
                                 )}
 
                                 <div className={`absolute -bottom-0.5 -right-0.5 w-6 h-6 rounded-full border-2 border-white dark:border-slate-900 flex items-center justify-center shadow-lg ${markerTone.badgeBg}`}>
-                                  {m.tipoMarcacion === 'ingreso'
-                                    ? <HardHat size={12} className="text-white" />
-                                    : m.tipoMarcacion === 'salida'
-                                      ? <MapPin size={12} className="text-white" />
-                                      : <MessageSquareText size={12} className="text-white" />}
+                                  <MIcon size={12} className="text-white" />
                                 </div>
                               </div>
                             </div>
@@ -1160,6 +1179,7 @@ export default function DualDashboardAsistencias() {
 
                       <FullscreenControl position="top-right" />
                       <NavigationControl position="top-right" visualizePitch={true} />
+                      <GeolocateControl position="top-right" />
                     </Map>
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-slate-500 dark:text-slate-400">
@@ -1171,10 +1191,11 @@ export default function DualDashboardAsistencias() {
 
                   <div className="absolute top-4 left-4 right-20 flex flex-wrap items-start gap-3 pointer-events-none">
                     <div className="pointer-events-auto bg-white/90 dark:bg-slate-900/90 backdrop-blur-sm p-3 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-md">
-                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Mapa de Obras</p>
+                      <p className="text-[10px] font-bold text-slate-500 uppercase tracking-widest mb-2">Mapa de Operaciones</p>
                       <div className="flex flex-col gap-2 text-xs font-semibold text-slate-700 dark:text-slate-300">
                         <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-blue-500 shadow-sm"></div> Ingresos en Obra</div>
                         <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-red-500 shadow-sm"></div> Salidas de Obra</div>
+                        <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-purple-500 shadow-sm"></div> Externos (Trámites/Hospital)</div>
                         <div className="flex items-center gap-2"><div className="w-3 h-3 rounded-full bg-amber-500 shadow-sm"></div> Notas con GPS</div>
                         <div className="mt-1 pt-2 border-t border-slate-200 dark:border-slate-700 flex items-center gap-2">
                           <div className="w-3 h-3 rounded-full bg-emerald-400/70 ring-4 ring-emerald-400/30"></div>
@@ -1193,9 +1214,10 @@ export default function DualDashboardAsistencias() {
                   </div>
 
                   <div className="absolute bottom-4 left-4 right-4 pointer-events-none">
-                    <div className="pointer-events-auto grid grid-cols-2 md:grid-cols-4 gap-3">
-                      <MiniMapStat title="Obras" value={ingresosObra} tone="blue" />
-                      <MiniMapStat title="Salidas" value={salidasObra} tone="red" />
+                    <div className="pointer-events-auto grid grid-cols-2 md:grid-cols-5 gap-3">
+                      <MiniMapStat title="Obras (In)" value={ingresosObra} tone="blue" />
+                      <MiniMapStat title="Obras (Out)" value={salidasObra} tone="red" />
+                      <MiniMapStat title="Externos" value={marcacionesExternas} tone="purple" />
                       <MiniMapStat title="Puntuales" value={asistenciasFiltradas.filter(a => a.estado_ingreso === 'PUNTUAL').length} tone="emerald" />
                       <MiniMapStat title="Tardanzas" value={asistenciasFiltradas.filter(a => a.estado_ingreso === 'TARDANZA').length} tone="rose" />
                     </div>
@@ -1209,6 +1231,7 @@ export default function DualDashboardAsistencias() {
 
       </main>
 
+      {/* MODALES SUPERPUESTOS */}
       {mostrarModalExportar && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-700 relative animate-in zoom-in-95 duration-200">
@@ -1261,29 +1284,33 @@ export default function DualDashboardAsistencias() {
       {notaSeleccionada && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-700 animate-in zoom-in-95 duration-200 transition-colors duration-500">
-            <div className={`${notaSeleccionada.tipoObra === 'ingreso' ? 'bg-blue-500' : notaSeleccionada.tipoObra === 'salida' ? 'bg-red-500' : 'bg-amber-500'} h-1.5 w-full`} />
+            <div className={`${notaSeleccionada.tipoObra === 'ingreso_obra' ? 'bg-blue-500' : notaSeleccionada.tipoObra === 'salida_obra' ? 'bg-red-500' : notaSeleccionada.tipoObra === 'externo' ? 'bg-purple-500' : 'bg-amber-500'} h-1.5 w-full`} />
             <div className="p-6 relative">
               <button onClick={() => setNotaSeleccionada(null)} className="absolute top-4 right-4 p-2 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full transition-colors z-10"><X size={20} /></button>
 
               <div className={`flex items-center gap-3 mb-4 
-                ${notaSeleccionada.tipoObra === 'ingreso' ? 'text-blue-500' :
-                  notaSeleccionada.tipoObra === 'salida' ? 'text-red-500' : 'text-amber-500'}`}
+                ${notaSeleccionada.tipoObra === 'ingreso_obra' ? 'text-blue-500' :
+                  notaSeleccionada.tipoObra === 'salida_obra' ? 'text-red-500' :
+                  notaSeleccionada.tipoObra === 'externo' ? 'text-purple-500' : 'text-amber-500'}`}
               >
-                {notaSeleccionada.tipoObra === 'ingreso' ? <HardHat size={28} /> :
-                  notaSeleccionada.tipoObra === 'salida' ? <MapIcon size={28} /> :
+                {notaSeleccionada.tipoObra === 'ingreso_obra' ? <HardHat size={28} /> :
+                  notaSeleccionada.tipoObra === 'salida_obra' ? <MapIcon size={28} /> :
+                  notaSeleccionada.tipoObra === 'externo' ? <Store size={28} /> :
                     <MessageSquareText size={28} />}
 
                 <h3 className="text-xl font-black text-slate-900 dark:text-white">
-                  {notaSeleccionada.tipoObra === 'ingreso' ? 'Ingreso en Obra' :
-                    notaSeleccionada.tipoObra === 'salida' ? 'Salida de Obra' : 'Nota Guardada'}
+                  {notaSeleccionada.tipoObra === 'ingreso_obra' ? 'Ingreso en Obra' :
+                    notaSeleccionada.tipoObra === 'salida_obra' ? 'Salida de Obra' :
+                    notaSeleccionada.tipoObra === 'externo' ? 'Marcación Externa' : 'Nota Guardada'}
                 </h3>
               </div>
 
               <p className="text-sm font-bold text-slate-500 dark:text-slate-400 mb-4 pb-4 border-b border-slate-100 dark:border-slate-800">
                 {notaSeleccionada.nombre} <br />
                 <span className="font-normal opacity-70">
-                  {notaSeleccionada.tipoObra === 'ingreso' ? `Ingresó a las ${notaSeleccionada.hora}` :
-                    notaSeleccionada.tipoObra === 'salida' ? `Salió a las ${notaSeleccionada.hora}` :
+                  {notaSeleccionada.tipoObra === 'ingreso_obra' ? `Ingresó a las ${notaSeleccionada.hora}` :
+                    notaSeleccionada.tipoObra === 'salida_obra' ? `Salió a las ${notaSeleccionada.hora}` :
+                    notaSeleccionada.tipoObra === 'externo' ? `Ubicación registrada a las ${notaSeleccionada.hora}` :
                       'Dejó una nota'}
                 </span>
               </p>
@@ -1337,18 +1364,19 @@ function StatCard({ title, value, icon, color }: any) {
   )
 }
 
-function MiniMapStat({ title, value, tone }: { title: string, value: number, tone: 'blue' | 'red' | 'amber' | 'emerald' | 'rose' }) {
+function MiniMapStat({ title, value, tone }: { title: string, value: number, tone: 'blue' | 'red' | 'amber' | 'emerald' | 'rose' | 'purple' }) {
   const toneClasses = {
     blue: 'bg-blue-50/90 text-blue-700 border-blue-200 dark:bg-blue-500/10 dark:text-blue-300 dark:border-blue-500/20',
     red: 'bg-red-50/90 text-red-700 border-red-200 dark:bg-red-500/10 dark:text-red-300 dark:border-red-500/20',
     amber: 'bg-amber-50/90 text-amber-700 border-amber-200 dark:bg-amber-500/10 dark:text-amber-300 dark:border-amber-500/20',
     emerald: 'bg-emerald-50/90 text-emerald-700 border-emerald-200 dark:bg-emerald-500/10 dark:text-emerald-300 dark:border-emerald-500/20',
-    rose: 'bg-rose-50/90 text-rose-700 border-rose-200 dark:bg-rose-500/10 dark:text-rose-300 dark:border-rose-500/20'
+    rose: 'bg-rose-50/90 text-rose-700 border-rose-200 dark:bg-rose-500/10 dark:text-rose-300 dark:border-rose-500/20',
+    purple: 'bg-purple-50/90 text-purple-700 border-purple-200 dark:bg-purple-500/10 dark:text-purple-300 dark:border-purple-500/20'
   }
 
   return (
     <div className={`backdrop-blur-sm border rounded-2xl px-4 py-3 shadow-md ${toneClasses[tone]}`}>
-      <p className="text-[10px] font-black uppercase tracking-widest opacity-80">{title}</p>
+      <p className="text-[9px] font-black uppercase tracking-widest opacity-80 truncate">{title}</p>
       <p className="text-xl font-black leading-none mt-1">{value}</p>
     </div>
   )
@@ -1537,7 +1565,7 @@ function FotocheckRow({
                 onClick={() => onAbrirNota({
                   nombre: data.nombres_completos,
                   nota: detalleNota.textoLimpio,
-                  hora: detalleNota.tipoMarcacion === 'ingreso'
+                  hora: detalleNota.tipoMarcacion === 'ingreso_obra' || detalleNota.tipoMarcacion === 'externo'
                     ? format(new Date(data.hora_ingreso), 'HH:mm a')
                     : (data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm a') : 'Desconocida'),
                   tipoObra: detalleNota.tipoMarcacion,
@@ -1545,16 +1573,19 @@ function FotocheckRow({
                   estadoIngreso: data.estado_ingreso
                 })}
                 className={`p-2 rounded-full border transition-all shadow-sm hover:scale-110 
-                  ${detalleNota.tipoMarcacion === 'ingreso'
+                  ${detalleNota.tipoMarcacion === 'ingreso_obra'
                     ? 'bg-blue-50 text-blue-600 border-blue-200 hover:bg-blue-100 dark:bg-blue-500/10 dark:border-blue-500/30'
-                    : detalleNota.tipoMarcacion === 'salida'
+                    : detalleNota.tipoMarcacion === 'salida_obra'
                       ? 'bg-red-50 text-red-600 border-red-200 hover:bg-red-100 dark:bg-red-500/10 dark:border-red-500/30'
-                      : 'bg-amber-50 text-amber-600 border-amber-200 hover:bg-amber-100 dark:bg-amber-500/10 dark:border-amber-500/30'}`}
-                title={detalleNota.tipoMarcacion === 'ingreso' ? "Ver ingreso de obra" : detalleNota.tipoMarcacion === 'salida' ? "Ver salida de obra" : "Ver nota"}
+                      : detalleNota.tipoMarcacion === 'externo'
+                        ? 'bg-purple-50 text-purple-600 border-purple-200 hover:bg-purple-100 dark:bg-purple-500/10 dark:border-purple-500/30'
+                        : 'bg-amber-50 text-amber-600 border-amber-200 hover:bg-amber-100 dark:bg-amber-500/10 dark:border-amber-500/30'}`}
+                title={detalleNota.tipoMarcacion === 'ingreso_obra' ? "Ver ingreso de obra" : detalleNota.tipoMarcacion === 'salida_obra' ? "Ver salida de obra" : detalleNota.tipoMarcacion === 'externo' ? "Ver marcación externa" : "Ver nota"}
               >
-                {detalleNota.tipoMarcacion === 'ingreso' ? <HardHat size={18} /> :
-                  detalleNota.tipoMarcacion === 'salida' ? <MapIcon size={18} /> :
-                    <MessageSquareText size={18} />}
+                {detalleNota.tipoMarcacion === 'ingreso_obra' ? <HardHat size={18} /> :
+                  detalleNota.tipoMarcacion === 'salida_obra' ? <MapIcon size={18} /> :
+                    detalleNota.tipoMarcacion === 'externo' ? <Store size={18} /> :
+                      <MessageSquareText size={18} />}
               </button>
 
               {modoEdicion && (
