@@ -318,16 +318,87 @@ export default function AdminDashboard() {
   }
 
   // ── Data fetching ────────────────────────────────────────────────────────────
+  //
+  // Lima = UTC-5. Un trabajador que entra las 8PM Lima (=01AM UTC del día sig.)
+  // queda grabado con fecha = día siguiente en UTC.
+  //
+  // Por eso para cualquier día D necesitamos 3 queries:
+  //  1. Records con fecha = D  (comportamiento normal)
+  //  2. Records con fecha = D+1 cuyo hora_ingreso UTC < D+1 05:00Z
+  //     → entraron en Lima-día D pero Supabase los guardó como Lima-día D+1
+  //  3. Records con fecha = D-1 cuya hora_salida UTC cae en Lima-día D
+  //     → entraron Lima-día D-1, salieron Lima-día D (turno cruce medianoche)
 
   const fetchData = async (fecha: Date) => {
     setLoading(true)
-    const { data, error } = await supabase.from('registro_asistencias').select('*')
-      .eq('fecha', format(fecha, 'yyyy-MM-dd')).order('hora_ingreso', { ascending: false })
-    if (!error && data) setAsistencias(data)
+
+    const fechaStr  = format(fecha, 'yyyy-MM-dd')
+    const prevStr   = format(subDays(fecha, 1), 'yyyy-MM-dd')
+    const nextStr   = format(addDays(fecha, 1), 'yyyy-MM-dd')
+    const next2Str  = format(addDays(fecha, 2), 'yyyy-MM-dd')
+
+    // ── Rangos UTC equivalentes a Lima (UTC-5) ──────────────────────────────
+    //
+    //  Lima 00:00 = UTC 05:00   (inicio del día Lima)
+    //  Lima 07:00 = UTC 12:00   (inicio turno diurno)
+    //  Lima 12:00 = UTC 17:00   (mediodía)
+    //  Lima 19:00 = UTC 00:00 del día siguiente UTC (inicio turno nocturno)
+    //  Lima 23:59 = UTC 04:59 del día siguiente UTC
+    //
+    //  REGLA: solo consideramos "nocturno" si hora_ingreso Lima >= 19:00
+    //  En UTC eso equivale a: hora_ingreso UTC >= D+1 00:00Z (medianoche UTC)
+    //  Y termina antes de:    hora_ingreso UTC <  D+1 05:00Z (= Lima 23:59)
+
+    const limaInicioUTC   = `${fechaStr}T05:00:00.000Z`  // 00:00 Lima-día D
+    const limaFinUTC      = `${nextStr}T05:00:00.000Z`   // 00:00 Lima-día D+1 (exclusivo)
+    // Nocturno Lima empieza a las 19:00 = 00:00 UTC del día siguiente
+    const noctInicioUTC   = `${nextStr}T00:00:00.000Z`   // 19:00 Lima-día D
+    const limaInicioUTCPrev = `${prevStr}T05:00:00.000Z` // 00:00 Lima-día D-1
+    const noctInicioUTCPrev = `${fechaStr}T00:00:00.000Z` // 19:00 Lima-día D-1
+
+    const [q1, q2, q3] = await Promise.all([
+      // 1. Normal: registros cuya fecha coincide con el día seleccionado
+      supabase.from('registro_asistencias').select('*')
+        .eq('fecha', fechaStr)
+        .order('hora_ingreso', { ascending: false }),
+
+      // 2. Registros con fecha=D+1 UTC que en realidad son la NOCHE de Lima-día D.
+      //    Solo los que entraron entre 19:00 y 23:59 Lima-día D
+      //    = hora_ingreso entre D+1 00:00Z y D+1 05:00Z
+      supabase.from('registro_asistencias').select('*')
+        .eq('fecha', nextStr)
+        .gte('hora_ingreso', noctInicioUTC)   // >= 19:00 Lima
+        .lt('hora_ingreso',  limaFinUTC)      // <  00:00 Lima del día D+1
+        .order('hora_ingreso', { ascending: false }),
+
+      // 3. Registros de fecha=D-1 cuya SALIDA cae en Lima-día D
+      //    Y cuya ENTRADA fue en el turno nocturno de Lima-día D-1 (>= 19:00 Lima D-1)
+      //    = hora_ingreso >= D 00:00Z (= 19:00 Lima D-1)
+      //    Esto excluye trabajadores diurnos del día anterior que salieron tarde.
+      supabase.from('registro_asistencias').select('*')
+        .eq('fecha', prevStr)
+        .gte('hora_ingreso', noctInicioUTCPrev)  // Entró >= 19:00 Lima D-1
+        .gte('hora_salida',  limaInicioUTC)      // Salida dentro de Lima-día D
+        .lt('hora_salida',   limaFinUTC)
+        .order('hora_ingreso', { ascending: false }),
+    ])
+
+    // Combinar sin duplicados, preservando orden: hoy → nocturno entrada → nocturno salida
+    const seen  = new Set<string>()
+    const todos = [
+      ...(q1.data ?? []),
+      ...(q2.data ?? []).map((r: any) => ({ ...r, _entroAyer: true })),
+      ...(q3.data ?? []).map((r: any) => ({ ...r, _saleHoy:  true })),
+    ].filter((r: any) => {
+      if (seen.has(r.id)) return false
+      seen.add(r.id)
+      return true
+    })
+
+    setAsistencias(todos)
     setLoading(false)
     if (isInitialLoad) setTimeout(() => setIsInitialLoad(false), 500)
   }
-
   useEffect(() => {
     fetchData(fechaActual)
     if (!isToday(fechaActual)) return
@@ -1046,18 +1117,39 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota, onB
   onAbrirNota: (n: any) => void
   onBorrarNota: (id: string) => void
 }) {
-  const isPuntual = data.estado_ingreso === 'PUNTUAL'
-  const nota = extraerDetalleNota(data.notas)
-  const tone = getMarkerTone(nota.tipoMarcacion)
+  const isPuntual    = data.estado_ingreso === 'PUNTUAL'
+  // _entroAyer: registro de mañana UTC cuya entrada fue anoche Lima → mostrar en el día de ayer
+  // _saleHoy:   registro de ayer UTC cuya salida fue esta mañana Lima → mostrar también hoy
+  const entroAyer = !!data._entroAyer
+  const saleHoy   = !!data._saleHoy
+  const nota  = extraerDetalleNota(data.notas)
+  const tone  = getMarkerTone(nota.tipoMarcacion)
   const NIcon = tone.icon
 
   return (
     <motion.div
       variants={{ hidden: { opacity: 0, x: -16 }, show: { opacity: 1, x: 0, transition: { type: 'spring', stiffness: 300, damping: 24 } } }}
       whileHover={{ scale: 1.003 }}
-      className={`flex items-center justify-between p-3 sm:p-4 rounded-xl bg-white dark:bg-slate-900 border transition-all hover:shadow-md
-        ${index === 0 && isToday(new Date(data.hora_ingreso)) ? 'border-blue-300 ring-1 ring-blue-100 shadow-sm' : 'border-slate-200 dark:border-slate-800'}`}
+      className={`relative flex items-center justify-between p-3 sm:p-4 rounded-xl bg-white dark:bg-slate-900 border transition-all hover:shadow-md
+        ${entroAyer || saleHoy
+          ? 'border-amber-300 ring-1 ring-amber-100 dark:ring-amber-500/10 shadow-sm'
+          : index === 0 && isToday(new Date(data.hora_ingreso))
+            ? 'border-blue-300 ring-1 ring-blue-100 shadow-sm'
+            : 'border-slate-200 dark:border-slate-800'}`}
     >
+      {/* Badge turno nocturno cruce de medianoche */}
+      {entroAyer && (
+        <div className="absolute -top-2.5 left-4 z-10 flex items-center gap-1 bg-amber-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full shadow-sm">
+          <Moon size={9} />
+          TURNO NOCTURNO · Ingresó la noche anterior
+        </div>
+      )}
+      {saleHoy && (
+        <div className="absolute -top-2.5 left-4 z-10 flex items-center gap-1 bg-indigo-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full shadow-sm">
+          <Moon size={9} />
+          SALIDA HOY · Ingresó el día anterior
+        </div>
+      )}
       {/* Avatar + info */}
       <div className="flex items-center gap-3 sm:gap-4 flex-1 min-w-0 pr-3">
         <div className="relative shrink-0">
