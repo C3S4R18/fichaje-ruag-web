@@ -580,6 +580,16 @@ export default function AdminDashboard() {
     } catch { toast.error('Error al eliminar nota') }
   }
 
+  const cambiarEstado = async (id: string, estadoActual: string) => {
+    const nuevoEstado = estadoActual === 'PUNTUAL' ? 'TARDANZA' : 'PUNTUAL'
+    try {
+      const { error } = await supabase.from('registro_asistencias').update({ estado_ingreso: nuevoEstado }).eq('id', id)
+      if (error) throw error
+      toast.success(`Estado cambiado a ${nuevoEstado}`)
+      setAsistencias(prev => prev.map(a => a.id === id ? { ...a, estado_ingreso: nuevoEstado } : a))
+    } catch { toast.error('Error al cambiar estado') }
+  }
+
   // ── Render ────────────────────────────────────────────────────────────────────
 
   if (!mounted || isInitialLoad) return (
@@ -770,6 +780,7 @@ export default function AdminDashboard() {
                       {filtradas.map((a, i) => (
                         <FotocheckRow key={a.id} data={a} index={i} modoEdicion={modoEdicion}
                           onActualizar={actualizarHora}
+                          onCambiarEstado={cambiarEstado}
                           onAbrirNota={n => setNotaModal(n)}
                           onBorrarNota={borrarNota} />
                       ))}
@@ -1111,9 +1122,10 @@ function ModalManual({ onClose, fechaBase, onSuccess }: { onClose: () => void; f
   )
 }
 
-function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota, onBorrarNota }: {
+function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado, onAbrirNota, onBorrarNota }: {
   data: any; index: number; modoEdicion: boolean
   onActualizar: (id: string, campo: 'hora_ingreso' | 'hora_salida', hora: string | null, fechaBase: string) => void
+  onCambiarEstado: (id: string, estadoActual: string) => void
   onAbrirNota: (n: any) => void
   onBorrarNota: (id: string) => void
 }) {
@@ -1167,9 +1179,23 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onAbrirNota, onB
             <span className="text-xs font-mono text-slate-400">{data.dni}</span>
             <span className="text-slate-200 dark:text-slate-700">·</span>
             <span className="text-[10px] font-bold text-slate-400 uppercase hidden sm:inline">{data.area}</span>
-            <span className={`px-1.5 py-0.5 rounded text-[9px] font-black ${isPuntual ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300' : 'bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-300'}`}>
-              {data.estado_ingreso}
-            </span>
+            {modoEdicion ? (
+              <button
+                onClick={() => onCambiarEstado(data.id, data.estado_ingreso)}
+                title="Clic para cambiar estado"
+                className={`px-1.5 py-0.5 rounded text-[9px] font-black border transition-all hover:scale-105 active:scale-95 cursor-pointer
+                  ${isPuntual
+                    ? 'bg-emerald-100 text-emerald-700 border-emerald-300 hover:bg-red-50 hover:text-red-600 hover:border-red-300'
+                    : 'bg-red-100 text-red-700 border-red-300 hover:bg-emerald-50 hover:text-emerald-600 hover:border-emerald-300'
+                  }`}
+              >
+                {data.estado_ingreso} ⇄
+              </button>
+            ) : (
+              <span className={`px-1.5 py-0.5 rounded text-[9px] font-black ${isPuntual ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300' : 'bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-300'}`}>
+                {data.estado_ingreso}
+              </span>
+            )}
           </div>
         </div>
       </div>
