@@ -1,4 +1,113 @@
+@import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;0,9..40,800;0,9..40,900;1,9..40,400&family=Syne:wght@600;700;800&display=swap');
 @import "tailwindcss";
+
+:root {
+  --bg:          #EEF2FF;
+  --surface:     #FFFFFF;
+  --surface-2:   #F8FAFF;
+  --border:      #E0E7FF;
+  --border-2:    #C7D2FE;
+  --text-1:      #1E1B4B;
+  --text-2:      #4338CA;
+  --text-3:      #818CF8;
+  --blue:        #4F46E5;
+  --blue-light:  #EEF2FF;
+  --blue-glow:   rgba(79,70,229,0.18);
+  --green:       #059669;
+  --green-light: #ECFDF5;
+  --red:         #DC2626;
+  --red-light:   #FEF2F2;
+  --amber:       #D97706;
+  --amber-light: #FFFBEB;
+  --purple:      #7C3AED;
+  --purple-light:#F5F3FF;
+  --gold:        #B45309;
+  --gold-light:  #FEF3C7;
+  --radius:      16px;
+  --shadow-sm:   0 1px 3px rgba(79,70,229,0.08), 0 1px 2px rgba(79,70,229,0.04);
+  --shadow-md:   0 4px 16px rgba(79,70,229,0.10), 0 2px 6px rgba(79,70,229,0.06);
+  --shadow-lg:   0 16px 40px rgba(79,70,229,0.14), 0 4px 12px rgba(79,70,229,0.08);
+  --shadow-glow: 0 0 40px rgba(79,70,229,0.20);
+}
+
+
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html { font-family: 'DM Sans', system-ui, sans-serif; }
+
+body {
+  background: var(--bg);
+  color: var(--text-1);
+  overscroll-behavior-y: contain;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border-2); border-radius: 99px; }
+
+.scrollbar-hide { scrollbar-width: none; -ms-overflow-style: none; }
+.scrollbar-hide::-webkit-scrollbar { display: none; }
+
+/* QR Scanner line animation */
+@keyframes scan {
+  0%   { top: 8%;  opacity: 0.3; }
+  50%  { opacity: 1; }
+  100% { top: 86%; opacity: 0.3; }
+}
+
+/* Badge float */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-6px); }
+}
+
+/* Glow pulse */
+@keyframes glow-pulse {
+  0%, 100% { box-shadow: 0 0 20px var(--blue-glow); }
+  50%       { box-shadow: 0 0 40px rgba(79,70,229,0.35), 0 0 60px rgba(79,70,229,0.15); }
+}
+
+/* Shimmer for loading */
+@keyframes shimmer {
+  0%   { background-position: -200% center; }
+  100% { background-position: 200% center; }
+}
+
+.shimmer {
+  background: linear-gradient(90deg, var(--surface-2) 25%, var(--border) 50%, var(--surface-2) 75%);
+  background-size: 200% auto;
+  animation: shimmer 1.5s linear infinite;
+}
+
+/* Trophy bounce */
+@keyframes trophy-bounce {
+  0%   { transform: scale(0) rotate(-10deg); }
+  60%  { transform: scale(1.15) rotate(5deg); }
+  80%  { transform: scale(0.95) rotate(-2deg); }
+  100% { transform: scale(1) rotate(0deg); }
+}
+
+.trophy-enter { animation: trophy-bounce 0.6s cubic-bezier(0.34,1.56,0.64,1) forwards; }
+
+/* Card entrance */
+@keyframes card-in {
+  from { opacity: 0; transform: translateY(24px) scale(0.97); }
+  to   { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.card-enter { animation: card-in 0.5s cubic-bezier(0.34,1.2,0.64,1) forwards; }
+
+/* Rotate spinner */
+@keyframes spin-slow { to { transform: rotate(360deg); } }
+
+/* Success checkmark */
+@keyframes check-draw {
+  from { stroke-dashoffset: 100; }
+  to   { stroke-dashoffset: 0; }
+}
 
 /* Esta línea mágica habilita el Modo Oscuro manual con el botón */
 @custom-variant dark (&:is(.dark *));
@@ -17,3 +126,5 @@
 .dark ::-webkit-scrollbar-thumb {
   background: #334155;
 }
+
+input[type="file"], textarea { font-size: 16px; -webkit-appearance: none; }

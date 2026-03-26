@@ -2,124 +2,116 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { createClient } from '@supabase/supabase-js'
-import { Camera, Edit2, ChevronDown, Loader2, RotateCcw, X } from 'lucide-react'
-
-// Configuración Supabase
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || ''
-const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''
-const supabase = createClient(supabaseUrl, supabaseKey)
+import { Camera, Edit2, ChevronDown, Loader2, RotateCcw, X, CheckCircle } from 'lucide-react'
+import { toast } from 'sonner'
+import { supabase } from '@/utils/supabase/client'
+import { motion, AnimatePresence } from 'framer-motion'
 
 const AREAS_LIST = [
   "Operaciones/Proyectos", "Presupuesto", "Contabilidad",
-  "Ssoma", "Rrhh", "Logística", "Finanzas", "Área comercial", "Software", "Almacén"
+  "Ssoma", "Rrhh", "Logística", "Finanzas", "Área comercial",
+  "Software", "Mantenimiento", "Almacén"
 ]
+
+// FIX: localStorage con manejo de errores (Safari modo privado lanza excepciones)
+function safeLocalStorage() {
+  try {
+    return {
+      get: (k: string) => localStorage.getItem(k),
+      set: (k: string, v: string) => localStorage.setItem(k, v),
+      remove: (k: string) => localStorage.removeItem(k),
+    }
+  } catch {
+    return { get: () => null, set: () => {}, remove: () => {} }
+  }
+}
 
 export default function SetupProfileWeb() {
   const router = useRouter()
-  
-  // --- Estado para verificar la memoria antes de mostrar el formulario ---
-  const [isChecking, setIsChecking] = useState(true)
+  const store = safeLocalStorage()
 
-  // Estados del formulario
-  const [nombres, setNombres] = useState('')
-  const [dni, setDni] = useState('')
+  const [isChecking, setIsChecking]   = useState(true)
+  const [nombres, setNombres]         = useState('')
+  const [dni, setDni]                 = useState('')
   const [selectedArea, setSelectedArea] = useState('')
-  
-  // Estados de la imagen
-  const [imageFile, setImageFile] = useState<File | null>(null)
+  const [imageFile, setImageFile]     = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string | null>(null)
-  const fileInputRef = useRef<HTMLInputElement>(null)
-  
-  // Estado de carga del botón principal
   const [isUploading, setIsUploading] = useState(false)
-
-  // --- ESTADOS PARA RECUPERACIÓN DE CUENTA ---
-  const [mostrarModalRecuperar, setMostrarModalRecuperar] = useState(false)
+  const [showRecuperar, setShowRecuperar] = useState(false)
   const [dniRecuperar, setDniRecuperar] = useState('')
   const [isRecuperando, setIsRecuperando] = useState(false)
+  const [uploadProgress, setUploadProgress] = useState(0)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Verificar si ya tiene cuenta apenas entra a la página
   useEffect(() => {
-    const dniGuardado = localStorage.getItem('RUAG_DNI')
-    const nombreGuardado = localStorage.getItem('RUAG_NOMBRE')
-    
+    const dniGuardado  = store.get('RUAG_DNI')
+    const nombreGuardado = store.get('RUAG_NOMBRE')
     if (dniGuardado && nombreGuardado) {
-      // Si ya tiene datos guardados, lo mandamos directo al escáner sin pedir nada
       router.push('/escaner')
     } else {
-      // Si es nuevo o borró sus datos, mostramos el formulario
       setIsChecking(false)
     }
   }, [router])
 
-  // Manejar la selección de imagen
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (file) {
-      setImageFile(file)
-      const objectUrl = URL.createObjectURL(file)
-      setImagePreview(objectUrl)
-    }
-  }
-
-  // Guardar en Supabase y continuar
-  const handleSave = async () => {
-    if (!nombres || dni.length !== 8 || !selectedArea || !imageFile) {
-      alert("Por favor completa todos los campos correctamente y sube tu foto.")
+    if (!file) return
+    if (file.size > 5 * 1024 * 1024) {
+      toast.error('La imagen no puede superar 5 MB')
       return
     }
+    setImageFile(file)
+    setImagePreview(URL.createObjectURL(file))
+  }
 
+  const handleSave = async () => {
+    if (!nombres.trim() || dni.length !== 8 || !selectedArea || !imageFile) {
+      toast.error('Completa todos los campos y sube tu foto')
+      return
+    }
     setIsUploading(true)
+    setUploadProgress(10)
 
     try {
-      const fileExt = imageFile.name.split('.').pop()
-      const fileName = `${dni}_${Date.now()}.${fileExt}`
-      const filePath = `${fileName}`
+      const ext      = imageFile.name.split('.').pop()
+      const fileName = `${dni}_${Date.now()}.${ext}`
 
+      setUploadProgress(30)
       const { error: uploadError } = await supabase.storage
         .from('fotos_perfil')
-        .upload(filePath, imageFile, { upsert: true })
-
+        .upload(fileName, imageFile, { upsert: true })
       if (uploadError) throw uploadError
 
-      const { data: publicUrlData } = supabase.storage
-        .from('fotos_perfil')
-        .getPublicUrl(filePath)
-      
-      const fotoUrl = publicUrlData.publicUrl
+      setUploadProgress(60)
+      const { data: urlData } = supabase.storage.from('fotos_perfil').getPublicUrl(fileName)
+      const fotoUrl = urlData.publicUrl
 
+      setUploadProgress(80)
       const { error: dbError } = await supabase
         .from('fotocheck_perfiles')
-        .upsert({
-          dni: dni,
-          nombres_completos: nombres,
-          area: selectedArea,
-          foto_url: fotoUrl
-        }, { onConflict: 'dni' }) 
-
+        .upsert({ dni, nombres_completos: nombres.trim(), area: selectedArea, foto_url: fotoUrl }, { onConflict: 'dni' })
       if (dbError) throw dbError
 
-      localStorage.setItem('RUAG_DNI', dni)
-      localStorage.setItem('RUAG_NOMBRE', nombres)
-      localStorage.setItem('RUAG_AREA', selectedArea)
-      localStorage.setItem('RUAG_FOTO', fotoUrl)
+      setUploadProgress(100)
+      store.set('RUAG_DNI', dni)
+      store.set('RUAG_NOMBRE', nombres.trim())
+      store.set('RUAG_AREA', selectedArea)
+      store.set('RUAG_FOTO', fotoUrl)
 
-      router.push('/escaner')
-
+      toast.success('¡Fotocheck creado exitosamente!')
+      setTimeout(() => router.push('/escaner'), 800)
     } catch (error: any) {
-      alert(`Error al guardar: ${error.message}`)
+      toast.error(`Error al guardar: ${error.message}`)
       setIsUploading(false)
+      setUploadProgress(0)
     }
   }
 
-  // --- FUNCIÓN PARA RECUPERAR DATOS DESDE SUPABASE ---
   const handleRecuperar = async () => {
     if (dniRecuperar.length !== 8) {
-      alert("Ingresa un DNI válido de 8 dígitos.")
+      toast.warning('Ingresa un DNI válido de 8 dígitos')
       return
     }
-
     setIsRecuperando(true)
     try {
       const { data, error } = await supabase
@@ -129,186 +121,264 @@ export default function SetupProfileWeb() {
         .single()
 
       if (error || !data) {
-        alert("No se encontró ningún Fotocheck con ese DNI.")
+        toast.error('No se encontró ningún Fotocheck con ese DNI')
         setIsRecuperando(false)
         return
       }
 
-      // Se encontraron los datos, guardarlos localmente
-      localStorage.setItem('RUAG_DNI', data.dni)
-      localStorage.setItem('RUAG_NOMBRE', data.nombres_completos)
-      localStorage.setItem('RUAG_AREA', data.area)
-      localStorage.setItem('RUAG_FOTO', data.foto_url)
+      store.set('RUAG_DNI', data.dni)
+      store.set('RUAG_NOMBRE', data.nombres_completos)
+      store.set('RUAG_AREA', data.area)
+      store.set('RUAG_FOTO', data.foto_url)
 
-      alert(`¡Bienvenido de nuevo, ${data.nombres_completos}!`)
+      toast.success(`¡Bienvenido de nuevo, ${data.nombres_completos}!`)
       router.push('/escaner')
-      
     } catch (error: any) {
-      alert(`Error al buscar: ${error.message}`)
+      toast.error(`Error al buscar: ${error.message}`)
       setIsRecuperando(false)
     }
   }
 
-  // Pantalla de carga mientras revisa la memoria
   if (isChecking) {
     return (
-      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center">
-        <Loader2 className="animate-spin text-blue-600 mb-4" size={48} />
-        <p className="text-white font-medium">Cargando tu perfil...</p>
+      <div className="min-h-screen flex flex-col items-center justify-center" style={{ background: 'var(--bg)' }}>
+        <div className="w-14 h-14 rounded-2xl flex items-center justify-center mb-5" style={{ background: 'var(--blue)', boxShadow: 'var(--shadow-glow)' }}>
+          <Loader2 className="animate-spin text-white" size={28} />
+        </div>
+        <p className="font-semibold" style={{ color: 'var(--text-2)' }}>Verificando tu perfil...</p>
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-slate-950 flex flex-col items-center py-12 px-6 overflow-y-auto relative">
-      
-      {/* --- MODAL RECUPERAR CUENTA --- */}
-      {mostrarModalRecuperar && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-in fade-in">
-          <div className="bg-slate-900 w-full max-w-sm rounded-3xl border border-slate-800 p-8 flex flex-col relative shadow-2xl animate-in zoom-in-95">
-            <button 
-              onClick={() => { if (!isRecuperando) setMostrarModalRecuperar(false) }} 
-              className="absolute top-5 right-5 text-slate-500 hover:text-white transition-colors"
-            >
-              <X size={24} />
-            </button>
-            
-            <div className="w-16 h-16 bg-blue-500/10 rounded-2xl flex items-center justify-center mb-6 self-center">
-              <RotateCcw size={32} className="text-blue-500" />
-            </div>
-            
-            <h2 className="text-2xl font-bold text-white text-center mb-2">Recuperar Fotocheck</h2>
-            <p className="text-slate-400 text-sm text-center mb-8">Ingresa tu DNI para buscar tus datos en la nube.</p>
+    <div className="min-h-screen flex flex-col items-center py-12 px-5 overflow-y-auto" style={{ background: 'var(--bg)' }}>
 
-            <input 
-              type="number" 
-              value={dniRecuperar}
-              onChange={(e) => { if (e.target.value.length <= 8) setDniRecuperar(e.target.value) }}
-              placeholder="Número de DNI"
-              className="w-full bg-slate-950 border border-slate-800 text-white px-5 py-4 rounded-xl focus:ring-2 focus:ring-blue-600 outline-none transition-all placeholder-slate-500 mb-6 text-center text-lg tracking-widest"
-            />
-
-            <button
-              onClick={handleRecuperar}
-              disabled={isRecuperando || dniRecuperar.length !== 8}
-              className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-500 text-white font-bold py-4 rounded-xl transition-all flex justify-center items-center"
+      {/* ── Modal Recuperar ─────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showRecuperar && (
+          <motion.div
+            className="fixed inset-0 z-50 flex items-center justify-center p-5"
+            style={{ background: 'rgba(30,27,75,0.5)', backdropFilter: 'blur(12px)' }}
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={() => { if (!isRecuperando) setShowRecuperar(false) }}
+          >
+            <motion.div
+              className="w-full max-w-sm rounded-3xl p-8 relative"
+              style={{ background: 'var(--surface)', boxShadow: 'var(--shadow-lg)', border: '1.5px solid var(--border)' }}
+              initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 400, damping: 28 }}
+              onClick={e => e.stopPropagation()}
             >
-              {isRecuperando ? <Loader2 className="animate-spin" size={24} /> : "Buscar y Recuperar"}
-            </button>
-          </div>
+              <button
+                onClick={() => { if (!isRecuperando) setShowRecuperar(false) }}
+                className="absolute top-5 right-5 w-8 h-8 rounded-full flex items-center justify-center transition-colors"
+                style={{ background: 'var(--surface-2)', color: 'var(--text-3)' }}
+              >
+                <X size={16} />
+              </button>
+
+              <div className="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto mb-5"
+                style={{ background: 'var(--blue-light)', border: '1.5px solid var(--border-2)' }}>
+                <RotateCcw size={28} style={{ color: 'var(--blue)' }} />
+              </div>
+
+              <h2 className="text-xl font-bold text-center mb-1" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>
+                Recuperar Fotocheck
+              </h2>
+              <p className="text-sm text-center mb-7" style={{ color: 'var(--text-3)' }}>
+                Ingresa tu DNI para buscar tus datos en la nube.
+              </p>
+
+              <input
+                type="number"
+                value={dniRecuperar}
+                onChange={e => { if (e.target.value.length <= 8) setDniRecuperar(e.target.value) }}
+                placeholder="Número de DNI"
+                className="w-full px-5 py-4 rounded-2xl text-center text-lg font-bold tracking-widest outline-none transition-all mb-5"
+                style={{
+                  background: 'var(--surface-2)', border: '1.5px solid var(--border-2)',
+                  color: 'var(--text-1)',
+                }}
+              />
+
+              <motion.button
+                onClick={handleRecuperar}
+                disabled={isRecuperando || dniRecuperar.length !== 8}
+                className="w-full py-4 rounded-2xl font-bold text-white flex items-center justify-center transition-all disabled:opacity-40"
+                style={{ background: 'var(--blue)', boxShadow: isRecuperando ? 'none' : 'var(--shadow-md)' }}
+                whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+              >
+                {isRecuperando ? <Loader2 className="animate-spin" size={22} /> : 'Buscar y Recuperar'}
+              </motion.button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── Contenido ───────────────────────────────────────────────────── */}
+      <motion.div
+        className="w-full max-w-md flex flex-col items-center"
+        initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.5, ease: [0.34, 1.2, 0.64, 1] }}
+      >
+        {/* Logo */}
+        <div className="w-12 h-12 rounded-2xl flex items-center justify-center mb-8"
+          style={{ background: 'var(--blue)', boxShadow: 'var(--shadow-glow)' }}>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+            <circle cx="12" cy="7" r="4"/>
+          </svg>
         </div>
-      )}
 
-      <div className="w-full max-w-md flex flex-col items-center">
-        <h1 className="text-white text-2xl md:text-3xl font-black tracking-widest text-center">
-          CREA TU FOTOCHECK
+        <h1 className="text-3xl font-black text-center tracking-tight mb-2"
+          style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>
+          Crea tu Fotocheck
         </h1>
-        <p className="text-slate-400 text-sm text-center mt-2 mb-10">
+        <p className="text-sm text-center mb-10" style={{ color: 'var(--text-3)' }}>
           Sube una foto clara de tu rostro para el registro.
         </p>
 
-        <input 
-          type="file" 
-          accept="image/*" 
-          ref={fileInputRef}
-          onChange={handleImageChange}
-          className="hidden"
-        />
+        {/* Avatar */}
+        <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageChange} className="hidden" />
 
-        <div className="relative mb-12">
-          <div className={`absolute -inset-2 rounded-full bg-gradient-to-tr from-blue-600 via-emerald-500 to-blue-400 ${!imagePreview ? 'animate-pulse' : 'animate-[spin_4s_linear_infinite]'}`} />
-          
-          <div 
+        <div className="relative mb-10">
+          {/* Aro animado */}
+          <div
+            className="absolute -inset-2 rounded-full opacity-70"
+            style={{
+              background: imagePreview
+                ? 'conic-gradient(from 0deg, var(--blue), var(--green), var(--blue))'
+                : 'conic-gradient(from 0deg, var(--blue), var(--border-2), var(--blue))',
+              animation: 'spin-slow 4s linear infinite',
+            }}
+          />
+          <motion.div
             onClick={() => fileInputRef.current?.click()}
-            className="relative w-40 h-40 bg-slate-900 rounded-full cursor-pointer flex items-center justify-center overflow-hidden border-4 border-slate-950 z-10 group"
+            className="relative w-36 h-36 rounded-full cursor-pointer flex items-center justify-center overflow-hidden border-4 group"
+            style={{ background: 'var(--surface-2)', borderColor: 'var(--surface)', boxShadow: 'var(--shadow-lg)' }}
+            whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}
           >
             {imagePreview ? (
-              <img 
-                src={imagePreview} 
-                alt="Vista previa" 
-                className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
-              />
+              <img src={imagePreview} alt="Preview" className="w-full h-full object-cover" />
             ) : (
-              <div className="flex flex-col items-center text-blue-400">
-                <Camera size={40} strokeWidth={1.5} />
+              <div className="flex flex-col items-center" style={{ color: 'var(--blue)' }}>
+                <Camera size={32} strokeWidth={1.5} />
                 <span className="text-xs font-bold mt-2">Subir Foto</span>
               </div>
             )}
-          </div>
+            <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-full"
+              style={{ background: 'rgba(79,70,229,0.25)' }}>
+              <Edit2 size={24} className="text-white" />
+            </div>
+          </motion.div>
 
           {imagePreview && (
-            <button 
+            <motion.button
               onClick={() => fileInputRef.current?.click()}
-              className="absolute bottom-0 right-0 z-20 w-10 h-10 bg-blue-600 rounded-full border-4 border-slate-950 flex items-center justify-center text-white hover:bg-blue-500 transition-colors"
+              className="absolute bottom-0 right-0 w-10 h-10 rounded-full flex items-center justify-center text-white border-4"
+              style={{ background: 'var(--blue)', borderColor: 'var(--bg)', boxShadow: 'var(--shadow-md)' }}
+              initial={{ scale: 0 }} animate={{ scale: 1 }}
+              transition={{ type: 'spring', stiffness: 500, damping: 20 }}
+              whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
             >
-              <Edit2 size={16} />
-            </button>
+              <Edit2 size={15} />
+            </motion.button>
           )}
         </div>
 
-        <div className="w-full space-y-5">
-          <div className="relative">
-            <input 
-              type="text" 
-              value={nombres}
-              onChange={(e) => setNombres(e.target.value.toUpperCase())}
-              placeholder="Nombres y Apellidos Completos"
-              className="w-full bg-slate-900 border border-slate-800 text-white px-5 py-4 rounded-2xl focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none transition-all placeholder-slate-500"
-            />
-          </div>
+        {/* Upload Progress */}
+        <AnimatePresence>
+          {isUploading && uploadProgress > 0 && (
+            <motion.div className="w-full mb-6" initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}>
+              <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: 'var(--border)' }}>
+                <motion.div
+                  className="h-full rounded-full"
+                  style={{ background: 'var(--blue)' }}
+                  initial={{ width: 0 }}
+                  animate={{ width: `${uploadProgress}%` }}
+                  transition={{ duration: 0.4, ease: 'easeOut' }}
+                />
+              </div>
+              <p className="text-xs mt-2 text-center font-medium" style={{ color: 'var(--text-3)' }}>
+                {uploadProgress < 100 ? 'Subiendo datos...' : '¡Listo!'}
+              </p>
+            </motion.div>
+          )}
+        </AnimatePresence>
 
-          <div className="relative">
-            <input 
-              type="number" 
-              value={dni}
-              onChange={(e) => {
-                if (e.target.value.length <= 8) setDni(e.target.value)
+        {/* Campos */}
+        <div className="w-full space-y-4">
+          {[
+            {
+              type: 'text', value: nombres, placeholder: 'Nombres y Apellidos Completos',
+              onChange: (e: any) => setNombres(e.target.value.toUpperCase()),
+            },
+            {
+              type: 'number', value: dni, placeholder: 'Número de DNI',
+              onChange: (e: any) => { if (e.target.value.length <= 8) setDni(e.target.value) },
+            },
+          ].map((field, i) => (
+            <motion.input
+              key={i}
+              type={field.type}
+              value={field.value}
+              onChange={field.onChange}
+              placeholder={field.placeholder}
+              className="w-full px-5 py-4 rounded-2xl outline-none transition-all font-medium"
+              style={{
+                background: 'var(--surface)', border: '1.5px solid var(--border)',
+                color: 'var(--text-1)',
               }}
-              placeholder="Número de DNI"
-              className="w-full bg-slate-900 border border-slate-800 text-white px-5 py-4 rounded-2xl focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none transition-all placeholder-slate-500"
+              whileFocus={{ scale: 1.01 }}
             />
-          </div>
+          ))}
 
+          {/* Área select */}
           <div className="relative">
             <select
               value={selectedArea}
-              onChange={(e) => setSelectedArea(e.target.value)}
-              className={`w-full bg-slate-900 border border-slate-800 px-5 py-4 rounded-2xl focus:ring-2 focus:ring-blue-600 focus:border-transparent outline-none transition-all appearance-none cursor-pointer ${selectedArea ? 'text-white' : 'text-slate-500'}`}
+              onChange={e => setSelectedArea(e.target.value)}
+              className="w-full px-5 py-4 rounded-2xl appearance-none cursor-pointer outline-none font-medium transition-all"
+              style={{
+                background: 'var(--surface)', border: '1.5px solid var(--border)',
+                color: selectedArea ? 'var(--text-1)' : 'var(--text-3)',
+              }}
             >
               <option value="" disabled>Selecciona tu Área</option>
-              {AREAS_LIST.map((area) => (
-                <option key={area} value={area} className="text-black bg-white">
-                  {area}
-                </option>
+              {AREAS_LIST.map(area => (
+                <option key={area} value={area}>{area}</option>
               ))}
             </select>
-            <div className="absolute inset-y-0 right-5 flex items-center pointer-events-none text-slate-400">
+            <div className="absolute inset-y-0 right-5 flex items-center pointer-events-none" style={{ color: 'var(--text-3)' }}>
               <ChevronDown size={20} />
             </div>
           </div>
         </div>
 
-        <button
+        {/* Botón guardar */}
+        <motion.button
           onClick={handleSave}
           disabled={isUploading}
-          className="w-full mt-10 bg-gradient-to-r from-blue-600 to-blue-500 hover:from-blue-500 hover:to-blue-400 text-white font-black tracking-widest py-4 rounded-2xl transition-all shadow-[0_0_30px_rgba(37,99,235,0.3)] disabled:opacity-50 flex justify-center items-center"
+          className="w-full mt-8 py-4 rounded-2xl font-bold text-white text-base flex items-center justify-center gap-2 disabled:opacity-50"
+          style={{ background: 'var(--blue)', boxShadow: 'var(--shadow-lg), var(--shadow-glow)', fontFamily: 'Syne, sans-serif' }}
+          whileHover={{ scale: 1.02, boxShadow: '0 20px 50px rgba(79,70,229,0.35)' }}
+          whileTap={{ scale: 0.98 }}
         >
-          {isUploading ? (
-            <Loader2 className="animate-spin text-white" size={24} />
-          ) : (
-            "GUARDAR Y CONTINUAR"
-          )}
-        </button>
+          {isUploading
+            ? <Loader2 className="animate-spin" size={22} />
+            : <><CheckCircle size={20} />GUARDAR Y CONTINUAR</>
+          }
+        </motion.button>
 
-        {/* BOTÓN PARA RECUPERAR CUENTA */}
-        <button 
-          onClick={() => setMostrarModalRecuperar(true)}
-          className="mt-6 text-blue-400 font-semibold hover:text-blue-300 transition-colors"
+        <motion.button
+          onClick={() => setShowRecuperar(true)}
+          className="mt-5 font-semibold text-sm transition-colors"
+          style={{ color: 'var(--blue)' }}
+          whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
         >
           ¿Ya tienes cuenta? Recuperar datos
-        </button>
-
-      </div>
+        </motion.button>
+      </motion.div>
     </div>
   )
 }
