@@ -580,6 +580,16 @@ export default function AdminDashboard() {
     } catch { toast.error('Error al eliminar nota') }
   }
 
+  const borrarRegistro = async (id: string, nombre: string) => {
+    if (!confirm(`¿Eliminar el registro de ${nombre}? Esta acción no se puede deshacer.`)) return
+    try {
+      const { error } = await supabase.from('registro_asistencias').delete().eq('id', id)
+      if (error) throw error
+      toast.success('Registro eliminado')
+      setAsistencias(prev => prev.filter(a => a.id !== id))
+    } catch { toast.error('Error al eliminar registro') }
+  }
+
   const cambiarEstado = async (id: string, estadoActual: string) => {
     const nuevoEstado = estadoActual === 'PUNTUAL' ? 'TARDANZA' : 'PUNTUAL'
     try {
@@ -782,7 +792,8 @@ export default function AdminDashboard() {
                           onActualizar={actualizarHora}
                           onCambiarEstado={cambiarEstado}
                           onAbrirNota={n => setNotaModal(n)}
-                          onBorrarNota={borrarNota} />
+                          onBorrarNota={borrarNota}
+                          onBorrarRegistro={borrarRegistro} />
                       ))}
                     </AnimatePresence>
                   </motion.div>
@@ -1047,26 +1058,83 @@ export default function AdminDashboard() {
 
 // ─── Sub-components ────────────────────────────────────────────────────────────
 
-function ModalManual({ onClose, fechaBase, onSuccess }: { onClose: () => void; fechaBase: string; onSuccess: (d: any) => void }) {
-  const [nombres, setNombres] = useState('')
-  const [dni, setDni]         = useState('')
-  const [area, setArea]       = useState('')
-  const [hora, setHora]       = useState('08:00')
-  const [saving, setSaving]   = useState(false)
+// Tipo para perfil de trabajador
+type PerfilTrabajador = { dni: string; nombres_completos: string; area: string; foto_url: string }
 
-  const AREAS = ["Operaciones/Proyectos","Presupuesto","Contabilidad","Ssoma","Rrhh","Logística","Finanzas","Área comercial","Software","Mantenimiento","Almacén"]
+function ModalManual({ onClose, fechaBase, onSuccess }: { onClose: () => void; fechaBase: string; onSuccess: (d: any) => void }) {
+  const [busqTrabajador, setBusqTrabajador] = useState('')
+  const [trabajadores, setTrabajadores]     = useState<PerfilTrabajador[]>([])
+  const [loadingPerfiles, setLoadingPerfiles] = useState(true)
+  const [perfilSeleccionado, setPerfilSeleccionado] = useState<PerfilTrabajador | null>(null)
+  const [showDropdown, setShowDropdown]     = useState(false)
+
+  const [hora, setHora]   = useState('08:00')
+  const [saving, setSaving] = useState(false)
+  const [yaExiste, setYaExiste] = useState(false)
+  const [checkingDup, setCheckingDup] = useState(false)
+
+  // Cargar todos los perfiles al abrir
+  useEffect(() => {
+    supabase.from('fotocheck_perfiles').select('dni, nombres_completos, area, foto_url')
+      .order('nombres_completos')
+      .then(({ data }) => { if (data) setTrabajadores(data); setLoadingPerfiles(false) })
+  }, [])
+
+  // Verificar duplicado: usamos rango UTC equivalente al día Lima, NO el campo fecha.
+  // Un turno nocturno (8PM Lima) queda grabado con fecha=D+1 en UTC,
+  // así que buscamos por hora_ingreso >= D 05:00Z y < D+1 05:00Z.
+  useEffect(() => {
+    if (!perfilSeleccionado) { setYaExiste(false); return }
+    setCheckingDup(true)
+    // Calcular rango UTC para el día Lima seleccionado
+    const [y, m, d] = fechaBase.split('-')
+    const next = new Date(Number(y), Number(m) - 1, Number(d) + 1)
+    const nextStr = `${next.getFullYear()}-${String(next.getMonth()+1).padStart(2,'0')}-${String(next.getDate()).padStart(2,'0')}`
+    const limaStart = `${fechaBase}T05:00:00.000Z`   // 00:00 Lima-día D
+    const limaEnd   = `${nextStr}T05:00:00.000Z`     // 00:00 Lima-día D+1
+    supabase.from('registro_asistencias')
+      .select('id', { count: 'exact', head: true })
+      .eq('dni', perfilSeleccionado.dni)
+      .gte('hora_ingreso', limaStart)
+      .lt('hora_ingreso', limaEnd)
+      .then(({ count }) => {
+        setYaExiste((count ?? 0) > 0)
+        setCheckingDup(false)
+      })
+  }, [perfilSeleccionado, fechaBase])
+
+  const trabajadoresFiltrados = trabajadores.filter(t =>
+    t.nombres_completos.toLowerCase().includes(busqTrabajador.toLowerCase()) ||
+    t.dni.includes(busqTrabajador)
+  )
+
+  const seleccionarTrabajador = (t: PerfilTrabajador) => {
+    setPerfilSeleccionado(t)
+    setBusqTrabajador(t.nombres_completos)
+    setShowDropdown(false)
+  }
 
   const save = async () => {
-    if (!nombres || dni.length !== 8 || !area || !hora) { toast.error('Llena todos los campos'); return }
+    if (!perfilSeleccionado) { toast.error('Selecciona un trabajador'); return }
+    if (yaExiste) { toast.error('Ya tiene asistencia en esta fecha'); return }
+    if (!hora) { toast.error('Selecciona la hora'); return }
     setSaving(true)
     try {
       const [h, m] = hora.split(':').map(Number)
       const d = new Date(fechaBase); d.setHours(h, m, 0)
       const isPuntual = h < 9 || (h === 9 && m <= 5)
-      const row = { dni, nombres_completos: nombres.toUpperCase(), area, fecha: fechaBase, hora_ingreso: d.toISOString(), estado_ingreso: isPuntual ? 'PUNTUAL' : 'TARDANZA', foto_url: '' }
+      const row = {
+        dni:               perfilSeleccionado.dni,
+        nombres_completos: perfilSeleccionado.nombres_completos,
+        area:              perfilSeleccionado.area,
+        foto_url:          perfilSeleccionado.foto_url ?? '',
+        fecha:             fechaBase,
+        hora_ingreso:      d.toISOString(),
+        estado_ingreso:    isPuntual ? 'PUNTUAL' : 'TARDANZA',
+      }
       const { data, error } = await supabase.from('registro_asistencias').insert(row).select().single()
       if (error) throw error
-      toast.success('Asistencia registrada')
+      toast.success(`Asistencia registrada — ${isPuntual ? 'PUNTUAL' : 'TARDANZA'}`)
       onSuccess(data)
     } catch (e: any) { toast.error(`Error: ${e.message}`); setSaving(false) }
   }
@@ -1074,47 +1142,115 @@ function ModalManual({ onClose, fechaBase, onSuccess }: { onClose: () => void; f
   return (
     <motion.div className="fixed inset-0 z-[100] flex items-center justify-center p-4"
       style={{ background: 'rgba(15,23,42,0.5)', backdropFilter: 'blur(8px)' }}
-      initial={{ opacity: 0 }} animate={{ opacity: 1 }}>
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }}
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}>
       <motion.div className="bg-white dark:bg-slate-900 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden border border-slate-200 dark:border-slate-700"
         initial={{ scale: 0.93, y: 12 }} animate={{ scale: 1, y: 0 }}
-        transition={{ type: 'spring', stiffness: 450, damping: 30 }}>
+        transition={{ type: 'spring', stiffness: 450, damping: 30 }}
+        onClick={e => e.stopPropagation()}>
         <div className="bg-blue-600 h-1" />
-        <div className="p-6 relative">
+        <div className="p-5 relative">
           <button onClick={onClose} className="absolute top-4 right-4 p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-full"><X size={18} /></button>
+
           <div className="flex items-center gap-3 mb-5">
             <div className="w-10 h-10 rounded-xl bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600"><UserPlus size={18} /></div>
-            <h3 className="font-black text-lg text-slate-900 dark:text-white">Registro Manual</h3>
+            <div>
+              <h3 className="font-black text-lg text-slate-900 dark:text-white leading-tight">Registro Manual</h3>
+              <p className="text-[10px] text-slate-400 font-medium">{fechaBase}</p>
+            </div>
           </div>
+
           <div className="space-y-3">
+            {/* Buscador de trabajador */}
             <div>
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Nombres y Apellidos</label>
-              <input type="text" value={nombres} onChange={e => setNombres(e.target.value)} placeholder="Juan Pérez García"
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">
+                Trabajador {loadingPerfiles && <span className="text-blue-400">(cargando...)</span>}
+              </label>
+              <div className="relative">
+                <div className="relative">
+                  <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={busqTrabajador}
+                    placeholder="Buscar por nombre o DNI..."
+                    onChange={e => { setBusqTrabajador(e.target.value); setShowDropdown(true); if (!e.target.value) setPerfilSeleccionado(null) }}
+                    onFocus={() => setShowDropdown(true)}
+                    className={`w-full pl-9 pr-4 py-2.5 rounded-xl border text-sm font-medium outline-none transition-all
+                      ${perfilSeleccionado && !yaExiste ? 'bg-emerald-50 dark:bg-emerald-500/10 border-emerald-300 dark:border-emerald-500/30'
+                        : perfilSeleccionado && yaExiste ? 'bg-red-50 dark:bg-red-500/10 border-red-300 dark:border-red-500/30'
+                        : 'bg-slate-50 dark:bg-slate-950/50 border-slate-200 dark:border-slate-800 focus:border-blue-500'}`}
+                  />
+                  {perfilSeleccionado && (
+                    <button onClick={() => { setPerfilSeleccionado(null); setBusqTrabajador(''); setYaExiste(false) }}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
+                      <X size={14} />
+                    </button>
+                  )}
+                </div>
+
+                {/* Dropdown lista de trabajadores */}
+                {showDropdown && !perfilSeleccionado && busqTrabajador.length > 0 && (
+                  <div className="absolute top-full left-0 right-0 mt-1 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-xl shadow-xl z-50 max-h-52 overflow-y-auto">
+                    {trabajadoresFiltrados.length === 0 ? (
+                      <div className="p-3 text-sm text-slate-400 text-center">Sin resultados</div>
+                    ) : trabajadoresFiltrados.slice(0, 8).map(t => (
+                      <button key={t.dni} onClick={() => seleccionarTrabajador(t)}
+                        className="w-full flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50 dark:hover:bg-slate-800 transition-colors text-left">
+                        <div className="w-9 h-9 rounded-full bg-slate-100 dark:bg-slate-700 overflow-hidden shrink-0 flex items-center justify-center">
+                          {t.foto_url ? <img src={t.foto_url} alt="" className="w-full h-full object-cover" />
+                            : <span className="text-xs font-black text-slate-500">{t.nombres_completos.split(' ').map((w: string) => w[0]).join('').substring(0,2).toUpperCase()}</span>}
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-bold text-slate-800 dark:text-slate-100 truncate uppercase">{t.nombres_completos}</p>
+                          <p className="text-[10px] text-slate-400 font-mono">{t.dni} · {t.area}</p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Estado duplicado */}
+              {perfilSeleccionado && (
+                <div className={`mt-2 flex items-center gap-2 text-xs font-bold px-3 py-1.5 rounded-lg
+                  ${checkingDup ? 'bg-slate-100 text-slate-500' : yaExiste ? 'bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-400' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400'}`}>
+                  {checkingDup ? <Loader2 size={12} className="animate-spin" /> : yaExiste ? <AlertCircle size={12} /> : <CheckCircle2 size={12} />}
+                  {checkingDup ? 'Verificando...' : yaExiste ? `Ya tiene asistencia el ${fechaBase}` : `Libre para registrar el ${fechaBase}`}
+                </div>
+              )}
+
+              {/* Info del trabajador seleccionado */}
+              {perfilSeleccionado && !checkingDup && (
+                <div className="mt-2 flex items-center gap-2 px-3 py-2 bg-slate-50 dark:bg-slate-800 rounded-xl border border-slate-200 dark:border-slate-700">
+                  <div className="w-8 h-8 rounded-full bg-slate-200 overflow-hidden shrink-0">
+                    {perfilSeleccionado.foto_url
+                      ? <img src={perfilSeleccionado.foto_url} alt="" className="w-full h-full object-cover" />
+                      : <div className="w-full h-full flex items-center justify-center text-[10px] font-black text-slate-500">{getInitials(perfilSeleccionado.nombres_completos)}</div>}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs font-black text-slate-700 dark:text-slate-200 truncate uppercase">{perfilSeleccionado.nombres_completos}</p>
+                    <p className="text-[10px] text-slate-400">{perfilSeleccionado.dni} · {perfilSeleccionado.area}</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Hora */}
+            <div>
+              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Hora de Ingreso</label>
+              <input type="time" value={hora} onChange={e => setHora(e.target.value)}
                 className="w-full bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 px-4 py-2.5 rounded-xl outline-none focus:border-blue-500 text-sm" />
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">DNI</label>
-                <input type="number" value={dni} onChange={e => { if (e.target.value.length <= 8) setDni(e.target.value) }} placeholder="12345678"
-                  className="w-full bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 px-4 py-2.5 rounded-xl outline-none focus:border-blue-500 text-sm" />
-              </div>
-              <div>
-                <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Hora Ingreso</label>
-                <input type="time" value={hora} onChange={e => setHora(e.target.value)}
-                  className="w-full bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 px-4 py-2.5 rounded-xl outline-none focus:border-blue-500 text-sm" />
-              </div>
-            </div>
-            <div>
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest block mb-1">Área</label>
-              <select value={area} onChange={e => setArea(e.target.value)}
-                className="w-full bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 px-4 py-2.5 rounded-xl outline-none focus:border-blue-500 text-sm cursor-pointer appearance-none">
-                <option value="" disabled>Seleccionar...</option>
-                {AREAS.map(a => <option key={a} value={a}>{a}</option>)}
-              </select>
+              {hora && (() => { const [h,m] = hora.split(':').map(Number); const p = h < 9 || (h === 9 && m <= 5); return (
+                <p className={`text-[10px] font-bold mt-1 ml-1 ${p ? 'text-emerald-600' : 'text-red-500'}`}>
+                  → {p ? '✓ PUNTUAL' : '✗ TARDANZA'}
+                </p>
+              )})()}
             </div>
           </div>
-          <button onClick={save} disabled={saving}
-            className="w-full mt-5 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl flex justify-center items-center gap-2 transition-all active:scale-95 disabled:opacity-60">
-            {saving ? <Loader2 className="animate-spin" size={18} /> : 'Registrar Asistencia'}
+
+          <button onClick={save} disabled={saving || !perfilSeleccionado || yaExiste || checkingDup}
+            className="w-full mt-5 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl flex justify-center items-center gap-2 transition-all active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
+            {saving ? <Loader2 className="animate-spin" size={18} /> : yaExiste ? '⚠ Ya registrado este día' : 'Registrar Asistencia'}
           </button>
         </div>
       </motion.div>
@@ -1122,12 +1258,13 @@ function ModalManual({ onClose, fechaBase, onSuccess }: { onClose: () => void; f
   )
 }
 
-function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado, onAbrirNota, onBorrarNota }: {
+function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado, onAbrirNota, onBorrarNota, onBorrarRegistro }: {
   data: any; index: number; modoEdicion: boolean
   onActualizar: (id: string, campo: 'hora_ingreso' | 'hora_salida', hora: string | null, fechaBase: string) => void
   onCambiarEstado: (id: string, estadoActual: string) => void
   onAbrirNota: (n: any) => void
   onBorrarNota: (id: string) => void
+  onBorrarRegistro: (id: string, nombre: string) => void
 }) {
   const isPuntual    = data.estado_ingreso === 'PUNTUAL'
   // _entroAyer: registro de mañana UTC cuya entrada fue anoche Lima → mostrar en el día de ayer
@@ -1235,7 +1372,7 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
           )}
         </div>
 
-        {/* Nota icon */}
+        {/* Nota icon + delete record */}
         <div className="flex items-center gap-1">
           {nota.tieneNota && (
             <>
@@ -1245,7 +1382,6 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
                   nota.tipoMarcacion === 'ingreso_obra' ? 'bg-blue-50 text-blue-600 border-blue-200 dark:bg-blue-500/10 dark:border-blue-500/30'
                   : nota.tipoMarcacion === 'salida_obra' ? 'bg-red-50 text-red-600 border-red-200 dark:bg-red-500/10 dark:border-red-500/30'
                   : nota.tipoMarcacion === 'externo' ? 'bg-purple-50 text-purple-600 border-purple-200 dark:bg-purple-500/10 dark:border-purple-500/30'
-                  // FIX: Icono de luna para turno nocturno
                   : nota.tipoMarcacion === 'nocturno' ? 'bg-amber-50 text-amber-600 border-amber-200 dark:bg-amber-500/10 dark:border-amber-500/30'
                   : 'bg-slate-50 text-slate-600 border-slate-200 dark:bg-slate-500/10 dark:border-slate-500/30'}`}
                 title={tone.label}
@@ -1254,11 +1390,23 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
               </button>
               {modoEdicion && (
                 <button onClick={() => onBorrarNota(data.id)}
-                  className="p-1.5 rounded-full border border-red-200 dark:border-red-500/30 text-red-500 hover:bg-red-50 dark:bg-red-500/10 hover:scale-110 transition-all">
+                  title="Borrar nota"
+                  className="p-1.5 rounded-full border border-red-200 dark:border-red-500/30 text-red-400 hover:bg-red-50 dark:bg-red-500/10 hover:scale-110 transition-all">
                   <Trash2 size={13} />
                 </button>
               )}
             </>
+          )}
+
+          {/* Botón eliminar registro completo — solo en modo edición */}
+          {modoEdicion && (
+            <button
+              onClick={() => onBorrarRegistro(data.id, data.nombres_completos)}
+              title="Eliminar registro completo"
+              className="p-1.5 rounded-full border border-red-300 dark:border-red-500/40 bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-500/20 hover:scale-110 transition-all ml-0.5"
+            >
+              <X size={14} />
+            </button>
           )}
         </div>
       </div>
