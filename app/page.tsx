@@ -1269,8 +1269,12 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
   const isPuntual    = data.estado_ingreso === 'PUNTUAL'
   // _entroAyer: registro de mañana UTC cuya entrada fue anoche Lima → mostrar en el día de ayer
   // _saleHoy:   registro de ayer UTC cuya salida fue esta mañana Lima → mostrar también hoy
-  const entroAyer = !!data._entroAyer
-  const saleHoy   = !!data._saleHoy
+  const entroAyer   = !!data._entroAyer
+  const saleHoy     = !!data._saleHoy
+  // yaSalio: solo para trabajadores de turno nocturno (nota empieza con "Turno Nocturno")
+  // que ya marcaron su salida hoy → el admin sabe que pueden volver a registrar esta noche
+  const esNocturno = data.notas?.startsWith('Turno Nocturno') ?? false
+  const yaSalio    = esNocturno && !!data.hora_salida && !saleHoy && isToday(new Date(data.hora_ingreso))
   const nota  = extraerDetalleNota(data.notas)
   const tone  = getMarkerTone(nota.tipoMarcacion)
   const NIcon = tone.icon
@@ -1279,24 +1283,54 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
     <motion.div
       variants={{ hidden: { opacity: 0, x: -16 }, show: { opacity: 1, x: 0, transition: { type: 'spring', stiffness: 300, damping: 24 } } }}
       whileHover={{ scale: 1.003 }}
-      className={`relative flex items-center justify-between p-3 sm:p-4 rounded-xl bg-white dark:bg-slate-900 border transition-all hover:shadow-md
+      className={`relative flex items-center justify-between rounded-xl bg-white dark:bg-slate-900 border transition-all hover:shadow-md
+        ${entroAyer || saleHoy ? 'pt-5 pb-3 px-3 sm:pt-6 sm:pb-4 sm:px-4' : yaSalio ? 'pt-5 pb-3 px-3 sm:pt-6 sm:pb-4 sm:px-4' : 'p-3 sm:p-4'}
         ${entroAyer || saleHoy
           ? 'border-amber-300 ring-1 ring-amber-100 dark:ring-amber-500/10 shadow-sm'
-          : index === 0 && isToday(new Date(data.hora_ingreso))
-            ? 'border-blue-300 ring-1 ring-blue-100 shadow-sm'
-            : 'border-slate-200 dark:border-slate-800'}`}
+          : yaSalio
+            ? 'border-emerald-300 ring-1 ring-emerald-100 dark:ring-emerald-500/10 shadow-sm'
+            : index === 0 && isToday(new Date(data.hora_ingreso))
+              ? 'border-blue-300 ring-1 ring-blue-100 shadow-sm'
+              : 'border-slate-200 dark:border-slate-800'}`}
     >
-      {/* Badge turno nocturno cruce de medianoche */}
+      {/* ── Badges turno nocturno cruce de medianoche ─────────────────── */}
       {entroAyer && (
-        <div className="absolute -top-2.5 left-4 z-10 flex items-center gap-1 bg-amber-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full shadow-sm">
+        // Este registro tiene fecha=D+1 en UTC pero la entrada fue a las 7-11PM Lima de este día D.
+        // Se muestra en el dashboard de D para que el admin vea la entrada nocturna.
+        <div className="absolute -top-3 left-3 z-10 flex items-center gap-1.5 bg-amber-500 text-white text-[9px] font-black px-2.5 py-1 rounded-full shadow-md border border-amber-400/50">
           <Moon size={9} />
-          TURNO NOCTURNO · Ingresó la noche anterior
+          <span>🌙 TURNO NOCTURNO</span>
+          <span className="opacity-75">·</span>
+          <span className="opacity-90">
+            Entró {new Date(data.hora_ingreso).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hour12: true })}
+            {' '}· Sale mañana
+          </span>
         </div>
       )}
       {saleHoy && (
-        <div className="absolute -top-2.5 left-4 z-10 flex items-center gap-1 bg-indigo-500 text-white text-[9px] font-black px-2 py-0.5 rounded-full shadow-sm">
+        // Este registro tiene fecha=D-1 en UTC (entró anoche Lima) pero su salida cae en Lima-día D.
+        // Se muestra en el dashboard de D para que el admin vea que salió esta mañana.
+        <div className="absolute -top-3 left-3 z-10 flex items-center gap-1.5 bg-indigo-500 text-white text-[9px] font-black px-2.5 py-1 rounded-full shadow-md border border-indigo-400/50">
           <Moon size={9} />
-          SALIDA HOY · Ingresó el día anterior
+          <span>🌅 SALIDA HOY</span>
+          <span className="opacity-75">·</span>
+          <span className="opacity-90">
+            Entró ayer {new Date(data.hora_ingreso).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hour12: true })}
+            {data.hora_salida && ` · Salió ${new Date(data.hora_salida).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hour12: true })}`}
+          </span>
+        </div>
+      )}
+      {/* Badge "Ya salió hoy" — turno completo, puede volver de noche */}
+      {yaSalio && (
+        <div className="absolute -top-3 left-3 z-10 flex items-center gap-1.5 bg-emerald-500 text-white text-[9px] font-black px-2.5 py-1 rounded-full shadow-md border border-emerald-400/50">
+          <CheckCircle2 size={9} />
+          <span>✓ TURNO COMPLETO</span>
+          <span className="opacity-75">·</span>
+          <span className="opacity-90">
+            Salió {new Date(data.hora_salida).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit', hour12: true })}
+          </span>
+          <span className="opacity-75">·</span>
+          <span className="opacity-90 text-emerald-100">puede registrar turno nocturno</span>
         </div>
       )}
       {/* Avatar + info */}

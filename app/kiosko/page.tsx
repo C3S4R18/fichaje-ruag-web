@@ -9,7 +9,7 @@ export default function KioskoQR() {
   const [qrValue, setQrValue]   = useState("RUAG_INGRESO")
   const [time, setTime]         = useState(new Date())
   const [mounted, setMounted]   = useState(false)
-  const [qrKey, setQrKey]       = useState(0) // para animar refresh del QR
+  const [qrKey, setQrKey]       = useState(0)
 
   useEffect(() => { setMounted(true) }, [])
 
@@ -81,10 +81,10 @@ export default function KioskoQR() {
           initial={{ opacity: 0, x: 24 }} animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.6, ease: [0.34, 1.2, 0.64, 1], delay: 0.1 }}
         >
-          {/* Clock */}
+          {/* FIX: keys prefixed to avoid collision when hours == minutes == seconds */}
           <div className="flex items-end gap-1 justify-end">
             <motion.span
-              key={hours}
+              key={`h-${hours}`}
               className="text-6xl lg:text-7xl font-black tabular-nums leading-none"
               style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}
               initial={{ opacity: 0.5, y: -4 }} animate={{ opacity: 1, y: 0 }}
@@ -93,7 +93,7 @@ export default function KioskoQR() {
             </motion.span>
             <span className="text-6xl lg:text-7xl font-black" style={{ color: 'var(--blue)', fontFamily: 'Syne, sans-serif' }}>:</span>
             <motion.span
-              key={minutes}
+              key={`m-${minutes}`}
               className="text-6xl lg:text-7xl font-black tabular-nums leading-none"
               style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}
               initial={{ opacity: 0.5, y: -4 }} animate={{ opacity: 1, y: 0 }}
@@ -101,7 +101,7 @@ export default function KioskoQR() {
               {minutes}
             </motion.span>
             <motion.span
-              key={seconds}
+              key={`s-${seconds}`}
               className="text-3xl font-bold tabular-nums mb-1"
               style={{ color: 'var(--text-3)' }}
               initial={{ opacity: 0.3 }} animate={{ opacity: 1 }}
