@@ -92,6 +92,8 @@ function extraerDetalleNota(notas?: string | null) {
   } else {
     textoLimpio = raw.replace(/^Turno Nocturno \([^)]+\):\s*/, '').trim()
   }
+  // Quitar el marcador [OFFLINE] del texto visible (solo se usa para detectar el tipo)
+  textoLimpio = textoLimpio.replace(/\s*\[OFFLINE\]\s*/g, '').trim()
   return { tieneNota: true, contieneGPS, textoLimpio, coordenadas, lat, lng, tipoMarcacion }
 }
 
@@ -332,6 +334,7 @@ export default function AdminDashboard() {
     const cnt: Record<string, number> = {}
     return asistencias.filter(a => { cnt[a.dni] = (cnt[a.dni] ?? 0) + 1; return cnt[a.dni] > 1 }).length
   }, [asistencias])
+  const totalOffline = useMemo(() => asistencias.filter(a => (a.notas ?? '').includes('[OFFLINE]')).length, [asistencias])
 
   // ── Excel ─────────────────────────────────────────────────────────────────
 
@@ -534,6 +537,7 @@ export default function AdminDashboard() {
             <StatCard title="Tardanzas"    value={tardanzas}          icon={<AlertCircle size={16} />}  color="bg-red-500" />
             <StatCard title="Con Salida"   value={conSalida}          icon={<LogOut size={16} />}       color="bg-slate-500" />
             <StatCard title="Reingresos"   value={reingresos}         icon={<RefreshCw size={16} />}    color="bg-indigo-500" sub="multi-turno" />
+            {totalOffline > 0 && <StatCard title="Offline" value={totalOffline} icon={<span className="text-xs">📵</span>} color="bg-violet-500" sub="sincronizados" />}
           </div>
 
           {/* Table / Map */}
@@ -776,6 +780,7 @@ function ModalManual({ onClose, fechaBase, onSuccess }: { onClose: () => void; f
   const [saving, setSaving]               = useState(false)
   const [turnosHoy, setTurnosHoy]         = useState(0)
   const [checking, setChecking]           = useState(false)
+  const [fechaRegistro, setFechaRegistro] = useState(fechaBase)
 
   useEffect(() => {
     supabase.from('fotocheck_perfiles').select('dni, nombres_completos, area, foto_url').order('nombres_completos')
@@ -785,13 +790,13 @@ function ModalManual({ onClose, fechaBase, onSuccess }: { onClose: () => void; f
   useEffect(() => {
     if (!perfil) { setTurnosHoy(0); return }
     setChecking(true)
-    const [y, m, d] = fechaBase.split('-')
+    const [y, m, d] = fechaRegistro.split('-')
     const next = new Date(Number(y), Number(m) - 1, Number(d) + 1)
     const nextStr = `${next.getFullYear()}-${String(next.getMonth()+1).padStart(2,'0')}-${String(next.getDate()).padStart(2,'0')}`
     supabase.from('registro_asistencias').select('id', { count: 'exact', head: true })
-      .eq('dni', perfil.dni).gte('hora_ingreso', `${fechaBase}T05:00:00.000Z`).lt('hora_ingreso', `${nextStr}T05:00:00.000Z`)
+      .eq('dni', perfil.dni).gte('hora_ingreso', `${fechaRegistro}T05:00:00.000Z`).lt('hora_ingreso', `${nextStr}T05:00:00.000Z`)
       .then(({ count }) => { setTurnosHoy(count ?? 0); setChecking(false) })
-  }, [perfil, fechaBase])
+  }, [perfil, fechaRegistro])
 
   const filtrados = trabajadores.filter(t => t.nombres_completos.toLowerCase().includes(busq.toLowerCase()) || t.dni.includes(busq))
 
@@ -800,12 +805,12 @@ function ModalManual({ onClose, fechaBase, onSuccess }: { onClose: () => void; f
     setSaving(true)
     try {
       const [h, m] = hora.split(':').map(Number)
-      const d = new Date(fechaBase); d.setHours(h, m, 0)
+      const d = new Date(fechaRegistro); d.setHours(h, m, 0)
       const esReingreso = turnosHoy > 0
       const isPuntual = esReingreso || h < 9 || (h === 9 && m <= 5)
       const { data, error } = await supabase.from('registro_asistencias').insert({
         dni: perfil.dni, nombres_completos: perfil.nombres_completos,
-        area: perfil.area, foto_url: perfil.foto_url ?? '', fecha: fechaBase,
+        area: perfil.area, foto_url: perfil.foto_url ?? '', fecha: fechaRegistro,
         hora_ingreso: d.toISOString(), estado_ingreso: isPuntual ? 'PUNTUAL' : 'TARDANZA',
       }).select().single()
       if (error) throw error
@@ -830,13 +835,30 @@ function ModalManual({ onClose, fechaBase, onSuccess }: { onClose: () => void; f
               <div className="w-9 h-9 rounded-xl bg-blue-100 dark:bg-blue-500/20 flex items-center justify-center text-blue-600"><UserPlus size={16} /></div>
               <div>
                 <h3 className="font-black text-base text-slate-900 dark:text-white">Registro Manual</h3>
-                <p className="text-[10px] text-slate-400">{fechaBase}</p>
+                <p className="text-[10px] text-slate-400">Para cualquier fecha</p>
               </div>
             </div>
             <button onClick={onClose} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"><X size={15} /></button>
           </div>
 
           <div className="space-y-3">
+            <div>
+              <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">Fecha del Registro</label>
+              <div className="relative">
+                <input
+                  type="date"
+                  value={fechaRegistro}
+                  max={format(new Date(), 'yyyy-MM-dd')}
+                  onChange={e => { if (e.target.value) setFechaRegistro(e.target.value) }}
+                  className="w-full bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 px-3 py-2.5 rounded-xl outline-none focus:border-blue-500 text-sm font-bold cursor-pointer"
+                />
+                {fechaRegistro !== fechaBase && (
+                  <span className="absolute right-9 top-1/2 -translate-y-1/2 text-[9px] font-black text-amber-500 bg-amber-50 dark:bg-amber-500/10 px-1.5 py-0.5 rounded">
+                    DÍA ANTERIOR
+                  </span>
+                )}
+              </div>
+            </div>
             <div>
               <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1.5">
                 Trabajador {loadingP && <span className="text-blue-400 normal-case font-medium">(cargando...)</span>}
@@ -931,9 +953,11 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
   const NIcon  = tone.icon
   const horas  = calcHoras(data.hora_ingreso, data.hora_salida)
   const esNocturno = data.notas?.startsWith('Turno Nocturno') ?? false
-  const hasBadge = entroAyer || saleHoy
+  const esOffline  = (data.notas ?? '').includes('[OFFLINE]')
+  const hasBadge = entroAyer || saleHoy || esOffline
 
   const borderClass = entroAyer || saleHoy ? 'border-amber-300 dark:border-amber-500/30 ring-1 ring-amber-100 dark:ring-amber-500/10'
+    : esOffline ? 'border-violet-300 dark:border-violet-500/30 ring-1 ring-violet-100 dark:ring-violet-500/10'
     : tieneSalida && isToday(new Date(data.hora_ingreso)) ? 'border-emerald-200 dark:border-emerald-500/20'
     : index === 0 && isToday(new Date(data.hora_ingreso)) ? 'border-blue-200 dark:border-blue-500/20 ring-1 ring-blue-50 dark:ring-blue-500/10'
     : 'border-slate-200 dark:border-slate-800'
@@ -957,6 +981,12 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
         </div>
       )}
 
+      {esOffline && (
+        <div className="absolute -top-2.5 left-3 z-10 flex items-center gap-1 bg-violet-600 text-white text-[8px] font-black px-2 py-0.5 rounded-full shadow-sm">
+          📵 SIN CONEXIÓN · Sincronizado offline
+        </div>
+      )}
+
       {/* Avatar */}
       <div className="flex items-center gap-3 flex-1 min-w-0 pr-3">
         <div className="relative shrink-0">
@@ -966,6 +996,7 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
           </div>
           <div className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white dark:border-slate-900 ${isPuntual ? 'bg-emerald-500' : 'bg-red-500'}`} />
           {esNocturno && <div className="absolute -top-0.5 -left-0.5 w-3.5 h-3.5 rounded-full bg-amber-400 border-2 border-white dark:border-slate-900 flex items-center justify-center"><Moon size={7} className="text-white" /></div>}
+          {esOffline && !esNocturno && <div className="absolute -top-0.5 -left-0.5 w-3.5 h-3.5 rounded-full bg-violet-500 border-2 border-white dark:border-slate-900 flex items-center justify-center text-white text-[7px] font-black leading-none">📵</div>}
         </div>
         <div className="min-w-0">
           <div className="hidden lg:block max-w-[280px] xl:max-w-[340px]">
