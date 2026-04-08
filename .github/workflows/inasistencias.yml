@@ -1,0 +1,34 @@
+# .github/workflows/inasistencias.yml
+# Corre todos los días a las 05:00 UTC = 00:00 Lima (lunes a viernes)
+# Llama al endpoint de tu app Next.js para marcar inasistencias automáticas
+
+name: Marcar Inasistencias Automáticas
+
+on:
+  schedule:
+    - cron: '0 5 * * 1-5'   # 05:00 UTC = medianoche Lima, lun-vie
+  workflow_dispatch:          # También permite correrlo manualmente desde GitHub
+
+jobs:
+  marcar-inasistencias:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Llamar endpoint de inasistencias
+        run: |
+          RESPONSE=$(curl -s -o /tmp/response.json -w "%{http_code}" \
+            -X POST \
+            -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
+            -H "Content-Type: application/json" \
+            "${{ secrets.APP_URL }}/api/cron/inasistencias")
+
+          echo "HTTP Status: $RESPONSE"
+          echo "Response body:"
+          cat /tmp/response.json
+
+          # Fallar si el HTTP status no es 200
+          if [ "$RESPONSE" != "200" ]; then
+            echo "❌ El endpoint devolvió un error"
+            exit 1
+          fi
+
+          echo "✅ Inasistencias procesadas correctamente"
