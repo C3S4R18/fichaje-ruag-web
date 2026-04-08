@@ -334,7 +334,8 @@ export default function AdminDashboard() {
     const cnt: Record<string, number> = {}
     return asistencias.filter(a => { cnt[a.dni] = (cnt[a.dni] ?? 0) + 1; return cnt[a.dni] > 1 }).length
   }, [asistencias])
-  const totalOffline = useMemo(() => asistencias.filter(a => (a.notas ?? '').includes('[OFFLINE]')).length, [asistencias])
+  const totalOffline      = useMemo(() => asistencias.filter(a => (a.notas ?? '').includes('[OFFLINE]')).length, [asistencias])
+  const totalInasistencias = useMemo(() => asistencias.filter(a => a.estado_ingreso === 'INASISTENCIA').length, [asistencias])
 
   // ── Excel ─────────────────────────────────────────────────────────────────
 
@@ -491,7 +492,7 @@ export default function AdminDashboard() {
               </div>
               {[
                 { value: filtroArea,   onChange: setFiltroArea,   opts: areas.map(a => ({ v: a, l: a === 'TODAS' ? 'Todas las Áreas' : a })) },
-                { value: filtroEstado, onChange: setFiltroEstado, opts: [{ v:'TODOS', l:'Todos' }, { v:'PUNTUAL', l:'Puntuales' }, { v:'TARDANZA', l:'Tardanzas' }] },
+                { value: filtroEstado, onChange: setFiltroEstado, opts: [{ v:'TODOS', l:'Todos' }, { v:'PUNTUAL', l:'Puntuales' }, { v:'TARDANZA', l:'Tardanzas' }, { v:'INASISTENCIA', l:'Inasistencias' }] },
               ].map((f, i) => (
                 <div key={i} className="relative">
                   <select value={f.value} onChange={e => f.onChange(e.target.value)}
@@ -538,6 +539,7 @@ export default function AdminDashboard() {
             <StatCard title="Con Salida"   value={conSalida}          icon={<LogOut size={16} />}       color="bg-slate-500" />
             <StatCard title="Reingresos"   value={reingresos}         icon={<RefreshCw size={16} />}    color="bg-indigo-500" sub="multi-turno" />
             {totalOffline > 0 && <StatCard title="Offline" value={totalOffline} icon={<span className="text-xs">📵</span>} color="bg-violet-500" sub="sincronizados" />}
+            {totalInasistencias > 0 && <StatCard title="Inasistencias" value={totalInasistencias} icon={<span className="text-xs">✗</span>} color="bg-slate-500" sub="sin marcar" />}
           </div>
 
           {/* Table / Map */}
@@ -944,6 +946,7 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
   onBorrarNota: (id: string) => void
   onBorrarRegistro: (id: string, nombre: string) => void
 }) {
+  const esInasistencia = data.estado_ingreso === 'INASISTENCIA'
   const isPuntual  = data.estado_ingreso === 'PUNTUAL'
   const entroAyer  = !!data._entroAyer
   const saleHoy    = !!data._saleHoy
@@ -954,9 +957,10 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
   const horas  = calcHoras(data.hora_ingreso, data.hora_salida)
   const esNocturno = data.notas?.startsWith('Turno Nocturno') ?? false
   const esOffline  = (data.notas ?? '').includes('[OFFLINE]')
-  const hasBadge = entroAyer || saleHoy || esOffline
+  const hasBadge = entroAyer || saleHoy || esOffline || esInasistencia
 
-  const borderClass = entroAyer || saleHoy ? 'border-amber-300 dark:border-amber-500/30 ring-1 ring-amber-100 dark:ring-amber-500/10'
+  const borderClass = esInasistencia ? 'border-slate-300 dark:border-slate-600 bg-slate-50/50 dark:bg-slate-800/30'
+    : entroAyer || saleHoy ? 'border-amber-300 dark:border-amber-500/30 ring-1 ring-amber-100 dark:ring-amber-500/10'
     : esOffline ? 'border-violet-300 dark:border-violet-500/30 ring-1 ring-violet-100 dark:ring-violet-500/10'
     : tieneSalida && isToday(new Date(data.hora_ingreso)) ? 'border-emerald-200 dark:border-emerald-500/20'
     : index === 0 && isToday(new Date(data.hora_ingreso)) ? 'border-blue-200 dark:border-blue-500/20 ring-1 ring-blue-50 dark:ring-blue-500/10'
@@ -986,6 +990,11 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
           📵 SIN CONEXIÓN · Sincronizado offline
         </div>
       )}
+      {esInasistencia && (
+        <div className="absolute -top-2.5 left-3 z-10 flex items-center gap-1 bg-slate-500 text-white text-[8px] font-black px-2 py-0.5 rounded-full shadow-sm">
+          ✗ INASISTENCIA · Sin registro en el día
+        </div>
+      )}
 
       {/* Avatar */}
       <div className="flex items-center gap-3 flex-1 min-w-0 pr-3">
@@ -994,7 +1003,7 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
             {data.foto_url ? <img src={data.foto_url} alt="" className="w-full h-full object-cover" /> :
               <div className="w-full h-full flex items-center justify-center font-black text-slate-400 text-sm">{getInitials(data.nombres_completos)}</div>}
           </div>
-          <div className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white dark:border-slate-900 ${isPuntual ? 'bg-emerald-500' : 'bg-red-500'}`} />
+          <div className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white dark:border-slate-900 ${esInasistencia ? 'bg-slate-400' : isPuntual ? 'bg-emerald-500' : 'bg-red-500'}`} />
           {esNocturno && <div className="absolute -top-0.5 -left-0.5 w-3.5 h-3.5 rounded-full bg-amber-400 border-2 border-white dark:border-slate-900 flex items-center justify-center"><Moon size={7} className="text-white" /></div>}
           {esOffline && !esNocturno && <div className="absolute -top-0.5 -left-0.5 w-3.5 h-3.5 rounded-full bg-violet-500 border-2 border-white dark:border-slate-900 flex items-center justify-center text-white text-[7px] font-black leading-none">📵</div>}
         </div>
@@ -1009,7 +1018,11 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
             <span className="text-[9px] font-mono text-slate-400">{data.dni}</span>
             <span className="hidden sm:inline text-[9px] font-bold text-slate-300 dark:text-slate-700">·</span>
             <span className="text-[9px] font-bold text-slate-400 uppercase hidden sm:inline">{data.area}</span>
-            {modoEdicion ? (
+            {esInasistencia ? (
+              <span className="px-1.5 py-0.5 rounded text-[8px] font-black bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400">
+                INASISTENCIA
+              </span>
+            ) : modoEdicion ? (
               <button onClick={() => onCambiarEstado(data.id, data.estado_ingreso)}
                 className={`px-1.5 py-0.5 rounded text-[8px] font-black border transition-all hover:scale-105 active:scale-95
                   ${isPuntual ? 'bg-emerald-100 text-emerald-700 border-emerald-300 hover:bg-red-50 hover:text-red-600 hover:border-red-300' : 'bg-red-100 text-red-700 border-red-300 hover:bg-emerald-50 hover:text-emerald-600 hover:border-emerald-300'}`}>
@@ -1033,8 +1046,8 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
               className="bg-transparent border-b border-blue-500 text-xs font-black text-blue-600 outline-none w-14 text-right"
               onBlur={e => { if (e.target.value !== format(new Date(data.hora_ingreso), 'HH:mm')) onActualizar(data.id, 'hora_ingreso', e.target.value, data.hora_ingreso) }} />
           ) : (
-            <span className={`font-black text-base tabular-nums ${isPuntual ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-              {format(new Date(data.hora_ingreso), 'HH:mm')}
+            <span className={`font-black text-base tabular-nums ${esInasistencia ? 'text-slate-400 dark:text-slate-600' : isPuntual ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+              {esInasistencia ? '—' : format(new Date(data.hora_ingreso), 'HH:mm')}
             </span>
           )}
         </div>
