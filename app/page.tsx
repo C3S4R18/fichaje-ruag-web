@@ -415,6 +415,19 @@ export default function AdminDashboard() {
     try { await supabase.from('registro_asistencias').update({ estado_ingreso: n }).eq('id', id); toast.success(`→ ${n}`); setAsistencias(prev => prev.map(a => a.id === id ? { ...a, estado_ingreso: n } : a)) } catch { toast.error('Error') }
   }
 
+  const actualizarNombre = async (id: string, dni: string, nuevoNombre: string) => {
+    const nombre = nuevoNombre.trim().toUpperCase()
+    if (!nombre) { toast.error('El nombre no puede estar vacío'); return }
+    try {
+      // Actualizar en registro_asistencias
+      await supabase.from('registro_asistencias').update({ nombres_completos: nombre }).eq('id', id)
+      // Actualizar también en fotocheck_perfiles para que quede sincronizado
+      await supabase.from('fotocheck_perfiles').update({ nombres_completos: nombre }).eq('dni', dni)
+      toast.success('Nombre actualizado')
+      setAsistencias(prev => prev.map(a => a.id === id ? { ...a, nombres_completos: nombre } : a))
+    } catch { toast.error('Error al actualizar nombre') }
+  }
+
   // ── Render ────────────────────────────────────────────────────────────────
 
   if (!mounted || isInitialLoad) return (
@@ -581,7 +594,8 @@ export default function AdminDashboard() {
                       {filtradas.map((a, i) => (
                         <FotocheckRow key={a.id} data={a} index={i} modoEdicion={modoEdicion}
                           onActualizar={actualizarHora} onCambiarEstado={cambiarEstado}
-                          onAbrirNota={n => setNotaModal(n)} onBorrarNota={borrarNota} onBorrarRegistro={borrarRegistro} />
+                          onAbrirNota={n => setNotaModal(n)} onBorrarNota={borrarNota}
+                          onBorrarRegistro={borrarRegistro} onActualizarNombre={actualizarNombre} />
                       ))}
                     </AnimatePresence>
                   </motion.div>
@@ -938,14 +952,17 @@ function ModalManual({ onClose, fechaBase, onSuccess }: { onClose: () => void; f
 
 // ─── FotocheckRow ─────────────────────────────────────────────────────────────
 
-function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado, onAbrirNota, onBorrarNota, onBorrarRegistro }: {
+function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado, onAbrirNota, onBorrarNota, onBorrarRegistro, onActualizarNombre }: {
   data: any; index: number; modoEdicion: boolean
   onActualizar: (id: string, campo: 'hora_ingreso' | 'hora_salida', hora: string | null, fechaBase: string) => void
   onCambiarEstado: (id: string, estadoActual: string) => void
   onAbrirNota: (n: any) => void
   onBorrarNota: (id: string) => void
   onBorrarRegistro: (id: string, nombre: string) => void
+  onActualizarNombre: (id: string, dni: string, nuevoNombre: string) => void
 }) {
+  const [editandoNombre, setEditandoNombre] = useState(false)
+  const [nombreTemp, setNombreTemp] = useState(data.nombres_completos)
   const esInasistencia = data.estado_ingreso === 'INASISTENCIA'
   const isPuntual  = data.estado_ingreso === 'PUNTUAL'
   const entroAyer  = !!data._entroAyer
@@ -1007,13 +1024,46 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
           {esNocturno && <div className="absolute -top-0.5 -left-0.5 w-3.5 h-3.5 rounded-full bg-amber-400 border-2 border-white dark:border-slate-900 flex items-center justify-center"><Moon size={7} className="text-white" /></div>}
           {esOffline && !esNocturno && <div className="absolute -top-0.5 -left-0.5 w-3.5 h-3.5 rounded-full bg-violet-500 border-2 border-white dark:border-slate-900 flex items-center justify-center text-white text-[7px] font-black leading-none">📵</div>}
         </div>
-        <div className="min-w-0">
-          <div className="hidden lg:block max-w-[280px] xl:max-w-[340px]">
-            <p className="font-black text-slate-800 dark:text-slate-100 text-base uppercase tracking-tight truncate">{data.nombres_completos}</p>
-          </div>
-          <div className="lg:hidden mq-wrap max-w-[140px] sm:max-w-[220px]">
-            <span className="mq-inner font-black text-slate-800 dark:text-slate-100 text-base uppercase tracking-tight">{data.nombres_completos}</span>
-          </div>
+        <div className="min-w-0 flex-1">
+          {modoEdicion && editandoNombre ? (
+            <div className="flex items-center gap-1.5 mb-0.5">
+              <input
+                autoFocus
+                value={nombreTemp}
+                onChange={e => setNombreTemp(e.target.value.toUpperCase())}
+                onBlur={() => {
+                  if (nombreTemp.trim() && nombreTemp.trim() !== data.nombres_completos) {
+                    onActualizarNombre(data.id, data.dni, nombreTemp)
+                  }
+                  setEditandoNombre(false)
+                }}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    if (nombreTemp.trim() && nombreTemp.trim() !== data.nombres_completos) {
+                      onActualizarNombre(data.id, data.dni, nombreTemp)
+                    }
+                    setEditandoNombre(false)
+                  }
+                  if (e.key === 'Escape') { setNombreTemp(data.nombres_completos); setEditandoNombre(false) }
+                }}
+                className="flex-1 bg-transparent border-b-2 border-blue-500 outline-none text-sm font-black text-slate-800 dark:text-slate-100 uppercase tracking-tight min-w-0"
+              />
+            </div>
+          ) : (
+            <div
+              className={`flex items-center gap-1 group/name ${modoEdicion ? 'cursor-pointer' : ''}`}
+              onClick={() => { if (modoEdicion) { setNombreTemp(data.nombres_completos); setEditandoNombre(true) } }}
+              title={modoEdicion ? 'Clic para editar nombre' : undefined}
+            >
+              <div className="hidden lg:block max-w-[240px] xl:max-w-[300px]">
+                <p className="font-black text-slate-800 dark:text-slate-100 text-base uppercase tracking-tight truncate">{data.nombres_completos}</p>
+              </div>
+              <div className="lg:hidden mq-wrap max-w-[130px] sm:max-w-[200px]">
+                <span className="mq-inner font-black text-slate-800 dark:text-slate-100 text-base uppercase tracking-tight">{data.nombres_completos}</span>
+              </div>
+              {modoEdicion && <span className="opacity-0 group-hover/name:opacity-100 transition-opacity text-blue-400 shrink-0" title="Editar nombre">✏️</span>}
+            </div>
+          )}
           <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
             <span className="text-[9px] font-mono text-slate-400">{data.dni}</span>
             <span className="hidden sm:inline text-[9px] font-bold text-slate-300 dark:text-slate-700">·</span>
