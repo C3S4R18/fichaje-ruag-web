@@ -68,6 +68,38 @@ function calcHoras(ingreso: string, salida: string | null): string {
 
 // ─── Nota parser ──────────────────────────────────────────────────────────────
 
+function toIsoOrNull(value?: string | null) {
+  if (!value) return null
+  const parsed = new Date(value)
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString()
+}
+
+function decorateForVisibleDate(record: any, fecha: Date) {
+  const fechaStr = format(fecha, 'yyyy-MM-dd')
+  const prevStr = format(subDays(fecha, 1), 'yyyy-MM-dd')
+  const nextStr = format(addDays(fecha, 1), 'yyyy-MM-dd')
+  const limaIni = `${fechaStr}T05:00:00.000Z`
+  const limaFin = `${nextStr}T05:00:00.000Z`
+  const noctIni = `${nextStr}T00:00:00.000Z`
+  const noctIniPrev = `${fechaStr}T00:00:00.000Z`
+  const ingresoIso = toIsoOrNull(record?.hora_ingreso)
+  const salidaIso = toIsoOrNull(record?.hora_salida)
+
+  if (record?.fecha === fechaStr) return record
+  if (record?.fecha === nextStr && ingresoIso && ingresoIso >= noctIni && ingresoIso < limaFin) {
+    return { ...record, _entroAyer: true }
+  }
+  if (record?.fecha === prevStr && salidaIso && salidaIso >= limaIni && salidaIso < limaFin && ingresoIso && ingresoIso >= noctIniPrev) {
+    return { ...record, _saleHoy: true }
+  }
+
+  return null
+}
+
+function upsertAsistencia(prev: any[], next: any) {
+  return [next, ...prev.filter((item) => item.id !== next.id)]
+}
+
 function extraerDetalleNota(notas?: string | null) {
   const raw = notas ?? ''
   if (!raw.trim()) return { tieneNota: false, contieneGPS: false, textoLimpio: '', coordenadas: '', lat: null as number | null, lng: null as number | null, tipoMarcacion: 'ninguna' as TipoMarcacion }
@@ -284,12 +316,21 @@ export default function AdminDashboard() {
     if (!isToday(fechaActual)) return
     const canal = supabase.channel('admin-rt')
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'registro_asistencias' }, p => {
-        setAsistencias(prev => [p.new, ...prev])
+        const visible = decorateForVisibleDate(p.new, fechaActual)
+        if (!visible) return
+        setAsistencias(prev => upsertAsistencia(prev, visible))
         new Audio('/notification.mp3').play().catch(() => {})
         toast.success(`📥 ${p.new.nombres_completos}`, { description: p.new.estado_ingreso })
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'registro_asistencias' }, p => {
-        setAsistencias(prev => prev.map(a => a.id === p.new.id ? { ...a, ...p.new } : a))
+        const visible = decorateForVisibleDate(p.new, fechaActual)
+        setAsistencias(prev => {
+          if (!visible) return prev.filter(a => a.id !== p.new.id)
+          const exists = prev.some(a => a.id === p.new.id)
+          return exists
+            ? prev.map(a => a.id === p.new.id ? { ...a, ...visible } : a)
+            : upsertAsistencia(prev, visible)
+        })
       })
       .subscribe()
     return () => { supabase.removeChannel(canal) }

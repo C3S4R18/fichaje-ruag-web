@@ -209,6 +209,8 @@ function buildRows(sheet) {
       total_gozados: toInt(row[16]),
       dias_pendientes: toInt(row[17]),
       fecha_vencimiento: excelDateToIso(row[18]),
+      vacaciones_por_vencer: toInt(row[19]),
+      vacaciones_pendientes_periodo: toInt(row[20]) || (toInt(row[17]) + toInt(row[19])),
     })
   }
 
@@ -219,7 +221,11 @@ async function main() {
   loadEnv(envPath)
 
   const workbookPath = process.argv[2] || 'C:/Users/cesar/Downloads/119 Control de vacaciones al 07.04.26 RGA.xlsx'
-  const fechaVencimientoFallback = process.argv[3] || process.env.VACACIONES_DEFAULT_VENCIMIENTO || '2026-12-31'
+  const periodo = Number(process.argv[3] || process.env.VACACIONES_PERIODO || 2026)
+  const fechaVencimientoFallback =
+    process.argv[4] ||
+    process.env.VACACIONES_DEFAULT_VENCIMIENTO ||
+    `${periodo}-12-31`
 
   if (!fs.existsSync(workbookPath)) {
     throw new Error(`No se encontró el Excel: ${workbookPath}`)
@@ -234,10 +240,11 @@ async function main() {
 
   const supabase = createClient(url, serviceKey)
   const workbook = XLSX.readFile(workbookPath)
-  const sheet = workbook.Sheets['vacaciones 2026']
+  const sheetName = `vacaciones ${periodo}`
+  const sheet = workbook.Sheets[sheetName]
 
   if (!sheet) {
-    throw new Error("No existe la hoja 'vacaciones 2026' en el Excel")
+    throw new Error(`No existe la hoja '${sheetName}' en el Excel`)
   }
 
   const excelRows = buildRows(sheet)
@@ -263,7 +270,7 @@ async function main() {
       area: row.area || match.perfil.area || null,
       cargo: row.cargo,
       codigo_excel: row.codigo_excel,
-      periodo: 2026,
+      periodo,
       saldo_arrastre: row.saldo_arrastre,
       dias_extra: 0,
       gozados_ene: row.gozados_ene,
@@ -281,6 +288,8 @@ async function main() {
       total_gozados: row.total_gozados,
       dias_pendientes: row.dias_pendientes,
       fecha_vencimiento: row.fecha_vencimiento || fechaVencimientoFallback,
+      vacaciones_por_vencer: row.vacaciones_por_vencer,
+      vacaciones_pendientes_periodo: row.vacaciones_pendientes_periodo,
     })
   }
 
@@ -290,7 +299,7 @@ async function main() {
 
   const { error: upsertError } = await supabase
     .from('vacaciones_saldos')
-    .upsert(matched, { onConflict: 'dni' })
+    .upsert(matched, { onConflict: 'dni,periodo' })
 
   if (upsertError) throw upsertError
 

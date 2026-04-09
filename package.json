@@ -7,6 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "vacaciones:import": "node import-vacaciones-2026.mjs",
     "vacaciones:import-2026": "node import-vacaciones-2026.mjs"
   },
   "dependencies": {

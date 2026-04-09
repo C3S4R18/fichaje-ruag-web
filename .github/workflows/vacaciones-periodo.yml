@@ -1,21 +1,21 @@
-name: Marcar Inasistencias Automaticas
+name: Crear Periodo Anual de Vacaciones
 
 on:
   schedule:
-    - cron: '0 5 * * *'
+    - cron: '50 4 * * *'
   workflow_dispatch:
 
 jobs:
-  marcar-inasistencias:
+  crear-periodo:
     runs-on: ubuntu-latest
     steps:
-      - name: Llamar endpoint de inasistencias
+      - name: Llamar endpoint de cambio de periodo
         run: |
           RESPONSE=$(curl -s -o /tmp/response.json -w "%{http_code}" \
             -X POST \
             -H "Authorization: Bearer ${{ secrets.CRON_SECRET }}" \
             -H "Content-Type: application/json" \
-            "${{ secrets.APP_URL }}/api/cron/inasistencias")
+            "${{ secrets.APP_URL }}/api/cron/vacaciones-periodo")
 
           echo "HTTP Status: $RESPONSE"
           echo "Response body:"
@@ -26,4 +26,4 @@ jobs:
             exit 1
           fi
 
-          echo "Inasistencias procesadas correctamente"
+          echo "Cambio de periodo procesado correctamente"

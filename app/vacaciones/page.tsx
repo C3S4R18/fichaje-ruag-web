@@ -1,17 +1,27 @@
 'use client'
 
+import * as XLSX from 'xlsx-js-style'
 import Link from 'next/link'
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
-import { supabase } from '@/utils/supabase/client'
+import { useRouter, useSearchParams } from 'next/navigation'
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import {
-  ArrowLeft, CalendarDays, CheckCircle2, Clock3, Loader2,
-  MoonStar, PlaneTakeoff, RefreshCw, Search, Sun, Wallet, AlertTriangle, XCircle
+  Archive,
+  ArrowLeft,
+  CheckCircle2,
+  Download,
+  Loader2,
+  RefreshCw,
+  Search,
+  X,
+  XCircle,
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 
-type VacationBalance = {
+import { supabase } from '@/utils/supabase/client'
+
+type Balance = {
   id: string
   dni: string
   trabajador_nombre: string
@@ -20,7 +30,6 @@ type VacationBalance = {
   codigo_excel: string | null
   periodo: number
   saldo_arrastre: number
-  dias_extra: number
   gozados_ene: number
   gozados_feb: number
   gozados_mar: number
@@ -35,11 +44,12 @@ type VacationBalance = {
   gozados_dic: number
   total_gozados: number
   dias_pendientes: number
-  fecha_vencimiento: string
-  renovaciones_aplicadas: number
+  fecha_vencimiento: string | null
+  vacaciones_por_vencer?: number | null
+  vacaciones_pendientes_periodo?: number | null
 }
 
-type VacationRequest = {
+type RequestRow = {
   id: string
   dni: string
   trabajador_nombre: string
@@ -49,32 +59,24 @@ type VacationRequest = {
   dias_solicitados: number
   comentario: string | null
   estado: string
-  saldo_antes: number | null
-  saldo_despues: number | null
   created_at: string
 }
 
-type MonthColumn = {
-  key: keyof VacationBalance
+type MonthCol = {
+  key: keyof Balance
   label: string
   monthIndex: number
 }
 
 type MonthDetail = {
-  row: VacationBalance
-  column: MonthColumn
-  importedValue: number
-  autoApprovedValue: number
-  requests: VacationRequest[]
+  row: Balance
+  col: MonthCol
+  imported: number
+  approved: number
+  requests: RequestRow[]
 }
 
-type DerivedBalance = {
-  approvedDays: number
-  effectivePendientes: number
-  effectiveGozados: number
-}
-
-const monthColumns: MonthColumn[] = [
+const months: MonthCol[] = [
   { key: 'gozados_ene', label: 'ENE', monthIndex: 0 },
   { key: 'gozados_feb', label: 'FEB', monthIndex: 1 },
   { key: 'gozados_mar', label: 'MAR', monthIndex: 2 },
@@ -89,696 +91,317 @@ const monthColumns: MonthColumn[] = [
   { key: 'gozados_dic', label: 'DIC', monthIndex: 11 },
 ]
 
-function asDate(value: string) {
-  return new Date(value.includes('T') ? value : `${value}T12:00:00`)
-}
-
-function formatDate(value: string) {
-  return format(asDate(value), 'dd MMM yyyy', { locale: es })
-}
-
-function formatDateTime(value: string) {
-  return format(asDate(value), 'dd MMM yyyy · HH:mm', { locale: es })
-}
-
-function num(value: number | string | null | undefined) {
+const num = (value: unknown) => {
   const parsed = Number(value ?? 0)
   return Number.isFinite(parsed) ? parsed : 0
 }
 
-function overlapsMonth(item: VacationRequest, year: number, monthIndex: number) {
-  const monthStart = new Date(Date.UTC(year, monthIndex, 1, 12))
-  const monthEnd = new Date(Date.UTC(year, monthIndex + 1, 0, 12))
+const asDate = (value: string) => new Date(value.includes('T') ? value : `${value}T12:00:00`)
+const shortDate = (value: string | null) => (value ? format(asDate(value), 'dd/MM/yy', { locale: es }) : '--')
+const longDate = (value: string) => format(asDate(value), 'dd MMM yyyy', { locale: es })
+const dateTime = (value: string) => format(asDate(value), 'dd MMM yyyy - HH:mm', { locale: es })
+const overlapsYear = (item: RequestRow, year: number) => asDate(item.fecha_inicio) <= new Date(Date.UTC(year, 11, 31, 12)) && asDate(item.fecha_fin) >= new Date(Date.UTC(year, 0, 1, 12))
+const overlapsMonth = (item: RequestRow, year: number, month: number) => asDate(item.fecha_inicio) <= new Date(Date.UTC(year, month + 1, 0, 12)) && asDate(item.fecha_fin) >= new Date(Date.UTC(year, month, 1, 12))
+function overlapDaysInMonth(item: RequestRow, year: number, month: number) {
   const start = asDate(item.fecha_inicio)
   const end = asDate(item.fecha_fin)
-  return start <= monthEnd && end >= monthStart
-}
-
-function overlapDaysInMonth(item: VacationRequest, year: number, monthIndex: number) {
-  const monthStart = new Date(Date.UTC(year, monthIndex, 1, 12))
-  const monthEnd = new Date(Date.UTC(year, monthIndex + 1, 0, 12))
-  const start = asDate(item.fecha_inicio)
-  const end = asDate(item.fecha_fin)
+  const monthStart = new Date(Date.UTC(year, month, 1, 12))
+  const monthEnd = new Date(Date.UTC(year, month + 1, 0, 12))
   const overlapStart = start > monthStart ? start : monthStart
   const overlapEnd = end < monthEnd ? end : monthEnd
   if (overlapStart > overlapEnd) return 0
   return Math.floor((overlapEnd.getTime() - overlapStart.getTime()) / 86400000) + 1
 }
 
-function ThemeButton({ isDark, onToggle }: { isDark: boolean; onToggle: () => void }) {
+const prevStatus = (estado: string) =>
+  estado === 'aprobada'
+    ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300'
+    : estado === 'cancelada'
+      ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300'
+      : 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300'
+
+function MonthModal({ detail, onClose }: { detail: MonthDetail | null; onClose: () => void }) {
+  if (!detail) return null
   return (
-    <button
-      onClick={onToggle}
-      className="inline-flex items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-xs font-black text-slate-600 dark:text-slate-300 shadow-sm transition-all hover:-translate-y-0.5"
-    >
-      {isDark ? <Sun size={14} /> : <MoonStar size={14} />}
-      {isDark ? 'CLARO' : 'OSCURO'}
-    </button>
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-2xl rounded-3xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between border-b border-slate-200 p-5 dark:border-slate-800">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">Detalle {detail.col.label} {detail.row.periodo}</p>
+            <h3 className="mt-1 text-lg font-black text-slate-900 dark:text-white">{detail.row.trabajador_nombre}</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">{detail.row.area || 'SIN AREA'} - {detail.row.cargo || 'SIN CARGO'}</p>
+          </div>
+          <button onClick={onClose} className="rounded-xl border border-slate-200 p-2 dark:border-slate-700"><X size={16} /></button>
+        </div>
+        <div className="grid gap-3 border-b border-slate-200 p-5 sm:grid-cols-3 dark:border-slate-800">
+          <div className="rounded-2xl bg-slate-50 p-4 dark:bg-slate-950"><p className="text-[10px] font-black uppercase text-slate-400">Importado</p><p className="mt-2 text-2xl font-black">{detail.imported}</p></div>
+          <div className="rounded-2xl bg-blue-50 p-4 dark:bg-blue-500/10"><p className="text-[10px] font-black uppercase text-blue-500">Aprobado</p><p className="mt-2 text-2xl font-black text-blue-700 dark:text-blue-300">{detail.approved}</p></div>
+          <div className="rounded-2xl bg-emerald-50 p-4 dark:bg-emerald-500/10"><p className="text-[10px] font-black uppercase text-emerald-500">Visible</p><p className="mt-2 text-2xl font-black text-emerald-700 dark:text-emerald-300">{detail.imported + detail.approved}</p></div>
+        </div>
+        <div className="max-h-[420px] space-y-3 overflow-y-auto p-5">
+          {detail.requests.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-400 dark:border-slate-700">No hay solicitudes en este mes.</div>
+          ) : detail.requests.map((item) => (
+            <div key={item.id} className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-sm font-black text-slate-900 dark:text-white">{longDate(item.fecha_inicio)} al {longDate(item.fecha_fin)}</p>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Pedido: {item.dias_solicitados} dias - En este mes: {overlapDaysInMonth(item, detail.row.periodo, detail.col.monthIndex)} dias</p>
+                </div>
+                <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase ${prevStatus(item.estado)}`}>{item.estado}</span>
+              </div>
+              {item.comentario && <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600 dark:bg-slate-950 dark:text-slate-300">{item.comentario}</p>}
+              <p className="mt-3 text-[11px] text-slate-400">Registrada: {dateTime(item.created_at)}</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
   )
 }
 
-function StatCard({
-  title,
-  value,
-  accent,
-  icon,
-  sub,
-}: {
-  title: string
-  value: number | string
-  accent: string
-  icon: ReactNode
-  sub?: string
-}) {
+function VacacionesPageContent() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const [mounted, setMounted] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [exporting, setExporting] = useState(false)
+  const [balances, setBalances] = useState<Balance[]>([])
+  const [requests, setRequests] = useState<RequestRow[]>([])
+  const [query, setQuery] = useState('')
+  const [area, setArea] = useState('TODAS')
+  const [resolvingId, setResolvingId] = useState<string | null>(null)
+  const [detail, setDetail] = useState<MonthDetail | null>(null)
+  const currentYear = new Date().getFullYear()
+  const requestedYear = Number(searchParams.get('year') || 0) || null
+
+  const fetchAll = useCallback(async () => {
+    setLoading(true)
+    const [balancesRes, requestsRes] = await Promise.all([
+      supabase.from('vacaciones_saldos').select('*').order('periodo', { ascending: false }).order('area').order('trabajador_nombre'),
+      supabase.from('vacaciones_solicitudes').select('*').order('created_at', { ascending: false }),
+    ])
+    if (balancesRes.error) toast.error(balancesRes.error.message)
+    if (requestsRes.error) toast.error(requestsRes.error.message)
+    setBalances((balancesRes.data ?? []) as Balance[])
+    setRequests((requestsRes.data ?? []) as RequestRow[])
+    setLoading(false)
+  }, [])
+
+  useEffect(() => {
+    setMounted(true)
+    void fetchAll()
+    const channel = supabase
+      .channel('vacaciones-rt')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vacaciones_saldos' }, () => void fetchAll())
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vacaciones_solicitudes' }, () => void fetchAll())
+      .subscribe()
+    return () => { supabase.removeChannel(channel) }
+  }, [fetchAll])
+
+  const years = useMemo(() => Array.from(new Set(balances.map((row) => num(row.periodo)))).filter(Boolean).sort((a, b) => b - a), [balances])
+  const activeYear = requestedYear && years.includes(requestedYear) ? requestedYear : (years[0] ?? currentYear)
+  const balancesYear = useMemo(() => balances.filter((row) => num(row.periodo) === activeYear), [balances, activeYear])
+  const requestsYear = useMemo(() => requests.filter((row) => overlapsYear(row, activeYear)), [requests, activeYear])
+  const areas = useMemo(() => ['TODAS', ...Array.from(new Set(balancesYear.map((row) => row.area).filter(Boolean) as string[])).sort()], [balancesYear])
+  const filtered = useMemo(() => balancesYear.filter((row) => {
+    const q = query.trim().toLowerCase()
+    return (!q || row.trabajador_nombre.toLowerCase().includes(q) || row.dni.includes(q) || (row.cargo || '').toLowerCase().includes(q))
+      && (area === 'TODAS' || row.area === area)
+  }), [balancesYear, query, area])
+
+  const grouped = useMemo(() => filtered.reduce<Record<string, Balance[]>>((acc, row) => {
+    const key = row.area || 'SIN AREA'
+    if (!acc[key]) acc[key] = []
+    acc[key].push(row)
+    return acc
+  }, {}), [filtered])
+
+  const getMonthRequests = useCallback((dni: string, year: number, monthIndex: number) => requestsYear.filter((row) => row.dni === dni && overlapsMonth(row, year, monthIndex)), [requestsYear])
+  const getMonthView = useCallback((row: Balance, col: MonthCol) => {
+    const imported = num(row[col.key])
+    const monthRequests = getMonthRequests(row.dni, row.periodo, col.monthIndex)
+    const approved = monthRequests.filter((item) => item.estado === 'aprobada').reduce((sum, item) => sum + overlapDaysInMonth(item, row.periodo, col.monthIndex), 0)
+    return { imported, approved, total: imported + approved, requests: monthRequests }
+  }, [getMonthRequests])
+
+  const derived = useCallback((row: Balance) => {
+    const approvedDays = requestsYear.filter((item) => item.dni === row.dni && item.estado === 'aprobada').reduce((sum, item) => sum + num(item.dias_solicitados), 0)
+    const pendientesPrev = num(row.dias_pendientes) - approvedDays
+    const porVencer = row.vacaciones_por_vencer != null ? num(row.vacaciones_por_vencer) : (row.fecha_vencimiento ? 30 : 0)
+    const pendientesPeriodo = (row.vacaciones_pendientes_periodo != null ? num(row.vacaciones_pendientes_periodo) : (num(row.dias_pendientes) + porVencer)) - approvedDays
+    return { approvedDays, pendientesPrev, pendientesPeriodo, gozados: num(row.total_gozados) + approvedDays, porVencer }
+  }, [requestsYear])
+
+  const exportExcel = useCallback(() => {
+    if (!balancesYear.length) return toast.error('No hay datos para exportar')
+    setExporting(true)
+    try {
+      const rows: Array<Array<string | number>> = [['', 'REPORTE DE VACACIONES'], ['', 'EMPLEADOS', '', `SALDOS DE DIAS POR GOZAR ${activeYear - 1}`, 'ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SET', 'OCT', 'NOV', 'DIC', 'Total dias gozados', `PENDIENTES POR GOZAR ${activeYear - 1}`, `FECHAS DE VENCIMIENTO ${activeYear}`, `VACACIONES POR VENCER ${activeYear}`, `Vacaciones Pendientes por gozar ${activeYear}`]]
+      Object.entries(grouped).forEach(([groupName, rowsByArea]) => {
+        rows.push(['', groupName])
+        rowsByArea.forEach((row) => {
+          const d = derived(row)
+          rows.push([row.codigo_excel || '', row.trabajador_nombre, row.cargo || '', num(row.saldo_arrastre), ...months.map((col) => getMonthView(row, col).total), d.gozados, d.pendientesPrev, row.fecha_vencimiento ? shortDate(row.fecha_vencimiento) : '', d.porVencer, d.pendientesPeriodo])
+        })
+      })
+      const ws = XLSX.utils.aoa_to_sheet(rows)
+      ws['!merges'] = [{ s: { r: 0, c: 1 }, e: { r: 0, c: 20 } }]
+      ws['!cols'] = [{ wpx: 52 }, { wpx: 240 }, { wpx: 170 }, { wpx: 90 }, ...months.map(() => ({ wpx: 54 })), { wpx: 92 }, { wpx: 110 }, { wpx: 120 }, { wpx: 110 }, { wpx: 145 }]
+      for (let c = 1; c <= 20; c++) ws[XLSX.utils.encode_cell({ r: 0, c })] && (ws[XLSX.utils.encode_cell({ r: 0, c })].s = { font: { bold: true, sz: 16 }, alignment: { horizontal: 'center' }, fill: { fgColor: { rgb: 'E5EEF9' } } })
+      for (let c = 0; c <= 20; c++) ws[XLSX.utils.encode_cell({ r: 1, c })] && (ws[XLSX.utils.encode_cell({ r: 1, c })].s = { font: { bold: true, color: { rgb: 'FFFFFF' } }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, fill: { fgColor: { rgb: '0F172A' } } })
+      const wb = XLSX.utils.book_new()
+      XLSX.utils.book_append_sheet(wb, ws, `vacaciones ${activeYear}`)
+      XLSX.writeFile(wb, `vacaciones_${activeYear}_ruag.xlsx`)
+      toast.success(`Excel ${activeYear} descargado`)
+    } finally {
+      setExporting(false)
+    }
+  }, [activeYear, balancesYear, derived, getMonthView, grouped])
+
+  const resolveRequest = useCallback(async (row: RequestRow, estado: 'aprobada' | 'cancelada') => {
+    setResolvingId(row.id)
+    const { error } = await supabase.from('vacaciones_solicitudes').update({ estado }).eq('id', row.id)
+    setResolvingId(null)
+    if (error) toast.error(error.message)
+    else toast.success(estado === 'aprobada' ? `Vacaciones aprobadas para ${row.trabajador_nombre}` : `Vacaciones rechazadas para ${row.trabajador_nombre}`)
+  }, [])
+
+  if (!mounted) return <div className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-slate-950"><Loader2 className="animate-spin text-blue-600" size={28} /></div>
+
   return (
-    <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm">
-      <div className="flex items-start justify-between gap-3">
-        <div>
-          <p className="text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">{title}</p>
-          <p className="mt-2 text-3xl font-black tracking-tight text-slate-900 dark:text-white tabular-nums">{value}</p>
-          {sub && <p className="mt-1 text-[11px] font-medium text-slate-400">{sub}</p>}
-        </div>
-        <div className={`flex h-11 w-11 items-center justify-center rounded-xl text-white ${accent}`}>
-          {icon}
-        </div>
+    <div className="min-h-screen bg-slate-50 px-4 py-6 text-slate-900 dark:bg-slate-950 dark:text-white sm:px-6 lg:px-8">
+      <Toaster position="top-center" richColors />
+      <MonthModal detail={detail} onClose={() => setDetail(null)} />
+      <div className="mx-auto max-w-[1800px] space-y-6">
+        <header className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+            <div className="flex items-start gap-4">
+              <Link href="/" className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800"><ArrowLeft size={18} /></Link>
+              <div>
+                <p className="text-[11px] font-black uppercase tracking-[0.22em] text-blue-500">RUAG</p>
+                <h1 className="text-3xl font-black tracking-tight">Vacaciones {activeYear}</h1>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Vista basada en la hoja anual y preparada para archivo por periodo.</p>
+              </div>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              <Link href="/vacaciones/historico" className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black dark:border-slate-700 dark:bg-slate-900"><Archive size={14} /> HISTORICO</Link>
+              <button onClick={() => void fetchAll()} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black dark:border-slate-700 dark:bg-slate-900"><RefreshCw size={14} /> ACTUALIZAR</button>
+              <button onClick={exportExcel} disabled={exporting || !balancesYear.length} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white disabled:opacity-50">{exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} EXPORTAR</button>
+            </div>
+          </div>
+          <div className="mt-5 flex flex-wrap gap-2">
+            {Array.from(new Set([currentYear, ...years])).sort((a, b) => b - a).map((year) => (
+              <button key={year} onClick={() => router.push(year === currentYear ? '/vacaciones' : `/vacaciones?year=${year}`)} className={`rounded-full px-3 py-1.5 text-[11px] font-black tracking-[0.14em] ${year === activeYear ? 'bg-blue-600 text-white' : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-200'}`}>{year < (years[0] ?? currentYear) ? `ARCHIVO ${year}` : year}</button>
+            ))}
+          </div>
+        </header>
+        <section className="rounded-3xl border border-slate-200 bg-white p-4 shadow-sm dark:border-slate-800 dark:bg-slate-900">
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_260px]">
+            <div className="relative">
+              <Search size={15} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar por nombre, cargo o DNI..." className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-3 pl-10 pr-4 text-sm font-medium outline-none dark:border-slate-700 dark:bg-slate-950" />
+            </div>
+            <select value={area} onChange={(e) => setArea(e.target.value)} className="rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black dark:border-slate-700 dark:bg-slate-950">
+              {areas.map((item) => <option key={item} value={item}>{item === 'TODAS' ? 'Todas las areas' : item}</option>)}
+            </select>
+          </div>
+        </section>
+
+        <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+          <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4 dark:border-slate-800">
+              <div>
+                <p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">Control estilo Excel</p>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Incluye "Vacaciones Pendientes por gozar {activeYear}" y detalle por mes.</p>
+              </div>
+              <span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-black text-slate-500 dark:bg-slate-800 dark:text-slate-300">{filtered.length} filas</span>
+            </div>
+            {loading ? (
+              <div className="flex min-h-[420px] items-center justify-center"><Loader2 className="animate-spin text-blue-600" size={26} /></div>
+            ) : !filtered.length ? (
+              <div className="flex min-h-[420px] items-center justify-center px-6 text-center text-sm text-slate-400">No hay saldos de vacaciones para mostrar.</div>
+            ) : (
+              <div className="max-h-[72vh] overflow-y-auto">
+                <table className="w-full table-fixed border-collapse text-[10px] leading-tight">
+                  <colgroup>
+                    <col className="w-[3%]" /><col className="w-[14%]" /><col className="w-[9%]" /><col className="w-[5%]" />
+                    {months.map((col) => <col key={col.key} className="w-[3.4%]" />)}
+                    <col className="w-[5%]" /><col className="w-[6%]" /><col className="w-[7%]" /><col className="w-[5%]" /><col className="w-[8%]" />
+                  </colgroup>
+                  <thead className="sticky top-0 z-10 bg-slate-950 text-white">
+                    <tr>
+                      <th className="px-1.5 py-3">#</th><th className="px-1.5 py-3 text-left">EMPLEADOS</th><th className="px-1.5 py-3 text-left">CARGO</th><th className="px-1.5 py-3">{activeYear - 1}</th>
+                      {months.map((col) => <th key={col.key} className="px-1 py-3">{col.label}</th>)}
+                      <th className="px-1.5 py-3">GOZADOS</th><th className="px-1.5 py-3">PEND. {activeYear - 1}</th><th className="px-1.5 py-3">VENCE</th><th className="px-1.5 py-3">POR VENCER</th><th className="px-1.5 py-3">PEND. {activeYear}</th>
+                    </tr>
+                  </thead>
+                  {Object.entries(grouped).map(([groupName, rows]) => (
+                    <tbody key={groupName}>
+                      <tr className="border-y border-slate-200 bg-slate-100 dark:border-slate-800 dark:bg-slate-950"><td colSpan={21} className="px-4 py-2 text-[11px] font-black tracking-[0.14em] text-slate-600 dark:text-slate-300">{groupName}</td></tr>
+                      {rows.map((row) => {
+                        const d = derived(row)
+                        return (
+                          <tr key={row.id} className="border-b border-slate-200 align-top dark:border-slate-800">
+                            <td className="px-1.5 py-3 text-center font-black text-slate-500">{row.codigo_excel || '-'}</td>
+                            <td className="px-1.5 py-3"><p className="line-clamp-2 font-black">{row.trabajador_nombre}</p><p className="mt-1 font-mono text-[9px] text-slate-400">{row.dni}</p></td>
+                            <td className="px-1.5 py-3 text-slate-600 dark:text-slate-300"><span className="line-clamp-2 block">{row.cargo || '--'}</span></td>
+                            <td className="px-1.5 py-3 text-center font-black">{num(row.saldo_arrastre)}</td>
+                            {months.map((col) => {
+                              const view = getMonthView(row, col)
+                              return <td key={col.key} className="px-0.5 py-2"><button onClick={() => setDetail({ row, col, imported: view.imported, approved: view.approved, requests: view.requests })} className={`w-full rounded-lg px-0.5 py-1 font-black ${view.total > 0 || view.requests.length ? 'bg-slate-100 text-slate-700 hover:bg-blue-50 hover:text-blue-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-blue-500/20 dark:hover:text-blue-200' : 'text-slate-300 hover:bg-slate-100 dark:text-slate-700 dark:hover:bg-slate-800'}`}>{view.total}</button></td>
+                            })}
+                            <td className="px-1.5 py-3 text-center font-black text-blue-600 dark:text-blue-300">{d.gozados}</td>
+                            <td className="px-1.5 py-3 text-center font-black">{d.pendientesPrev}</td>
+                            <td className="px-1.5 py-3 text-center font-black text-slate-500 dark:text-slate-300">{shortDate(row.fecha_vencimiento)}</td>
+                            <td className="px-1.5 py-3 text-center font-black text-amber-600 dark:text-amber-300">{d.porVencer}</td>
+                            <td className="px-1.5 py-3 text-center font-black text-emerald-600 dark:text-emerald-300">{d.pendientesPeriodo}</td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  ))}
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-5">
+            <div className="overflow-hidden rounded-3xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+              <div className="border-b border-slate-200 px-5 py-4 dark:border-slate-800"><p className="text-[11px] font-black uppercase tracking-[0.18em] text-slate-400">Solicitudes en tiempo real</p></div>
+              <div className="max-h-[520px] space-y-3 overflow-y-auto p-4">
+                {requestsYear.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-400 dark:border-slate-700">Aun no hay solicitudes de vacaciones.</div>
+                ) : requestsYear.slice(0, 12).map((item) => (
+                  <div key={item.id} className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                    <div className="flex items-start justify-between gap-3">
+                      <div><p className="font-black">{item.trabajador_nombre}</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{longDate(item.fecha_inicio)} al {longDate(item.fecha_fin)}</p></div>
+                      <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase ${prevStatus(item.estado)}`}>{item.estado}</span>
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400"><span>{item.dias_solicitados} dias</span><span>-</span><span>{item.area || 'SIN AREA'}</span></div>
+                    {item.comentario && <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600 dark:bg-slate-950 dark:text-slate-300">{item.comentario}</p>}
+                    <p className="mt-3 text-[11px] text-slate-400">Registrada: {dateTime(item.created_at)}</p>
+                    {item.estado === 'solicitada' && (
+                      <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                        <button onClick={() => void resolveRequest(item, 'aprobada')} disabled={resolvingId === item.id} className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white disabled:opacity-50">{resolvingId === item.id ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />} APROBAR</button>
+                        <button onClick={() => void resolveRequest(item, 'cancelada')} disabled={resolvingId === item.id} className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 px-3 py-2 text-xs font-black text-white disabled:opacity-50">{resolvingId === item.id ? <Loader2 size={14} className="animate-spin" /> : <XCircle size={14} />} RECHAZAR</button>
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
       </div>
     </div>
   )
 }
 
 export default function VacacionesPage() {
-  const [mounted, setMounted] = useState(false)
-  const [isDark, setIsDark] = useState(false)
-  const [loading, setLoading] = useState(true)
-  const [saldos, setSaldos] = useState<VacationBalance[]>([])
-  const [solicitudes, setSolicitudes] = useState<VacationRequest[]>([])
-  const [busqueda, setBusqueda] = useState('')
-  const [filtroArea, setFiltroArea] = useState('TODAS')
-  const [error, setError] = useState<string | null>(null)
-  const [resolviendoId, setResolviendoId] = useState<string | null>(null)
-  const [monthDetail, setMonthDetail] = useState<MonthDetail | null>(null)
-
-  useEffect(() => {
-    setMounted(true)
-    const dark = localStorage.getItem('ruag_theme') === 'dark'
-    setIsDark(dark)
-    document.documentElement.classList.toggle('dark', dark)
-  }, [])
-
-  const toggleTheme = () => {
-    setIsDark((prev) => {
-      const next = !prev
-      document.documentElement.classList.toggle('dark', next)
-      localStorage.setItem('ruag_theme', next ? 'dark' : 'light')
-      return next
-    })
-  }
-
-  const fetchVacaciones = useCallback(async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      try {
-        await supabase.rpc('procesar_vencimientos_vacaciones').throwOnError()
-      } catch {
-        // El refresco de vencimientos es opcional; si la función no existe aún,
-        // seguimos intentando mostrar los datos disponibles.
-      }
-
-      const [saldosRes, solicitudesRes] = await Promise.all([
-        supabase
-          .from('vacaciones_saldos')
-          .select('*')
-          .order('area', { ascending: true })
-          .order('trabajador_nombre', { ascending: true }),
-        supabase
-          .from('vacaciones_solicitudes')
-          .select('*')
-          .order('created_at', { ascending: false })
-      ])
-
-      if (saldosRes.error) throw saldosRes.error
-      if (solicitudesRes.error) throw solicitudesRes.error
-
-      setSaldos((saldosRes.data ?? []) as VacationBalance[])
-      setSolicitudes((solicitudesRes.data ?? []) as VacationRequest[])
-    } catch (err: any) {
-      const message = err?.message || 'No se pudieron cargar las vacaciones'
-      setError(message)
-      toast.error(message)
-    } finally {
-      setLoading(false)
-    }
-  }, [])
-
-  useEffect(() => {
-    if (!mounted) return
-
-    void fetchVacaciones()
-
-    const channel = supabase
-      .channel('vacaciones-rt')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'vacaciones_saldos' }, () => {
-        void fetchVacaciones()
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'vacaciones_solicitudes' }, () => {
-        void fetchVacaciones()
-      })
-      .subscribe()
-
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [mounted, fetchVacaciones])
-
-  const resolverSolicitud = useCallback(
-    async (item: VacationRequest, nextEstado: 'aprobada' | 'cancelada') => {
-      setResolviendoId(item.id)
-      try {
-        const { error } = await supabase
-          .from('vacaciones_solicitudes')
-          .update({ estado: nextEstado })
-          .eq('id', item.id)
-
-        if (error) throw error
-
-        toast.success(
-          nextEstado === 'aprobada'
-            ? `Vacaciones aprobadas para ${item.trabajador_nombre}`
-            : `Vacaciones rechazadas para ${item.trabajador_nombre}`
-        )
-
-        void fetchVacaciones()
-      } catch (err: any) {
-        toast.error(err?.message || 'No se pudo actualizar la solicitud')
-      } finally {
-        setResolviendoId((current) => (current === item.id ? null : current))
-      }
-    },
-    [fetchVacaciones]
-  )
-
-  const areas = useMemo(
-    () => ['TODAS', ...Array.from(new Set(saldos.map((row) => row.area).filter(Boolean) as string[])).sort()],
-    [saldos]
-  )
-
-  const saldosFiltrados = useMemo(() => {
-    const query = busqueda.trim().toLowerCase()
-    return saldos.filter((row) => {
-      const matchText =
-        !query ||
-        row.trabajador_nombre.toLowerCase().includes(query) ||
-        row.dni.includes(query) ||
-        (row.cargo ?? '').toLowerCase().includes(query)
-
-      const matchArea = filtroArea === 'TODAS' || row.area === filtroArea
-      return matchText && matchArea
-    })
-  }, [saldos, busqueda, filtroArea])
-
-  const groupedByArea = useMemo(() => {
-    return saldosFiltrados.reduce<Record<string, VacationBalance[]>>((acc, row) => {
-      const key = row.area || 'SIN ÁREA'
-      if (!acc[key]) acc[key] = []
-      acc[key].push(row)
-      return acc
-    }, {})
-  }, [saldosFiltrados])
-
-  const getMonthRequests = useCallback(
-    (dni: string, year: number, monthIndex: number) =>
-      solicitudes.filter((item) => item.dni === dni && overlapsMonth(item, year, monthIndex)),
-    [solicitudes]
-  )
-
-  const getMonthDisplay = useCallback(
-    (row: VacationBalance, column: MonthColumn) => {
-      const importedValue = num(row[column.key])
-      const requests = getMonthRequests(row.dni, row.periodo, column.monthIndex)
-      const autoApprovedValue = requests
-        .filter((item) => item.estado === 'aprobada')
-        .reduce((sum, item) => sum + overlapDaysInMonth(item, row.periodo, column.monthIndex), 0)
-
-      return {
-        importedValue,
-        autoApprovedValue,
-        totalValue: importedValue + autoApprovedValue,
-        requests,
-      }
-    },
-    [getMonthRequests]
-  )
-
-  const getDerivedBalance = useCallback(
-    (row: VacationBalance): DerivedBalance => {
-      const approvedDays = solicitudes
-        .filter((item) => item.dni === row.dni && item.estado === 'aprobada')
-        .reduce((sum, item) => sum + num(item.dias_solicitados), 0)
-
-      return {
-        approvedDays,
-        effectivePendientes: num(row.dias_pendientes) - approvedDays,
-        effectiveGozados: num(row.total_gozados) + approvedDays,
-      }
-    },
-    [solicitudes]
-  )
-
-  const totalPendientes = useMemo(
-    () => saldosFiltrados.reduce((sum, row) => sum + getDerivedBalance(row).effectivePendientes, 0),
-    [saldosFiltrados, getDerivedBalance]
-  )
-
-  const totalGozados = useMemo(
-    () => saldosFiltrados.reduce((sum, row) => sum + getDerivedBalance(row).effectiveGozados, 0),
-    [saldosFiltrados, getDerivedBalance]
-  )
-
-  const totalRenovados = useMemo(
-    () => saldosFiltrados.reduce((sum, row) => sum + num(row.dias_extra), 0),
-    [saldosFiltrados]
-  )
-
-  const proximosVencer = useMemo(() => {
-    const today = new Date()
-    return saldosFiltrados.filter((row) => {
-      const diff = Math.ceil((asDate(row.fecha_vencimiento).getTime() - today.getTime()) / 86400000)
-      return diff >= 0 && diff <= 30
-    }).length
-  }, [saldosFiltrados])
-
-  if (!mounted) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-slate-950">
-        <Loader2 className="animate-spin text-blue-600" size={28} />
-      </div>
-    )
-  }
-
   return (
-    <div className="min-h-screen bg-slate-50 dark:bg-slate-950 text-slate-900 dark:text-white">
-      <Toaster position="top-center" richColors />
-
-      <header className="sticky top-0 z-40 border-b border-slate-200 dark:border-slate-800 bg-white/90 dark:bg-slate-900/90 backdrop-blur-xl">
-        <div className="mx-auto flex max-w-[1700px] items-center justify-between gap-4 px-4 py-4 sm:px-6">
-          <div className="flex items-center gap-3">
-            <Link
-              href="/"
-              className="inline-flex h-11 w-11 items-center justify-center rounded-xl border border-slate-200 bg-white text-slate-600 shadow-sm transition-all hover:-translate-y-0.5 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300"
-            >
-              <ArrowLeft size={18} />
-            </Link>
-            <div>
-              <p className="text-[10px] font-black uppercase tracking-[0.18em] text-sky-500">RUAG</p>
-              <h1 className="text-xl font-black tracking-tight">Vacaciones 2026</h1>
-              <p className="text-xs font-medium text-slate-400">Vista operativa basada en la hoja “vacaciones 2026”</p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => {
-                void fetchVacaciones()
-                toast.success('Vacaciones actualizadas')
-              }}
-              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900 px-3 py-2 text-xs font-black text-slate-600 dark:text-slate-300 shadow-sm transition-all hover:-translate-y-0.5"
-            >
-              <RefreshCw size={14} />
-              ACTUALIZAR
-            </button>
-            <ThemeButton isDark={isDark} onToggle={toggleTheme} />
-          </div>
-        </div>
-      </header>
-
-      <main className="mx-auto flex max-w-[1700px] flex-col gap-5 px-4 py-6 sm:px-6">
-        <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-          <StatCard title="Trabajadores" value={saldosFiltrados.length} accent="bg-blue-600" icon={<CalendarDays size={18} />} />
-          <StatCard title="Pendientes" value={totalPendientes} accent="bg-emerald-600" icon={<Wallet size={18} />} sub="días disponibles" />
-          <StatCard title="Gozados" value={totalGozados} accent="bg-indigo-600" icon={<PlaneTakeoff size={18} />} sub="consumidos en 2026" />
-          <StatCard title="Vencen pronto" value={proximosVencer} accent="bg-amber-500" icon={<AlertTriangle size={18} />} sub="+30 días al vencer" />
-        </section>
-
-        <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm">
-          <div className="grid gap-3 lg:grid-cols-[1fr_220px]">
-            <div className="relative">
-              <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={15} />
-              <input
-                value={busqueda}
-                onChange={(e) => setBusqueda(e.target.value)}
-                placeholder="Buscar por nombre, cargo o DNI..."
-                className="w-full rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 px-10 py-2.5 text-sm font-medium outline-none transition-all focus:border-blue-500"
-              />
-            </div>
-            <select
-              value={filtroArea}
-              onChange={(e) => setFiltroArea(e.target.value)}
-              className="rounded-xl border border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 px-3 py-2.5 text-sm font-bold outline-none transition-all focus:border-blue-500"
-            >
-              {areas.map((area) => (
-                <option key={area} value={area}>
-                  {area === 'TODAS' ? 'Todas las áreas' : area}
-                </option>
-              ))}
-            </select>
-          </div>
-        </section>
-
-        {error && (
-          <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-600 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
-            {error}
-          </div>
-        )}
-
-        <section className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-          <div className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
-            <div className="border-b border-slate-200 dark:border-slate-800 px-4 py-3">
-              <h2 className="text-sm font-black uppercase tracking-[0.16em] text-slate-500">Control estilo Excel</h2>
-            </div>
-
-            {loading ? (
-              <div className="flex min-h-[400px] items-center justify-center">
-                <Loader2 className="animate-spin text-blue-600" size={28} />
-              </div>
-            ) : saldosFiltrados.length === 0 ? (
-              <div className="flex min-h-[280px] items-center justify-center px-6 text-center text-sm font-semibold text-slate-400">
-                No hay saldos de vacaciones para mostrar.
-              </div>
-            ) : (
-              <div className="space-y-5 p-4">
-                {Object.entries(groupedByArea).map(([area, rows]) => (
-                  <div key={area} className="overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800">
-                    <div className="border-b border-slate-200 dark:border-slate-800 bg-slate-50 dark:bg-slate-950 px-4 py-3">
-                      <p className="text-sm font-black uppercase tracking-wide text-slate-700 dark:text-slate-200">{area}</p>
-                    </div>
-                    <div className="overflow-x-auto">
-                      <table className="min-w-[1300px] w-full text-sm">
-                        <thead className="bg-slate-900 text-white">
-                          <tr>
-                            <th className="px-3 py-3 text-left text-[10px] font-black uppercase tracking-[0.12em]">Empleado</th>
-                            <th className="px-3 py-3 text-left text-[10px] font-black uppercase tracking-[0.12em]">Cargo</th>
-                            <th className="px-3 py-3 text-center text-[10px] font-black uppercase tracking-[0.12em]">Saldo 2025</th>
-                            {monthColumns.map((column) => (
-                              <th key={column.key} className="px-3 py-3 text-center text-[10px] font-black uppercase tracking-[0.12em]">
-                                {column.label}
-                              </th>
-                            ))}
-                            <th className="px-3 py-3 text-center text-[10px] font-black uppercase tracking-[0.12em]">Gozados</th>
-                            <th className="px-3 py-3 text-center text-[10px] font-black uppercase tracking-[0.12em]">Extra</th>
-                            <th className="px-3 py-3 text-center text-[10px] font-black uppercase tracking-[0.12em]">Pendientes</th>
-                            <th className="px-3 py-3 text-center text-[10px] font-black uppercase tracking-[0.12em]">Vence</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {rows.map((row) => {
-                            const derived = getDerivedBalance(row)
-                            const venceEn = Math.ceil((asDate(row.fecha_vencimiento).getTime() - Date.now()) / 86400000)
-                            const vencimientoClass =
-                              venceEn < 0
-                                ? 'bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-300'
-                                : venceEn <= 30
-                                  ? 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'
-                                  : 'bg-slate-50 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
-
-                            return (
-                              <tr key={row.id} className="border-t border-slate-100 dark:border-slate-800">
-                                <td className="px-3 py-3 align-top">
-                                  <div className="min-w-[220px]">
-                                    <p className="font-black uppercase tracking-tight text-slate-800 dark:text-slate-100">
-                                      {row.trabajador_nombre}
-                                    </p>
-                                    <p className="mt-1 text-[11px] font-medium text-slate-400">{row.dni}</p>
-                                  </div>
-                                </td>
-                                <td className="px-3 py-3 align-top text-slate-600 dark:text-slate-300">{row.cargo || '—'}</td>
-                                <td className="px-3 py-3 text-center font-black tabular-nums">{num(row.saldo_arrastre)}</td>
-                                {monthColumns.map((column) => {
-                                  const monthData = getMonthDisplay(row, column)
-                                  const isInteractive = monthData.requests.length > 0
-                                  const hasAutoApproved = monthData.autoApprovedValue > 0
-
-                                  return (
-                                    <td key={column.key} className="px-2 py-2 text-center">
-                                      <button
-                                        type="button"
-                                        onClick={() =>
-                                          setMonthDetail({
-                                            row,
-                                            column,
-                                            importedValue: monthData.importedValue,
-                                            autoApprovedValue: monthData.autoApprovedValue,
-                                            requests: monthData.requests,
-                                          })
-                                        }
-                                        className={`w-full rounded-xl px-2 py-2 text-center font-black tabular-nums transition-all ${
-                                          isInteractive || hasAutoApproved
-                                            ? 'bg-sky-50 text-sky-700 hover:-translate-y-0.5 dark:bg-sky-500/10 dark:text-sky-300'
-                                            : 'text-slate-600 dark:text-slate-300'
-                                        }`}
-                                      >
-                                        {monthData.totalValue || '—'}
-                                      </button>
-                                    </td>
-                                  )
-                                })}
-                                <td className="px-3 py-3 text-center font-black tabular-nums text-indigo-600 dark:text-indigo-300">{derived.effectiveGozados}</td>
-                                <td className="px-3 py-3 text-center font-black tabular-nums text-sky-600 dark:text-sky-300">{num(row.dias_extra)}</td>
-                                <td className="px-3 py-3 text-center font-black tabular-nums text-emerald-600 dark:text-emerald-300">{derived.effectivePendientes}</td>
-                                <td className="px-3 py-3 text-center">
-                                  <span className={`inline-flex rounded-lg px-2 py-1 text-[11px] font-black ${vencimientoClass}`}>
-                                    {formatDate(row.fecha_vencimiento)}
-                                  </span>
-                                </td>
-                              </tr>
-                            )
-                          })}
-                        </tbody>
-                      </table>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <aside className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 shadow-sm overflow-hidden">
-            <div className="border-b border-slate-200 dark:border-slate-800 px-4 py-3">
-              <h2 className="text-sm font-black uppercase tracking-[0.16em] text-slate-500">Solicitudes en tiempo real</h2>
-            </div>
-
-            <div className="max-h-[960px] overflow-y-auto p-4 space-y-3">
-              {solicitudes.length === 0 ? (
-                <div className="rounded-2xl border border-dashed border-slate-200 dark:border-slate-700 px-4 py-10 text-center text-sm font-semibold text-slate-400">
-                  Aún no hay solicitudes de vacaciones.
-                </div>
-              ) : (
-                solicitudes.map((item) => {
-                  const isResolving = resolviendoId === item.id
-                  const statusLabel =
-                    item.estado === 'cancelada' ? 'rechazada' : item.estado === 'solicitada' ? 'pendiente' : item.estado
-                  const statusClass =
-                    item.estado === 'cancelada'
-                      ? 'bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-300'
-                      : item.estado === 'aprobada'
-                        ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
-                        : 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'
-
-                  return (
-                    <div key={item.id} className="rounded-2xl border border-slate-200 dark:border-slate-800 p-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-black uppercase tracking-tight text-slate-800 dark:text-slate-100">
-                            {item.trabajador_nombre}
-                          </p>
-                          <p className="mt-1 text-[11px] font-medium text-slate-400">{item.area || 'Sin área'}</p>
-                        </div>
-                        <span className={`inline-flex shrink-0 rounded-lg px-2 py-1 text-[10px] font-black uppercase ${statusClass}`}>
-                          {statusLabel}
-                        </span>
-                      </div>
-
-                      <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
-                        <div className="rounded-xl bg-slate-50 dark:bg-slate-950 px-3 py-2">
-                          <p className="text-[10px] font-black uppercase tracking-[0.12em] text-slate-400">Desde</p>
-                          <p className="mt-1 font-bold text-slate-700 dark:text-slate-200">{formatDate(item.fecha_inicio)}</p>
-                        </div>
-                        <div className="rounded-xl bg-slate-50 dark:bg-slate-950 px-3 py-2">
-                          <p className="text-[10px] font-black uppercase tracking-[0.12em] text-slate-400">Hasta</p>
-                          <p className="mt-1 font-bold text-slate-700 dark:text-slate-200">{formatDate(item.fecha_fin)}</p>
-                        </div>
-                      </div>
-
-                      <div className="mt-3 flex items-center justify-between rounded-xl border border-slate-200 dark:border-slate-800 px-3 py-2">
-                        <div className="flex items-center gap-2 text-sm font-black text-indigo-600 dark:text-indigo-300">
-                          <PlaneTakeoff size={15} />
-                          {num(item.dias_solicitados)} día(s)
-                        </div>
-                        <div className="text-right text-[11px] font-semibold text-slate-400">
-                          {item.saldo_antes != null && item.saldo_despues != null ? `${item.saldo_antes} → ${item.saldo_despues}` : 'Sin saldo'}
-                        </div>
-                      </div>
-
-                      {item.comentario && (
-                        <p className="mt-3 rounded-xl bg-slate-50 dark:bg-slate-950 px-3 py-2 text-sm text-slate-600 dark:text-slate-300">
-                          {item.comentario}
-                        </p>
-                      )}
-
-                      {item.estado === 'solicitada' && (
-                        <div className="mt-3 grid grid-cols-2 gap-2">
-                          <button
-                            onClick={() => void resolverSolicitud(item, 'aprobada')}
-                            disabled={isResolving}
-                            className="inline-flex items-center justify-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white transition-all hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            {isResolving ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle2 size={14} />}
-                            ACEPTAR
-                          </button>
-                          <button
-                            onClick={() => void resolverSolicitud(item, 'cancelada')}
-                            disabled={isResolving}
-                            className="inline-flex items-center justify-center gap-2 rounded-xl bg-red-600 px-3 py-2 text-xs font-black text-white transition-all hover:-translate-y-0.5 disabled:cursor-not-allowed disabled:opacity-60"
-                          >
-                            {isResolving ? <Loader2 size={14} className="animate-spin" /> : <XCircle size={14} />}
-                            RECHAZAR
-                          </button>
-                        </div>
-                      )}
-
-                      <div className="mt-3 flex items-center gap-2 text-[11px] font-medium text-slate-400">
-                        <Clock3 size={13} />
-                        {formatDateTime(item.created_at)}
-                      </div>
-                    </div>
-                  )
-                })
-              )}
-            </div>
-          </aside>
-        </section>
-
-        <section className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-900 p-4 shadow-sm">
-          <div className="flex flex-wrap items-center gap-3 text-sm">
-            <div className="inline-flex items-center gap-2 rounded-xl bg-slate-50 dark:bg-slate-950 px-3 py-2 font-semibold text-slate-600 dark:text-slate-300">
-              <CheckCircle2 size={14} className="text-emerald-500" />
-              El dashboard escucha `vacaciones_saldos` y `vacaciones_solicitudes` en tiempo real.
-            </div>
-            <div className="inline-flex items-center gap-2 rounded-xl bg-slate-50 dark:bg-slate-950 px-3 py-2 font-semibold text-slate-600 dark:text-slate-300">
-              <Wallet size={14} className="text-sky-500" />
-              Cuando una solicitud queda aprobada, pendientes y gozados se recalculan al instante.
-            </div>
-            <div className="inline-flex items-center gap-2 rounded-xl bg-slate-50 dark:bg-slate-950 px-3 py-2 font-semibold text-slate-600 dark:text-slate-300">
-              <CalendarDays size={14} className="text-amber-500" />
-              La fecha de vence sale de la hoja 2026; cuando llega ese día se suman 30 días y se mueve la próxima fecha.
-            </div>
-          </div>
-        </section>
-      </main>
-
-      {monthDetail && (
-        <MonthRequestsModal
-          detail={monthDetail}
-          onClose={() => setMonthDetail(null)}
-        />
-      )}
-    </div>
-  )
-}
-
-function MonthRequestsModal({
-  detail,
-  onClose,
-}: {
-  detail: MonthDetail
-  onClose: () => void
-}) {
-  const { row, column, requests, importedValue, autoApprovedValue } = detail
-
-  return (
-    <div
-      className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm"
-      onClick={onClose}
-    >
-      <div
-        className="w-full max-w-2xl rounded-3xl border border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900"
-        onClick={(event) => event.stopPropagation()}
-      >
-        <div className="border-b border-slate-200 px-5 py-4 dark:border-slate-800">
-          <div className="flex items-start justify-between gap-4">
-            <div>
-              <p className="text-[10px] font-black uppercase tracking-[0.16em] text-sky-500">{column.label} {row.periodo}</p>
-              <h3 className="mt-1 text-lg font-black tracking-tight text-slate-900 dark:text-white">{row.trabajador_nombre}</h3>
-              <p className="mt-1 text-xs font-medium text-slate-400">{row.area || 'Sin área'} · {row.cargo || 'Sin cargo'}</p>
-            </div>
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-xl border border-slate-200 px-3 py-2 text-xs font-black text-slate-500 transition-all hover:-translate-y-0.5 dark:border-slate-700 dark:text-slate-300"
-            >
-              CERRAR
-            </button>
-          </div>
-        </div>
-
-        <div className="grid gap-3 border-b border-slate-200 px-5 py-4 dark:border-slate-800 sm:grid-cols-3">
-          <div className="rounded-2xl bg-slate-50 px-4 py-3 dark:bg-slate-950">
-            <p className="text-[10px] font-black uppercase tracking-[0.12em] text-slate-400">Base Excel</p>
-            <p className="mt-2 text-2xl font-black text-slate-900 dark:text-white">{importedValue}</p>
-          </div>
-          <div className="rounded-2xl bg-sky-50 px-4 py-3 dark:bg-sky-500/10">
-            <p className="text-[10px] font-black uppercase tracking-[0.12em] text-sky-500">Aprobadas sistema</p>
-            <p className="mt-2 text-2xl font-black text-sky-700 dark:text-sky-300">+{autoApprovedValue}</p>
-          </div>
-          <div className="rounded-2xl bg-emerald-50 px-4 py-3 dark:bg-emerald-500/10">
-            <p className="text-[10px] font-black uppercase tracking-[0.12em] text-emerald-500">Total mostrado</p>
-            <p className="mt-2 text-2xl font-black text-emerald-700 dark:text-emerald-300">{importedValue + autoApprovedValue}</p>
-          </div>
-        </div>
-
-        <div className="max-h-[60vh] space-y-3 overflow-y-auto px-5 py-4">
-          {requests.length === 0 ? (
-            <div className="rounded-2xl border border-dashed border-slate-200 px-4 py-12 text-center text-sm font-semibold text-slate-400 dark:border-slate-700">
-              No hay solicitudes registradas en el sistema para este mes.
-            </div>
-          ) : (
-            requests.map((item) => {
-              const statusLabel =
-                item.estado === 'cancelada' ? 'rechazada' : item.estado === 'solicitada' ? 'pendiente' : item.estado
-              const statusClass =
-                item.estado === 'cancelada'
-                  ? 'bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-300'
-                  : item.estado === 'aprobada'
-                    ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300'
-                    : 'bg-amber-50 text-amber-700 dark:bg-amber-500/10 dark:text-amber-300'
-
-              return (
-                <div key={item.id} className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-black text-slate-900 dark:text-white">
-                        {formatDate(item.fecha_inicio)} → {formatDate(item.fecha_fin)}
-                      </p>
-                      <p className="mt-1 text-xs font-medium text-slate-400">{num(item.dias_solicitados)} día(s) solicitados</p>
-                    </div>
-                    <span className={`inline-flex rounded-lg px-2 py-1 text-[10px] font-black uppercase ${statusClass}`}>
-                      {statusLabel}
-                    </span>
-                  </div>
-
-                  {item.comentario && (
-                    <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600 dark:bg-slate-950 dark:text-slate-300">
-                      {item.comentario}
-                    </p>
-                  )}
-
-                  <p className="mt-3 text-[11px] font-medium text-slate-400">{formatDateTime(item.created_at)}</p>
-                </div>
-              )
-            })
-          )}
-        </div>
-      </div>
-    </div>
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-slate-950"><Loader2 className="animate-spin text-blue-600" size={28} /></div>}>
+      <VacacionesPageContent />
+    </Suspense>
   )
 }
