@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "vacaciones:import-2026": "node import-vacaciones-2026.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.97.0",

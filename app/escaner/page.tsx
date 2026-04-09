@@ -7,6 +7,7 @@ import {
   MapPin, AlertTriangle, CheckCircle, Loader2, LogOut, History,
   Edit2, Edit3, X, Trophy, Lock, Map, Calendar, ChevronLeft,
   ChevronRight, CheckCircle2, HardHat, Store, Moon, Star,
+  PlaneTakeoff, Phone, RefreshCw, Wallet,
 } from 'lucide-react'
 import { format, parseISO, differenceInDays } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -19,6 +20,36 @@ import { supabase } from '@/utils/supabase/client'
 interface Perfil      { dni: string; nombres: string; area: string; foto_url: string }
 interface Asistencia  { id: string; fecha?: string; hora_ingreso: string; estado_ingreso: string; hora_salida: string | null; notas: string | null }
 interface LogroItem   { id: number; emoji: string; titulo: string; desc: string }
+interface VacacionesSaldo {
+  dni: string
+  trabajador_nombre: string
+  area: string | null
+  cargo: string | null
+  saldo_arrastre: number
+  dias_extra: number
+  total_gozados: number
+  dias_pendientes: number
+  fecha_vencimiento: string
+  renovaciones_aplicadas: number
+}
+interface VacacionSolicitud {
+  id: string
+  dni: string
+  trabajador_nombre: string
+  area: string | null
+  fecha_inicio: string
+  fecha_fin: string
+  dias_solicitados: number
+  comentario: string | null
+  estado: string
+  saldo_antes: number | null
+  saldo_despues: number | null
+  created_at: string | null
+}
+interface VacationCalendarDay {
+  fecha: string
+  solicitudes: VacacionSolicitud[]
+}
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -44,6 +75,9 @@ const HORAS_NOCTURNAS = [
   { hora: 21, label: '9 PM' }, { hora: 22, label: '10 PM' },
   { hora: 23, label: '11 PM' },
 ]
+
+const LIMA_TZ = 'America/Lima'
+const SOPORTE_WHATSAPP_NUMBER = '51947327420'
 
 // ─── Utils ────────────────────────────────────────────────────────────────────
 
@@ -78,6 +112,81 @@ const getInitials = (name: string) => {
   const words = name.trim().split(' ').filter(Boolean)
   if (words.length === 1) return words[0].substring(0, 2).toUpperCase()
   return (words[0][0] + words[1][0]).toUpperCase()
+}
+
+const num = (value: number | string | null | undefined) => {
+  const parsed = Number(value ?? 0)
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+const normalizeStatus = (value?: string | null) => String(value ?? '').toLowerCase()
+
+const toDateAtNoon = (value: string) => new Date(value.includes('T') ? value : `${value}T12:00:00`)
+
+const formatShortDate = (value: string) => format(toDateAtNoon(value), 'dd MMM yyyy', { locale: es })
+
+const formatDateTimeLabel = (value?: string | null) => {
+  if (!value) return '--'
+  try {
+    return new Intl.DateTimeFormat('es-PE', {
+      timeZone: LIMA_TZ,
+      day: '2-digit',
+      month: 'short',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    }).format(new Date(value))
+  } catch {
+    return value
+  }
+}
+
+const formatTimeLima = (value?: string | null) => {
+  if (!value) return '--:--'
+  try {
+    return new Intl.DateTimeFormat('es-PE', {
+      timeZone: LIMA_TZ,
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    }).format(new Date(value))
+  } catch {
+    return '--:--'
+  }
+}
+
+const formatVacationRangeLabel = (start: string, end: string) => {
+  try {
+    return `${format(toDateAtNoon(start), 'd MMM', { locale: es })} al ${format(toDateAtNoon(end), 'd MMM', { locale: es })}`
+  } catch {
+    return `${start} al ${end}`
+  }
+}
+
+const abrirSoporteWhatsApp = (perfil: Perfil, problemaDetectado?: string | null) => {
+  const fecha = new Intl.DateTimeFormat('es-PE', {
+    timeZone: LIMA_TZ,
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(new Date())
+
+  const mensaje = [
+    '*SOPORTE RUAG JORNADA*',
+    '',
+    `Trabajador: ${perfil.nombres}`,
+    `DNI: ${perfil.dni}`,
+    `Area: ${perfil.area}`,
+    `Fecha: ${fecha}`,
+    'Canal: Web iPhone',
+    problemaDetectado ? `Problema: ${problemaDetectado}` : 'Problema: Necesito ayuda con mi registro.',
+  ].join('\n')
+
+  window.open(`https://wa.me/${SOPORTE_WHATSAPP_NUMBER}?text=${encodeURIComponent(mensaje)}`, '_blank', 'noopener,noreferrer')
 }
 
 // ─── Logros helpers ───────────────────────────────────────────────────────────
@@ -214,6 +323,7 @@ export default function EscanerWeb() {
   // Modals
   const [showLogros, setShowLogros]         = useState(false)
   const [showCalendar, setShowCalendar]     = useState(false)
+  const [showVacations, setShowVacations]   = useState(false)
   const [showNota, setShowNota]             = useState(false)
   const [showObra, setShowObra]             = useState(false)
   const [showExterno, setShowExterno]       = useState(false)
@@ -233,11 +343,109 @@ export default function EscanerWeb() {
   const [historialMes, setHistorialMes]   = useState<Asistencia[]>([])
   const [targetDate, setTargetDate]       = useState(new Date())
   const [selectedDay, setSelectedDay]     = useState<Asistencia | null>(null)
+  const [selectedVacationDay, setSelectedVacationDay] = useState<VacationCalendarDay | null>(null)
   const [loadingCal, setLoadingCal]       = useState(false)
+
+  // Vacations
+  const [vacacionesSaldo, setVacacionesSaldo] = useState<VacacionesSaldo | null>(null)
+  const [vacacionesSolicitudes, setVacacionesSolicitudes] = useState<VacacionSolicitud[]>([])
+  const [loadingVacaciones, setLoadingVacaciones] = useState(false)
+  const [vacacionesError, setVacacionesError] = useState<string | null>(null)
+  const [vacationStart, setVacationStart] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const [vacationEnd, setVacationEnd] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const [vacationComment, setVacationComment] = useState('')
+  const [submittingVacation, setSubmittingVacation] = useState(false)
+  const knownVacationStatusesRef = useRef<Record<string, string>>({})
 
   // Photo
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const cargarVacaciones = async (dniArg?: string | null, withLoader = true) => {
+    const targetDni = dniArg ?? perfil?.dni
+    if (!targetDni) return
+
+    if (withLoader) setLoadingVacaciones(true)
+    setVacacionesError(null)
+
+    try {
+      try {
+        await supabase.rpc('procesar_vencimientos_vacaciones')
+      } catch {
+        // optional
+      }
+
+      const [saldoRes, solicitudesRes] = await Promise.all([
+        supabase
+          .from('vacaciones_saldos')
+          .select('*')
+          .eq('dni', targetDni)
+          .maybeSingle(),
+        supabase
+          .from('vacaciones_solicitudes')
+          .select('*')
+          .eq('dni', targetDni)
+          .order('created_at', { ascending: false }),
+      ])
+
+      if (saldoRes.error) throw saldoRes.error
+      if (solicitudesRes.error) throw solicitudesRes.error
+
+      const solicitudes = (solicitudesRes.data ?? []) as VacacionSolicitud[]
+      setVacacionesSaldo((saldoRes.data ?? null) as VacacionesSaldo | null)
+      setVacacionesSolicitudes(solicitudes)
+      knownVacationStatusesRef.current = solicitudes.reduce<Record<string, string>>((acc, item) => {
+        acc[item.id] = normalizeStatus(item.estado)
+        return acc
+      }, {})
+    } catch (err: any) {
+      setVacacionesError(err?.message || 'No se pudieron cargar tus vacaciones.')
+    } finally {
+      if (withLoader) setLoadingVacaciones(false)
+    }
+  }
+
+  const getApprovedVacationRequestsForDay = (dateKey: string) =>
+    vacacionesSolicitudes.filter((item) =>
+      normalizeStatus(item.estado) === 'aprobada' &&
+      item.fecha_inicio <= dateKey &&
+      item.fecha_fin >= dateKey
+    )
+
+  const handleSolicitarVacaciones = async () => {
+    if (!perfil) return
+
+    const diasSolicitados = differenceInDays(toDateAtNoon(vacationEnd), toDateAtNoon(vacationStart)) + 1
+    if (diasSolicitados <= 0) {
+      toast.error('Selecciona un rango valido.')
+      return
+    }
+
+    setSubmittingVacation(true)
+    try {
+      const { error } = await supabase.from('vacaciones_solicitudes').insert({
+        dni: perfil.dni,
+        trabajador_nombre: vacacionesSaldo?.trabajador_nombre || perfil.nombres,
+        area: vacacionesSaldo?.area || perfil.area,
+        fecha_inicio: vacationStart,
+        fecha_fin: vacationEnd,
+        dias_solicitados: diasSolicitados,
+        comentario: vacationComment.trim() || null,
+      })
+
+      if (error) throw error
+
+      toast.success('Solicitud registrada correctamente.')
+      setVacationComment('')
+      setVacationStart(format(new Date(), 'yyyy-MM-dd'))
+      setVacationEnd(format(new Date(), 'yyyy-MM-dd'))
+      await cargarVacaciones(perfil.dni, false)
+    } catch (err: any) {
+      toast.error(err?.message || 'No se pudo registrar la solicitud.')
+    } finally {
+      setSubmittingVacation(false)
+    }
+  }
 
   // ── Carga inicial ──────────────────────────────────────────────────────────
   useEffect(() => {
@@ -277,6 +485,7 @@ export default function EscanerWeb() {
           const { data: logs } = await supabase.from('logros_usuarios').select('logro_id').eq('dni', p.dni)
           if (logs) setUnlockedLogros(logs.map((l: { logro_id: number }) => l.logro_id))
         } catch { /* ok */ }
+        await cargarVacaciones(p.dni, false)
       }
       setIsLoading(false)
     }
@@ -306,6 +515,54 @@ export default function EscanerWeb() {
     fetchMes()
   }, [showCalendar, targetDate, perfil])
 
+  useEffect(() => {
+    if (!showVacations || !perfil) return
+    void cargarVacaciones(perfil.dni, true)
+  }, [showVacations, perfil])
+
+  useEffect(() => {
+    if (!perfil) return
+
+    const channel = supabase
+      .channel(`vacaciones-worker-${perfil.dni}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'vacaciones_saldos', filter: `dni=eq.${perfil.dni}` },
+        () => {
+          void cargarVacaciones(perfil.dni, false)
+        }
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'vacaciones_solicitudes', filter: `dni=eq.${perfil.dni}` },
+        (payload: any) => {
+          const next = payload?.new
+          const nextId = String(next?.id ?? '')
+          const nextStatus = normalizeStatus(next?.estado)
+
+          if (nextId && nextStatus) {
+            const prevStatus = knownVacationStatusesRef.current[nextId]
+            if (prevStatus && prevStatus !== nextStatus) {
+              const rango = formatVacationRangeLabel(String(next.fecha_inicio ?? ''), String(next.fecha_fin ?? ''))
+              if (nextStatus === 'aprobada') {
+                toast.success('Vacaciones aprobadas', { description: `Tu solicitud del ${rango} fue aprobada.` })
+              } else if (nextStatus === 'cancelada') {
+                toast.error('Vacaciones rechazadas', { description: `Tu solicitud del ${rango} fue rechazada.` })
+              }
+            }
+            knownVacationStatusesRef.current[nextId] = nextStatus
+          }
+
+          void cargarVacaciones(perfil.dni, false)
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [perfil])
+
   // ── Helpers ────────────────────────────────────────────────────────────────
 
   const mostrarExito = (msg: string) => { setMensaje(msg); setScanState('EXITO') }
@@ -316,7 +573,7 @@ export default function EscanerWeb() {
 
   const unlockAndAnimate = (ids: number[]) => {
     if (!ids.length) return
-    setUnlockedLogros(prev => [...prev, ...ids])
+    setUnlockedLogros(prev => Array.from(new Set([...prev, ...ids])))
     setTimeout(() => {
       const l = TODOS_LOS_LOGROS.find(x => x.id === ids[0])
       if (l) setAchievement(l)
@@ -572,23 +829,32 @@ export default function EscanerWeb() {
           const day  = i + 1
           const dStr = `${y}-${String(mo + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
           const e    = historialMes.find(x => x.fecha === dStr)
+          const vacationRequests = getApprovedVacationRequestsForDay(dStr)
+          const hasVacation = vacationRequests.length > 0
           const isPuntual  = e?.estado_ingreso === 'PUNTUAL'
           const isTardanza = e?.estado_ingreso === 'TARDANZA'
+          const isInteractive = Boolean(e) || hasVacation
 
           return (
             <motion.button
               key={day}
-              disabled={!e}
-              onClick={() => e && setSelectedDay(e)}
+              disabled={!isInteractive}
+              onClick={() => {
+                if (hasVacation) {
+                  setSelectedVacationDay({ fecha: dStr, solicitudes: vacationRequests })
+                } else if (e) {
+                  setSelectedDay(e)
+                }
+              }}
               className="aspect-square rounded-xl flex items-center justify-center text-sm font-bold border transition-all"
               style={{
-                background:   isPuntual ? 'var(--green-light)' : isTardanza ? 'var(--red-light)' : 'var(--surface-2)',
-                borderColor:  isPuntual ? '#6EE7B7' : isTardanza ? '#FCA5A5' : 'var(--border)',
-                color:        isPuntual ? 'var(--green)' : isTardanza ? 'var(--red)' : 'var(--text-3)',
-                opacity:      !e ? 0.5 : 1,
+                background:   hasVacation ? 'var(--blue-light)' : isPuntual ? 'var(--green-light)' : isTardanza ? 'var(--red-light)' : 'var(--surface-2)',
+                borderColor:  hasVacation ? '#93C5FD' : isPuntual ? '#6EE7B7' : isTardanza ? '#FCA5A5' : 'var(--border)',
+                color:        hasVacation ? 'var(--blue)' : isPuntual ? 'var(--green)' : isTardanza ? 'var(--red)' : 'var(--text-3)',
+                opacity:      !isInteractive ? 0.5 : 1,
               }}
-              whileHover={e ? { scale: 1.1 } : {}}
-              whileTap={e ? { scale: 0.95 } : {}}
+              whileHover={isInteractive ? { scale: 1.1 } : {}}
+              whileTap={isInteractive ? { scale: 0.95 } : {}}
             >
               {day}
             </motion.button>
@@ -619,6 +885,12 @@ export default function EscanerWeb() {
   const isPuntual   = asistenciaHoy?.estado_ingreso === 'PUNTUAL'
   const statusColor = isPuntual ? 'var(--green)' : 'var(--red)'
   const statusBg    = isPuntual ? 'var(--green-light)' : 'var(--red-light)'
+  const approvedVacationDays = vacacionesSolicitudes
+    .filter((item) => normalizeStatus(item.estado) === 'aprobada')
+    .reduce((sum, item) => sum + num(item.dias_solicitados), 0)
+  const pendingDisplay = vacacionesSaldo ? num(vacacionesSaldo.dias_pendientes) - approvedVacationDays : 0
+  const gozadosDisplay = vacacionesSaldo ? num(vacacionesSaldo.total_gozados) + approvedVacationDays : 0
+  const diasSolicitadosPreview = differenceInDays(toDateAtNoon(vacationEnd), toDateAtNoon(vacationStart)) + 1
 
   return (
     <div
@@ -661,13 +933,36 @@ export default function EscanerWeb() {
                 <p className="text-xs font-semibold" style={{ color: 'var(--text-3)' }}>Registra tu asistencia</p>
               </div>
             </div>
-            <button
-              onClick={() => setShowCalendar(true)}
-              className="w-10 h-10 rounded-2xl flex items-center justify-center transition-all"
-              style={{ background: 'var(--surface)', border: '1.5px solid var(--border)', boxShadow: 'var(--shadow-sm)', color: 'var(--text-2)' }}
-            >
-              <History size={18} />
-            </button>
+            <div className="flex gap-2">
+              <motion.button
+                onClick={() => setShowLogros(true)}
+                className="w-10 h-10 rounded-2xl flex items-center justify-center border transition-all"
+                style={{ background: 'var(--gold-light)', borderColor: '#FDE68A', color: 'var(--gold)', boxShadow: 'var(--shadow-sm)' }}
+                whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.92 }}>
+                <Trophy size={18} />
+              </motion.button>
+              <motion.button
+                onClick={() => setShowCalendar(true)}
+                className="w-10 h-10 rounded-2xl flex items-center justify-center border transition-all"
+                style={{ background: 'var(--surface)', borderColor: 'var(--border)', color: 'var(--text-2)', boxShadow: 'var(--shadow-sm)' }}
+                whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.92 }}>
+                <History size={18} />
+              </motion.button>
+              <motion.button
+                onClick={() => setShowVacations(true)}
+                className="w-10 h-10 rounded-2xl flex items-center justify-center border transition-all"
+                style={{ background: 'var(--blue-light)', borderColor: '#BFDBFE', color: 'var(--blue)', boxShadow: 'var(--shadow-sm)' }}
+                whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.92 }}>
+                <PlaneTakeoff size={18} />
+              </motion.button>
+              <motion.button
+                onClick={() => abrirSoporteWhatsApp(perfil)}
+                className="w-10 h-10 rounded-2xl flex items-center justify-center transition-all"
+                style={{ background: 'linear-gradient(135deg, #22C55E, #10B981)', color: 'white', boxShadow: '0 8px 20px rgba(16,185,129,0.28)' }}
+                whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.92 }}>
+                <Phone size={18} />
+              </motion.button>
+            </div>
           </div>
 
           {/* Camera box */}
@@ -811,6 +1106,16 @@ export default function EscanerWeb() {
                 whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
                 <History size={18} />
               </motion.button>
+              <motion.button onClick={() => setShowVacations(true)} className="w-10 h-10 rounded-2xl flex items-center justify-center border transition-all"
+                style={{ background: 'var(--blue-light)', borderColor: '#BFDBFE', color: 'var(--blue)', boxShadow: 'var(--shadow-sm)' }}
+                whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
+                <PlaneTakeoff size={18} />
+              </motion.button>
+              <motion.button onClick={() => abrirSoporteWhatsApp(perfil)} className="w-10 h-10 rounded-2xl flex items-center justify-center transition-all"
+                style={{ background: 'linear-gradient(135deg, #22C55E, #10B981)', color: 'white', boxShadow: '0 8px 20px rgba(16,185,129,0.28)' }}
+                whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
+                <Phone size={18} />
+              </motion.button>
             </div>
           </div>
 
@@ -901,7 +1206,7 @@ export default function EscanerWeb() {
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-[0.15em] mb-1" style={{ color: 'var(--text-3)' }}>Ingreso Hoy</p>
                   <p className="text-2xl font-black" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>
-                    {asistenciaHoy.hora_ingreso ? format(new Date(asistenciaHoy.hora_ingreso), 'hh:mm a') : '--:--'}
+                    {formatTimeLima(asistenciaHoy.hora_ingreso)}
                   </p>
                 </div>
                 <div className="text-right">
@@ -1251,6 +1556,10 @@ export default function EscanerWeb() {
                       <div className="w-3 h-3 rounded-full" style={{ background: 'var(--red)', boxShadow: '0 0 8px rgba(220,38,38,0.4)' }} />
                       <span className="text-xs font-semibold" style={{ color: 'var(--text-2)' }}>Tardanza</span>
                     </div>
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 rounded-full" style={{ background: 'var(--blue)', boxShadow: '0 0 8px rgba(37,99,235,0.38)' }} />
+                      <span className="text-xs font-semibold" style={{ color: 'var(--text-2)' }}>Vacaciones</span>
+                    </div>
                   </div>
                 </div>
               )}
@@ -1260,6 +1569,272 @@ export default function EscanerWeb() {
       </AnimatePresence>
 
       {/* ── Detalle del día ───────────────────────────────────────────────── */}
+      <AnimatePresence>
+        {showVacations && (
+          <motion.div className="fixed inset-0 z-50 flex items-end justify-center"
+            style={{ background: 'rgba(30,27,75,0.45)', backdropFilter: 'blur(8px)' }}
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={() => !submittingVacation && setShowVacations(false)}>
+            <motion.div
+              className="w-full max-w-lg rounded-t-[32px] p-6 pb-10 flex flex-col"
+              style={{ background: 'var(--surface)', boxShadow: '0 -20px 60px rgba(30,27,75,0.15)', maxHeight: '92vh', border: '1.5px solid var(--border)', borderBottom: 'none' }}
+              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+              transition={{ type: 'spring', stiffness: 380, damping: 36 }}
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="w-12 h-1.5 rounded-full mx-auto mb-6" style={{ background: 'var(--border-2)' }} />
+              <div className="flex items-center justify-between gap-3 mb-5">
+                <div className="flex items-center gap-3">
+                  <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: 'var(--blue-light)', border: '1.5px solid var(--border-2)' }}>
+                    <PlaneTakeoff size={22} style={{ color: 'var(--blue)' }} />
+                  </div>
+                  <div>
+                    <h3 className="font-black text-lg" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>Mis Vacaciones</h3>
+                    <p className="text-sm font-semibold" style={{ color: 'var(--text-3)' }}>Consulta tu saldo y solicita dias desde aqui.</p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <motion.button
+                    onClick={() => void cargarVacaciones(perfil.dni, true)}
+                    className="w-10 h-10 rounded-2xl flex items-center justify-center border transition-all"
+                    style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text-2)' }}
+                    whileHover={{ scale: 1.06 }} whileTap={{ scale: 0.94 }}>
+                    <RefreshCw size={17} />
+                  </motion.button>
+                  <button
+                    onClick={() => !submittingVacation && setShowVacations(false)}
+                    className="w-10 h-10 rounded-2xl flex items-center justify-center border"
+                    style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text-2)' }}>
+                    <X size={16} />
+                  </button>
+                </div>
+              </div>
+              <div className="overflow-y-auto scrollbar-hide flex-1 pr-1">
+                {loadingVacaciones ? (
+                  <div className="flex min-h-[240px] items-center justify-center">
+                    <Loader2 className="animate-spin" size={32} style={{ color: 'var(--blue)' }} />
+                  </div>
+                ) : (
+                  <div className="space-y-4 pb-2">
+                    {vacacionesError && (
+                      <div className="rounded-2xl px-4 py-3 text-sm font-semibold" style={{ background: 'var(--red-light)', color: 'var(--red)', border: '1.5px solid #FCA5A5' }}>
+                        {vacacionesError}
+                      </div>
+                    )}
+                    {vacacionesSaldo ? (
+                      <div className="rounded-3xl p-5" style={{ background: 'var(--surface-2)', border: '1.5px solid var(--border)' }}>
+                        <p className="text-lg font-black" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>
+                          {vacacionesSaldo.trabajador_nombre}
+                        </p>
+                        <p className="text-sm font-semibold mt-1" style={{ color: 'var(--text-3)' }}>
+                          {(vacacionesSaldo.area || perfil.area || 'Sin area')} · {(vacacionesSaldo.cargo || 'Sin cargo')}
+                        </p>
+                        <div className="grid grid-cols-2 gap-3 mt-5">
+                          {[
+                            { label: 'Pendientes', value: pendingDisplay, color: 'var(--green)', bg: 'var(--green-light)', icon: <Wallet size={16} /> },
+                            { label: 'Gozados', value: gozadosDisplay, color: 'var(--blue)', bg: 'var(--blue-light)', icon: <PlaneTakeoff size={16} /> },
+                            { label: 'Arrastre', value: num(vacacionesSaldo.saldo_arrastre), color: 'var(--text-2)', bg: 'var(--surface)', icon: <History size={16} /> },
+                            { label: 'Extra', value: num(vacacionesSaldo.dias_extra), color: '#D97706', bg: '#FEF3C7', icon: <Calendar size={16} /> },
+                          ].map((item) => (
+                            <div key={item.label} className="rounded-2xl p-4 border" style={{ background: item.bg, borderColor: 'var(--border)' }}>
+                              <div className="flex items-center justify-between gap-3">
+                                <span className="text-[11px] font-black uppercase tracking-[0.12em]" style={{ color: item.color }}>{item.label}</span>
+                                <span style={{ color: item.color }}>{item.icon}</span>
+                              </div>
+                              <p className="mt-3 text-2xl font-black" style={{ color: item.color, fontFamily: 'Syne, sans-serif' }}>{item.value}</p>
+                            </div>
+                          ))}
+                        </div>
+                        <div className="mt-4 rounded-2xl px-4 py-3 border" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
+                          <p className="text-[10px] font-black uppercase tracking-[0.14em]" style={{ color: 'var(--text-3)' }}>Vencimiento actual</p>
+                          <p className="mt-1 text-sm font-black" style={{ color: 'var(--text-1)' }}>{formatShortDate(vacacionesSaldo.fecha_vencimiento)}</p>
+                          <p className="mt-1 text-xs font-medium" style={{ color: 'var(--text-3)' }}>
+                            Al aprobarse, los dias bajan de pendientes y suben a gozados en tiempo real.
+                          </p>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="rounded-3xl p-5 text-center" style={{ background: 'var(--surface-2)', border: '1.5px dashed var(--border)' }}>
+                        <p className="font-black text-base" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>Sin saldo importado</p>
+                        <p className="text-sm mt-2" style={{ color: 'var(--text-3)' }}>
+                          Todavia no encontramos vacaciones cargadas para tu DNI en la hoja 2026.
+                        </p>
+                      </div>
+                    )}
+                    {vacacionesSaldo && (
+                      <div className="rounded-3xl p-5" style={{ background: 'var(--surface)', border: '1.5px solid var(--border)', boxShadow: 'var(--shadow-sm)' }}>
+                        <div className="flex items-start justify-between gap-3 mb-4">
+                          <div>
+                            <h4 className="font-black text-base" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>Solicitar vacaciones</h4>
+                            <p className="text-xs font-semibold mt-1" style={{ color: 'var(--text-3)' }}>
+                              Puedes pedirlas aunque tu saldo quede en positivo o negativo.
+                            </p>
+                          </div>
+                          <span className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black" style={{ background: 'var(--blue-light)', color: 'var(--blue)' }}>
+                            {diasSolicitadosPreview > 0 ? `${diasSolicitadosPreview} dia(s)` : 'Rango invalido'}
+                          </span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3">
+                          <label className="rounded-2xl p-4 border" style={{ background: 'var(--surface-2)', borderColor: 'var(--border)' }}>
+                            <p className="text-[10px] font-black uppercase tracking-[0.12em]" style={{ color: 'var(--text-3)' }}>Desde</p>
+                            <input type="date" value={vacationStart} onChange={e => setVacationStart(e.target.value)}
+                              className="mt-2 w-full bg-transparent text-sm font-bold outline-none" style={{ color: 'var(--text-1)' }} />
+                          </label>
+                          <label className="rounded-2xl p-4 border" style={{ background: 'var(--surface-2)', borderColor: 'var(--border)' }}>
+                            <p className="text-[10px] font-black uppercase tracking-[0.12em]" style={{ color: 'var(--text-3)' }}>Hasta</p>
+                            <input type="date" value={vacationEnd} onChange={e => setVacationEnd(e.target.value)}
+                              className="mt-2 w-full bg-transparent text-sm font-bold outline-none" style={{ color: 'var(--text-1)' }} />
+                          </label>
+                        </div>
+                        <div className="mt-3 rounded-2xl border" style={{ background: 'var(--surface-2)', borderColor: 'var(--border)' }}>
+                          <textarea
+                            value={vacationComment}
+                            onChange={e => setVacationComment(e.target.value)}
+                            rows={3}
+                            placeholder="Comentario opcional para RRHH o jefatura..."
+                            className="w-full resize-none rounded-2xl bg-transparent p-4 text-sm outline-none"
+                            style={{ color: 'var(--text-1)' }}
+                          />
+                        </div>
+                        <div className="mt-4 rounded-2xl px-4 py-3 border" style={{ background: 'var(--blue-light)', borderColor: '#BFDBFE' }}>
+                          <p className="text-xs font-semibold" style={{ color: 'var(--blue)' }}>
+                            Resumen: {Math.max(diasSolicitadosPreview, 0)} dia(s) calendario · saldo visible actual {pendingDisplay}
+                          </p>
+                        </div>
+                        <motion.button
+                          onClick={handleSolicitarVacaciones}
+                          disabled={submittingVacation || diasSolicitadosPreview <= 0}
+                          className="mt-4 w-full py-4 rounded-2xl font-black text-sm text-white flex items-center justify-center gap-2 disabled:opacity-50"
+                          style={{ background: 'var(--blue)', boxShadow: 'var(--shadow-md)' }}
+                          whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
+                        >
+                          {submittingVacation ? <Loader2 className="animate-spin" size={18} /> : <><PlaneTakeoff size={16} /> SOLICITAR VACACIONES</>}
+                        </motion.button>
+                      </div>
+                    )}
+                    <div className="rounded-3xl p-5" style={{ background: 'var(--surface)', border: '1.5px solid var(--border)', boxShadow: 'var(--shadow-sm)' }}>
+                      <h4 className="font-black text-base" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>Historial de solicitudes</h4>
+                      <p className="text-xs font-semibold mt-1 mb-4" style={{ color: 'var(--text-3)' }}>
+                        Cuando una solicitud queda aprobada, tu saldo visible se recalcula automaticamente.
+                      </p>
+                      {vacacionesSolicitudes.length === 0 ? (
+                        <div className="rounded-2xl border px-4 py-8 text-center text-sm font-semibold" style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text-3)' }}>
+                          Aun no tienes solicitudes registradas.
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {vacacionesSolicitudes.map((item) => {
+                            const status = normalizeStatus(item.estado)
+                            const badgeBg = status === 'aprobada' ? 'var(--green-light)' : status === 'cancelada' ? 'var(--red-light)' : '#FEF3C7'
+                            const badgeColor = status === 'aprobada' ? 'var(--green)' : status === 'cancelada' ? 'var(--red)' : '#B45309'
+                            return (
+                              <div key={item.id} className="rounded-2xl p-4 border" style={{ background: 'var(--surface-2)', borderColor: 'var(--border)' }}>
+                                <div className="flex items-start justify-between gap-3">
+                                  <div>
+                                    <p className="text-sm font-black" style={{ color: 'var(--text-1)' }}>
+                                      {formatVacationRangeLabel(item.fecha_inicio, item.fecha_fin)}
+                                    </p>
+                                    <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
+                                      {num(item.dias_solicitados)} dia(s)
+                                    </p>
+                                  </div>
+                                  <span className="inline-flex rounded-full px-3 py-1 text-[10px] font-black uppercase"
+                                    style={{ background: badgeBg, color: badgeColor }}>
+                                    {status === 'cancelada' ? 'rechazada' : status}
+                                  </span>
+                                </div>
+                                {(item.saldo_antes != null || item.saldo_despues != null) && (
+                                  <div className="mt-3 flex items-center justify-between rounded-xl px-3 py-2 border"
+                                    style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
+                                    <span className="text-[11px] font-black uppercase tracking-[0.12em]" style={{ color: 'var(--text-3)' }}>Saldo</span>
+                                    <span className="text-sm font-black" style={{ color: 'var(--text-1)' }}>
+                                      {item.saldo_antes ?? '—'} {'->'} {item.saldo_despues ?? '—'}
+                                    </span>
+                                  </div>
+                                )}
+                                {item.comentario && (
+                                  <p className="mt-3 text-sm leading-relaxed" style={{ color: 'var(--text-2)' }}>
+                                    {item.comentario}
+                                  </p>
+                                )}
+                                {item.created_at && (
+                                  <p className="mt-3 text-[11px] font-medium" style={{ color: 'var(--text-3)' }}>
+                                    Registrada: {formatDateTimeLabel(item.created_at)}
+                                  </p>
+                                )}
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {selectedVacationDay && (
+          <motion.div className="fixed inset-0 z-[60] flex items-center justify-center p-5"
+            style={{ background: 'rgba(30,27,75,0.5)', backdropFilter: 'blur(12px)' }}
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={() => setSelectedVacationDay(null)}>
+            <motion.div
+              className="w-full max-w-sm rounded-3xl p-7 relative overflow-hidden"
+              style={{ background: 'var(--surface)', boxShadow: 'var(--shadow-lg)', border: '1.5px solid var(--border)' }}
+              initial={{ scale: 0.9, y: 16 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.9, y: 16 }}
+              transition={{ type: 'spring', stiffness: 450, damping: 30 }}
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="absolute top-0 left-0 right-0 h-24 opacity-40"
+                style={{ background: 'linear-gradient(to bottom, rgba(37,99,235,0.2), transparent)' }} />
+              <div className="flex flex-col items-center text-center relative z-10">
+                <div className="w-16 h-16 rounded-full flex items-center justify-center mb-4" style={{ background: 'var(--blue-light)' }}>
+                  <PlaneTakeoff size={32} style={{ color: 'var(--blue)' }} />
+                </div>
+                <h3 className="text-2xl font-black capitalize" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>
+                  {format(parseISO(selectedVacationDay.fecha), "EEEE dd", { locale: es })}
+                </h3>
+                <p className="text-sm font-medium capitalize mt-0.5" style={{ color: 'var(--text-3)' }}>
+                  {format(parseISO(selectedVacationDay.fecha), "MMMM yyyy", { locale: es })}
+                </p>
+                <span className="mt-3 px-4 py-1.5 rounded-lg text-xs font-black tracking-wider uppercase"
+                  style={{ background: 'var(--blue-light)', color: 'var(--blue)', border: '1.5px solid #93C5FD' }}>
+                  Vacaciones aprobadas
+                </span>
+                <div className="w-full mt-6 space-y-3">
+                  {selectedVacationDay.solicitudes.map((item) => (
+                    <div key={item.id} className="rounded-2xl p-4 text-left"
+                      style={{ background: 'var(--surface-2)', border: '1.5px solid var(--border)' }}>
+                      <p className="text-sm font-black" style={{ color: 'var(--text-1)' }}>
+                        {formatVacationRangeLabel(item.fecha_inicio, item.fecha_fin)}
+                      </p>
+                      <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
+                        {num(item.dias_solicitados)} dia(s) aprobados
+                      </p>
+                      {item.comentario && (
+                        <p className="text-sm mt-3 leading-relaxed" style={{ color: 'var(--text-2)' }}>
+                          {item.comentario}
+                        </p>
+                      )}
+                    </div>
+                  ))}
+                </div>
+                <motion.button onClick={() => setSelectedVacationDay(null)}
+                  className="w-full mt-6 py-4 rounded-2xl font-bold text-sm"
+                  style={{ background: 'var(--surface-2)', color: 'var(--text-2)', border: '1.5px solid var(--border)' }}
+                  whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}>
+                  Cerrar
+                </motion.button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <AnimatePresence>
         {selectedDay && (
           <motion.div className="fixed inset-0 z-[60] flex items-center justify-center p-5"
@@ -1303,8 +1878,8 @@ export default function EscanerWeb() {
 
                 <div className="w-full flex gap-3 mt-6">
                   {[
-                    { label: 'INGRESO', time: selectedDay.hora_ingreso ? format(new Date(selectedDay.hora_ingreso), 'hh:mm a') : '--:--' },
-                    { label: 'SALIDA',  time: selectedDay.hora_salida  ? format(new Date(selectedDay.hora_salida),  'hh:mm a') : '--:--' },
+                    { label: 'INGRESO', time: formatTimeLima(selectedDay.hora_ingreso) },
+                    { label: 'SALIDA',  time: formatTimeLima(selectedDay.hora_salida) },
                   ].map(({ label, time }) => (
                     <div key={label} className="flex-1 rounded-2xl p-4 text-center"
                       style={{ background: 'var(--surface-2)', border: '1.5px solid var(--border)' }}>

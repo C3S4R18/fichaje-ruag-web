@@ -6,6 +6,7 @@ import { supabase } from '@/utils/supabase/client'
 import { motion, AnimatePresence } from 'framer-motion'
 import { format, isToday, subDays, addDays } from 'date-fns'
 import { es } from 'date-fns/locale'
+import Link from 'next/link'
 import {
   CalendarDays, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle,
   LogOut, UserPlus, Loader2, Search, FileSpreadsheet, SlidersHorizontal,
@@ -524,6 +525,10 @@ export default function AdminDashboard() {
               className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 border border-emerald-200 dark:border-emerald-500/20 text-[11px] font-black transition-all active:scale-95 tracking-wider">
               <FileSpreadsheet size={13} /> EXCEL
             </button>
+            <Link href="/vacaciones"
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-sky-50 dark:bg-sky-500/10 text-sky-700 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-500/20 border border-sky-200 dark:border-sky-500/20 text-[11px] font-black transition-all active:scale-95 tracking-wider">
+              <CalendarDays size={13} /> VACACIONES
+            </Link>
             <button onClick={() => fetchData(fechaActual)}
               className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-[11px] font-black transition-all active:scale-95 tracking-wider">
               <RefreshCw size={12} /> ACTUALIZAR

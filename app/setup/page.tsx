@@ -238,6 +238,29 @@ export default function SetupProfileWeb() {
           Sube una foto clara de tu rostro para el registro.
         </p>
 
+        <div
+          className="w-full mb-8 rounded-3xl p-5"
+          style={{ background: 'var(--surface)', border: '1.5px solid var(--border)', boxShadow: 'var(--shadow-sm)' }}
+        >
+          <p className="text-[10px] font-black uppercase tracking-[0.18em] mb-3" style={{ color: 'var(--blue)' }}>
+            Modo iPhone
+          </p>
+          <p className="text-sm font-semibold leading-relaxed" style={{ color: 'var(--text-2)' }}>
+            Despues del registro tendras el mismo flujo web del trabajador: escaneo, historial, logros, vacaciones y soporte.
+          </p>
+          <div className="flex flex-wrap gap-2 mt-4">
+            {['Escaner', 'Historial', 'Logros', 'Vacaciones', 'Soporte'].map((item) => (
+              <span
+                key={item}
+                className="rounded-full px-3 py-1.5 text-[11px] font-black"
+                style={{ background: 'var(--blue-light)', color: 'var(--blue)', border: '1px solid var(--border-2)' }}
+              >
+                {item}
+              </span>
+            ))}
+          </div>
+        </div>
+
         {/* Avatar */}
         <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageChange} className="hidden" />
 
