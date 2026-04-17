@@ -34,6 +34,12 @@ function normalizeName(name) {
     .toUpperCase()
 }
 
+function makeSyntheticDni(row) {
+  const code = (row.codigo_excel ?? '').toString().trim()
+  if (code) return `EXCEL-${code}`
+  return `EXCEL-${normalizeName(row.trabajador_nombre).replace(/\s+/g, '-')}`
+}
+
 function levenshtein(a, b) {
   const m = a.length
   const n = b.length
@@ -181,7 +187,7 @@ function buildRows(sheet) {
     const cargo = (row[2] ?? '').toString().trim()
 
     if (!nombre) continue
-    if (/^AREA DE/i.test(nombre)) {
+    if (/^AREA\b/i.test(nombre)) {
       currentArea = nombre.toUpperCase()
       continue
     }
@@ -248,26 +254,43 @@ async function main() {
   }
 
   const excelRows = buildRows(sheet)
-  const { data: perfiles, error: perfilesError } = await supabase
-    .from('fotocheck_perfiles')
-    .select('dni, nombres_completos, area')
+  const [{ data: perfiles, error: perfilesError }, { data: existingVacaciones, error: existingVacacionesError }] = await Promise.all([
+    supabase
+      .from('fotocheck_perfiles')
+      .select('dni, nombres_completos, area'),
+    supabase
+      .from('vacaciones_saldos')
+      .select('id, dni, trabajador_nombre')
+      .eq('periodo', periodo),
+  ])
 
   if (perfilesError) throw perfilesError
+  if (existingVacacionesError) throw existingVacacionesError
+
+  const existingByName = new Map()
+  for (const item of existingVacaciones ?? []) {
+    const key = normalizeName(item.trabajador_nombre)
+    const current = existingByName.get(key)
+    if (!current || String(current.dni).startsWith('EXCEL-')) {
+      existingByName.set(key, item)
+    }
+  }
 
   const matched = []
   const unmatched = []
+  const importedWithoutProfile = []
+  const placeholderProfiles = []
+  const desiredDniByName = new Map()
 
   for (const row of excelRows) {
     const match = findBestProfile(row.trabajador_nombre, perfiles ?? [])
-    if (!match) {
-      unmatched.push(row.trabajador_nombre)
-      continue
-    }
-
+    const existing = existingByName.get(normalizeName(row.trabajador_nombre))
+    const dni = match?.perfil.dni || existing?.dni || makeSyntheticDni(row)
+    desiredDniByName.set(normalizeName(row.trabajador_nombre), dni)
     matched.push({
-      dni: match.perfil.dni,
+      dni,
       trabajador_nombre: row.trabajador_nombre,
-      area: row.area || match.perfil.area || null,
+      area: row.area || match?.perfil.area || null,
       cargo: row.cargo,
       codigo_excel: row.codigo_excel,
       periodo,
@@ -291,10 +314,29 @@ async function main() {
       vacaciones_por_vencer: row.vacaciones_por_vencer,
       vacaciones_pendientes_periodo: row.vacaciones_pendientes_periodo,
     })
+
+    if (!match) {
+      unmatched.push(row.trabajador_nombre)
+      importedWithoutProfile.push(row.trabajador_nombre)
+      placeholderProfiles.push({
+        dni,
+        nombres_completos: row.trabajador_nombre,
+        area: row.area || 'SIN AREA',
+        foto_url: '',
+      })
+    }
   }
 
   if (!matched.length) {
     throw new Error('No hubo coincidencias entre el Excel y fotocheck_perfiles')
+  }
+
+  if (placeholderProfiles.length) {
+    const { error: profilesUpsertError } = await supabase
+      .from('fotocheck_perfiles')
+      .upsert(placeholderProfiles, { onConflict: 'dni' })
+
+    if (profilesUpsertError) throw profilesUpsertError
   }
 
   const { error: upsertError } = await supabase
@@ -303,11 +345,25 @@ async function main() {
 
   if (upsertError) throw upsertError
 
+  const duplicateRowsToDelete = (existingVacaciones ?? []).filter((item) => {
+    const desiredDni = desiredDniByName.get(normalizeName(item.trabajador_nombre))
+    return desiredDni && desiredDni !== item.dni
+  })
+
+  if (duplicateRowsToDelete.length) {
+    const { error: deleteError } = await supabase
+      .from('vacaciones_saldos')
+      .delete()
+      .in('id', duplicateRowsToDelete.map((item) => item.id))
+
+    if (deleteError) throw deleteError
+  }
+
   console.log(`Importados: ${matched.length}`)
   console.log(`Sin match: ${unmatched.length}`)
   if (unmatched.length) {
-    console.log('Trabajadores sin match confiable:')
-    unmatched.forEach((name) => console.log(`- ${name}`))
+    console.log('Trabajadores importados sin match en fotocheck_perfiles:')
+    importedWithoutProfile.forEach((name) => console.log(`- ${name}`))
   }
 }
 

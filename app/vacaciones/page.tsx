@@ -12,8 +12,10 @@ import {
   CheckCircle2,
   Download,
   Loader2,
+  Pencil,
   RefreshCw,
   Search,
+  UserPlus,
   X,
   XCircle,
 } from 'lucide-react'
@@ -76,6 +78,19 @@ type MonthDetail = {
   requests: RequestRow[]
 }
 
+type EditorDraft = {
+  id?: string
+  dni: string
+  trabajador_nombre: string
+  area: string
+  cargo: string
+  codigo_excel: string
+  saldo_arrastre: string
+  dias_pendientes: string
+  fecha_vencimiento: string
+  vacaciones_por_vencer: string
+}
+
 const months: MonthCol[] = [
   { key: 'gozados_ene', label: 'ENE', monthIndex: 0 },
   { key: 'gozados_feb', label: 'FEB', monthIndex: 1 },
@@ -91,9 +106,59 @@ const months: MonthCol[] = [
   { key: 'gozados_dic', label: 'DIC', monthIndex: 11 },
 ]
 
+const preferredAreaOrder = [
+  'AREA DE GERENCIA',
+  'AREA DE PRESUPUESTO',
+  'AREA DE OPERACIONES',
+  'AREA CONTABLE',
+  'AREA DE FINANZAS',
+  'AREA DE LOGISTICA',
+  'AREA DE REGURSOS HUMANOS',
+  'AREA DE SEGURIDAD',
+  'AREA COMERCIAL',
+]
+
 const num = (value: unknown) => {
   const parsed = Number(value ?? 0)
   return Number.isFinite(parsed) ? parsed : 0
+}
+
+const cloneDeep = <T,>(value: T): T => JSON.parse(JSON.stringify(value))
+
+const normalizeTemplateName = (value: string | null | undefined) =>
+  String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^A-Za-z0-9]+/g, ' ')
+    .trim()
+    .toUpperCase()
+
+function toExcelSerial(value: string | null) {
+  if (!value) return ''
+  const date = asDate(value)
+  return Math.floor((Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()) - Date.UTC(1899, 11, 30)) / 86400000)
+}
+
+function formatCommentDate(value: string) {
+  return format(asDate(value), 'dd/MM', { locale: es })
+}
+
+const blankDraft = (): EditorDraft => ({
+  dni: '',
+  trabajador_nombre: '',
+  area: '',
+  cargo: '',
+  codigo_excel: '',
+  saldo_arrastre: '0',
+  dias_pendientes: '0',
+  fecha_vencimiento: '',
+  vacaciones_por_vencer: '0',
+})
+
+function areaSortValue(value: string | null) {
+  const normalized = String(value ?? 'SIN AREA').trim().toUpperCase()
+  const index = preferredAreaOrder.indexOf(normalized)
+  return index === -1 ? preferredAreaOrder.length + 100 : index
 }
 
 const asDate = (value: string) => new Date(value.includes('T') ? value : `${value}T12:00:00`)
@@ -160,6 +225,94 @@ function MonthModal({ detail, onClose }: { detail: MonthDetail | null; onClose: 
   )
 }
 
+function EditorModal({
+  open,
+  draft,
+  setDraft,
+  onClose,
+  onSave,
+  saving,
+  isEdit,
+  areaSuggestions,
+}: {
+  open: boolean
+  draft: EditorDraft
+  setDraft: (next: EditorDraft) => void
+  onClose: () => void
+  onSave: () => void
+  saving: boolean
+  isEdit: boolean
+  areaSuggestions: string[]
+}) {
+  if (!open) return null
+
+  const update = (key: keyof EditorDraft, value: string) => setDraft({ ...draft, [key]: value })
+
+  return (
+    <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-2xl rounded-3xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between border-b border-slate-200 p-5 dark:border-slate-800">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">RRHH</p>
+            <h3 className="mt-1 text-lg font-black text-slate-900 dark:text-white">{isEdit ? 'Editar trabajador' : 'Nuevo trabajador'}</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">Actualiza categoria, cargo y datos base para vacaciones.</p>
+          </div>
+          <button onClick={onClose} className="rounded-xl border border-slate-200 p-2 dark:border-slate-700"><X size={16} /></button>
+        </div>
+
+        <div className="grid gap-4 p-5 sm:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">DNI</label>
+            <input value={draft.dni} onChange={(e) => update('dni', e.target.value.toUpperCase())} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium outline-none dark:border-slate-700 dark:bg-slate-950" />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">Codigo Excel</label>
+            <input value={draft.codigo_excel} onChange={(e) => update('codigo_excel', e.target.value.toUpperCase())} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium outline-none dark:border-slate-700 dark:bg-slate-950" />
+          </div>
+          <div className="sm:col-span-2">
+            <label className="mb-1 block text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">Trabajador</label>
+            <input value={draft.trabajador_nombre} onChange={(e) => update('trabajador_nombre', e.target.value.toUpperCase())} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium outline-none dark:border-slate-700 dark:bg-slate-950" />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">Categoria / Area</label>
+            <input list="vac-area-suggestions" value={draft.area} onChange={(e) => update('area', e.target.value.toUpperCase())} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium outline-none dark:border-slate-700 dark:bg-slate-950" />
+            <datalist id="vac-area-suggestions">
+              {areaSuggestions.map((item) => <option key={item} value={item} />)}
+            </datalist>
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">Cargo</label>
+            <input value={draft.cargo} onChange={(e) => update('cargo', e.target.value.toUpperCase())} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium outline-none dark:border-slate-700 dark:bg-slate-950" />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">Saldo arrastre</label>
+            <input type="number" value={draft.saldo_arrastre} onChange={(e) => update('saldo_arrastre', e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium outline-none dark:border-slate-700 dark:bg-slate-950" />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">Pendientes año previo</label>
+            <input type="number" value={draft.dias_pendientes} onChange={(e) => update('dias_pendientes', e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium outline-none dark:border-slate-700 dark:bg-slate-950" />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">Fecha vencimiento</label>
+            <input type="date" value={draft.fecha_vencimiento} onChange={(e) => update('fecha_vencimiento', e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium outline-none dark:border-slate-700 dark:bg-slate-950" />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">Vacaciones por vencer</label>
+            <input type="number" value={draft.vacaciones_por_vencer} onChange={(e) => update('vacaciones_por_vencer', e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium outline-none dark:border-slate-700 dark:bg-slate-950" />
+          </div>
+        </div>
+
+        <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 p-5 dark:border-slate-800">
+          <button onClick={onClose} className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-black dark:border-slate-700">CANCELAR</button>
+          <button onClick={onSave} disabled={saving} className="rounded-xl bg-blue-600 px-4 py-2 text-xs font-black text-white disabled:opacity-50">
+            {saving ? 'GUARDANDO...' : isEdit ? 'GUARDAR CAMBIOS' : 'CREAR TRABAJADOR'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function VacacionesPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -172,6 +325,9 @@ function VacacionesPageContent() {
   const [area, setArea] = useState('TODAS')
   const [resolvingId, setResolvingId] = useState<string | null>(null)
   const [detail, setDetail] = useState<MonthDetail | null>(null)
+  const [editorOpen, setEditorOpen] = useState(false)
+  const [editorSaving, setEditorSaving] = useState(false)
+  const [editorDraft, setEditorDraft] = useState<EditorDraft>(blankDraft())
   const currentYear = new Date().getFullYear()
   const requestedYear = Number(searchParams.get('year') || 0) || null
 
@@ -201,9 +357,24 @@ function VacacionesPageContent() {
 
   const years = useMemo(() => Array.from(new Set(balances.map((row) => num(row.periodo)))).filter(Boolean).sort((a, b) => b - a), [balances])
   const activeYear = requestedYear && years.includes(requestedYear) ? requestedYear : (years[0] ?? currentYear)
-  const balancesYear = useMemo(() => balances.filter((row) => num(row.periodo) === activeYear), [balances, activeYear])
+  const balancesYear = useMemo(() => (
+    balances
+      .filter((row) => num(row.periodo) === activeYear)
+      .slice()
+      .sort((a, b) => {
+        const areaDiff = areaSortValue(a.area) - areaSortValue(b.area)
+        if (areaDiff !== 0) return areaDiff
+        const nameDiff = String(a.trabajador_nombre).localeCompare(String(b.trabajador_nombre), 'es', { sensitivity: 'base' })
+        if (nameDiff !== 0) return nameDiff
+        return String(a.codigo_excel || '').localeCompare(String(b.codigo_excel || ''), 'es', { sensitivity: 'base' })
+      })
+  ), [balances, activeYear])
   const requestsYear = useMemo(() => requests.filter((row) => overlapsYear(row, activeYear)), [requests, activeYear])
-  const areas = useMemo(() => ['TODAS', ...Array.from(new Set(balancesYear.map((row) => row.area).filter(Boolean) as string[])).sort()], [balancesYear])
+  const areaSuggestions = useMemo(() => {
+    const extras = Array.from(new Set(balances.map((row) => String(row.area || '').trim().toUpperCase()).filter(Boolean)))
+    return Array.from(new Set([...preferredAreaOrder, ...extras])).filter(Boolean)
+  }, [balances])
+  const areas = useMemo(() => ['TODAS', ...areaSuggestions], [areaSuggestions])
   const filtered = useMemo(() => balancesYear.filter((row) => {
     const q = query.trim().toLowerCase()
     return (!q || row.trabajador_nombre.toLowerCase().includes(q) || row.dni.includes(q) || (row.cargo || '').toLowerCase().includes(q))
@@ -216,6 +387,13 @@ function VacacionesPageContent() {
     acc[key].push(row)
     return acc
   }, {}), [filtered])
+
+  const groupedAll = useMemo(() => balancesYear.reduce<Record<string, Balance[]>>((acc, row) => {
+    const key = row.area || 'SIN AREA'
+    if (!acc[key]) acc[key] = []
+    acc[key].push(row)
+    return acc
+  }, {}), [balancesYear])
 
   const getMonthRequests = useCallback((dni: string, year: number, monthIndex: number) => requestsYear.filter((row) => row.dni === dni && overlapsMonth(row, year, monthIndex)), [requestsYear])
   const getMonthView = useCallback((row: Balance, col: MonthCol) => {
@@ -233,31 +411,214 @@ function VacacionesPageContent() {
     return { approvedDays, pendientesPrev, pendientesPeriodo, gozados: num(row.total_gozados) + approvedDays, porVencer }
   }, [requestsYear])
 
-  const exportExcel = useCallback(() => {
+  const exportExcel = useCallback(async () => {
     if (!balancesYear.length) return toast.error('No hay datos para exportar')
     setExporting(true)
     try {
-      const rows: Array<Array<string | number>> = [['', 'REPORTE DE VACACIONES'], ['', 'EMPLEADOS', '', `SALDOS DE DIAS POR GOZAR ${activeYear - 1}`, 'ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SET', 'OCT', 'NOV', 'DIC', 'Total dias gozados', `PENDIENTES POR GOZAR ${activeYear - 1}`, `FECHAS DE VENCIMIENTO ${activeYear}`, `VACACIONES POR VENCER ${activeYear}`, `Vacaciones Pendientes por gozar ${activeYear}`]]
-      Object.entries(grouped).forEach(([groupName, rowsByArea]) => {
+      const response = await fetch('/vacaciones-template.xlsx')
+      if (!response.ok) throw new Error('No se encontro la plantilla del Excel')
+
+      const buffer = await response.arrayBuffer()
+      const wb = XLSX.read(buffer, { type: 'array', cellStyles: true })
+      const targetSheetName = `vacaciones ${activeYear}`
+      const sourceSheetName =
+        wb.SheetNames.find((name) => String(name).toLowerCase() === targetSheetName.toLowerCase()) ||
+        wb.SheetNames.find((name) => /^vacaciones \d{4}$/i.test(String(name)))
+
+      if (!sourceSheetName) throw new Error('La plantilla no tiene una hoja de vacaciones base')
+
+      const templateSheet = cloneDeep(wb.Sheets[sourceSheetName])
+      const titleRowIndex = 0
+      const headerRowIndex = 1
+      const areaRowIndex = 2
+      const employeeRowIndex = 3
+      const titleStyles = Array.from({ length: 21 }, (_, c) => cloneDeep(templateSheet[XLSX.utils.encode_cell({ r: titleRowIndex, c })]?.s || null))
+      const headerStyles = Array.from({ length: 21 }, (_, c) => cloneDeep(templateSheet[XLSX.utils.encode_cell({ r: headerRowIndex, c })]?.s || null))
+      const areaStyles = Array.from({ length: 21 }, (_, c) => cloneDeep(templateSheet[XLSX.utils.encode_cell({ r: areaRowIndex, c })]?.s || null))
+      const employeeStyles = Array.from({ length: 21 }, (_, c) => cloneDeep(templateSheet[XLSX.utils.encode_cell({ r: employeeRowIndex, c })]?.s || null))
+      const templateRowsMeta = cloneDeep(templateSheet['!rows'] || [])
+
+      const templateMatrix = XLSX.utils.sheet_to_json(templateSheet, { header: 1, raw: true, defval: '' }) as Array<Array<string | number>>
+      const templateAreaOrder: string[] = []
+      const templatePeopleByArea: Record<string, string[]> = {}
+      let currentArea = ''
+      for (let i = 2; i < templateMatrix.length; i++) {
+        const nombre = String(templateMatrix[i]?.[1] ?? '').trim()
+        const cargo = String(templateMatrix[i]?.[2] ?? '').trim()
+        if (!nombre) continue
+        if (/^AREA\b/i.test(nombre)) {
+          currentArea = nombre.toUpperCase()
+          if (!templateAreaOrder.includes(currentArea)) templateAreaOrder.push(currentArea)
+          if (!templatePeopleByArea[currentArea]) templatePeopleByArea[currentArea] = []
+          continue
+        }
+        if (!cargo || !currentArea) continue
+        templatePeopleByArea[currentArea] ||= []
+        templatePeopleByArea[currentArea].push(normalizeTemplateName(nombre))
+      }
+
+      const rowsByArea = new Map<string, Balance[]>()
+      balancesYear.forEach((row) => {
+        const key = String(row.area || 'SIN AREA').trim().toUpperCase()
+        if (!rowsByArea.has(key)) rowsByArea.set(key, [])
+        rowsByArea.get(key)!.push(row)
+      })
+
+      const orderedAreas = [
+        ...templateAreaOrder,
+        ...Array.from(rowsByArea.keys()).filter((area) => !templateAreaOrder.includes(area)).sort((a, b) => areaSortValue(a) - areaSortValue(b) || a.localeCompare(b, 'es', { sensitivity: 'base' })),
+      ]
+
+      const rows: Array<Array<string | number>> = [
+        ['', 'REPORTE DE VACACIONES'],
+        ['', 'EMPLEADOS', '', `SALDOS DE DIAS POR GOZAR ${activeYear - 1}`, 'ENE', 'FEB', 'MAR', 'ABR', 'MAY', 'JUN', 'JUL', 'AGO', 'SET', 'OCT', 'NOV', 'DIC', 'Total días gozados', `PENDIENTES POR GOZAR ${activeYear - 1}`, `FECHAS DE VENCIMIENTO ${activeYear}`, `VACACIONES POR VENCER ${activeYear}`, `Vacaciones Pendientes por gozar ${activeYear}`],
+      ]
+
+      orderedAreas.forEach((groupName) => {
+        const sourceRows = [...(rowsByArea.get(groupName) ?? [])]
+        if (!sourceRows.length && !templateAreaOrder.includes(groupName)) return
+
         rows.push(['', groupName])
-        rowsByArea.forEach((row) => {
+        const used = new Set<number>()
+        const templatePeople = templatePeopleByArea[groupName] ?? []
+
+        templatePeople.forEach((personName) => {
+          const index = sourceRows.findIndex((row, idx) => !used.has(idx) && normalizeTemplateName(row.trabajador_nombre) === personName)
+          if (index === -1) return
+          used.add(index)
+          const row = sourceRows[index]
           const d = derived(row)
-          rows.push([row.codigo_excel || '', row.trabajador_nombre, row.cargo || '', num(row.saldo_arrastre), ...months.map((col) => getMonthView(row, col).total), d.gozados, d.pendientesPrev, row.fecha_vencimiento ? shortDate(row.fecha_vencimiento) : '', d.porVencer, d.pendientesPeriodo])
+          rows.push([
+            row.codigo_excel || '',
+            row.trabajador_nombre,
+            row.cargo || '',
+            num(row.saldo_arrastre),
+            ...months.map((col) => getMonthView(row, col).total),
+            d.gozados,
+            d.pendientesPrev,
+            toExcelSerial(row.fecha_vencimiento),
+            d.porVencer,
+            d.pendientesPeriodo,
+          ])
+        })
+
+        sourceRows
+          .filter((_, idx) => !used.has(idx))
+          .sort((a, b) => String(a.codigo_excel || '').localeCompare(String(b.codigo_excel || ''), 'es', { sensitivity: 'base' }) || a.trabajador_nombre.localeCompare(b.trabajador_nombre, 'es', { sensitivity: 'base' }))
+          .forEach((row) => {
+            const d = derived(row)
+            rows.push([
+              row.codigo_excel || '',
+              row.trabajador_nombre,
+              row.cargo || '',
+              num(row.saldo_arrastre),
+              ...months.map((col) => getMonthView(row, col).total),
+              d.gozados,
+              d.pendientesPrev,
+              toExcelSerial(row.fecha_vencimiento),
+              d.porVencer,
+              d.pendientesPeriodo,
+            ])
+          })
+      })
+
+      const ws = cloneDeep(templateSheet)
+      ws['!merges'] = cloneDeep(templateSheet['!merges'] || [{ s: { r: 0, c: 1 }, e: { r: 0, c: 20 } }])
+      ws['!cols'] = cloneDeep(templateSheet['!cols'] || [])
+      const areaHeight = templateRowsMeta[areaRowIndex]?.hpx || templateRowsMeta[areaRowIndex]?.hpt || 22
+      const employeeHeight = templateRowsMeta[employeeRowIndex]?.hpx || templateRowsMeta[employeeRowIndex]?.hpt || 22
+      ws['!rows'] = rows.map((row, index) => {
+        if (index < 2) return cloneDeep(templateRowsMeta[index] || {})
+        const isAreaRow = Boolean(row[1] && !row[2] && !row[3])
+        return cloneDeep(isAreaRow ? { hpx: areaHeight } : { hpx: employeeHeight })
+      })
+
+      const templateRowCount = XLSX.utils.decode_range(templateSheet['!ref'] || 'A1:U1').e.r + 1
+      for (let r = 0; r < templateRowCount; r++) {
+        for (let c = 0; c <= 20; c++) {
+          const address = XLSX.utils.encode_cell({ r, c })
+          if (!ws[address]) ws[address] = { t: 's', v: '' }
+          ws[address].v = ''
+          ws[address].t = 's'
+          delete ws[address].c
+        }
+      }
+
+      rows.forEach((row, r) => {
+        const isAreaRow = r >= 2 && Boolean(row[1] && !row[2] && !row[3])
+        for (let c = 0; c <= 20; c++) {
+          const address = XLSX.utils.encode_cell({ r, c })
+          const value = row[c] ?? ''
+          const existing = ws[address] || { v: '', t: 's' }
+          ws[address] = {
+            ...existing,
+            v: value,
+            t: typeof value === 'number' ? 'n' : 's',
+            s:
+              r === 0
+                ? cloneDeep(titleStyles[c])
+                : r === 1
+                  ? cloneDeep(headerStyles[c])
+                  : isAreaRow
+                    ? {
+                        ...(cloneDeep(areaStyles[c]) || {}),
+                        fill: { patternType: 'solid', fgColor: { rgb: 'BDD7EE' } },
+                        font: { ...((cloneDeep(areaStyles[c]) || {}).font || {}), bold: true, color: { rgb: '000000' } },
+                      }
+                    : cloneDeep(employeeStyles[c]),
+          }
+        }
+      })
+
+      rows.forEach((row, r) => {
+        if (r < 2) return
+        const isAreaRow = Boolean(row[1] && !row[2] && !row[3])
+        if (isAreaRow) return
+        const workerName = String(row[1] || '')
+        const worker = balancesYear.find((item) => normalizeTemplateName(item.trabajador_nombre) === normalizeTemplateName(workerName))
+        if (!worker) return
+
+        months.forEach((col, index) => {
+          const monthRequests = getMonthRequests(worker.dni, activeYear, col.monthIndex).filter((item) => item.estado === 'aprobada')
+          if (!monthRequests.length) return
+
+          const address = XLSX.utils.encode_cell({ r, c: 4 + index })
+          const commentLines = monthRequests.map((item) => {
+            const start = formatCommentDate(item.fecha_inicio)
+            const end = formatCommentDate(item.fecha_fin)
+            return start === end ? `VACACIONES ${start}` : `VACACIONES ${start} AL ${end}`
+          })
+
+          ws[address] = ws[address] || { t: 'n', v: 0 }
+          ws[address].c = [
+            {
+              a: 'RUAG',
+              t: `RUAG:\n${commentLines.join('\n')}`,
+            },
+          ] as any
+          ;(ws[address].c as any).hidden = true
         })
       })
-      const ws = XLSX.utils.aoa_to_sheet(rows)
-      ws['!merges'] = [{ s: { r: 0, c: 1 }, e: { r: 0, c: 20 } }]
-      ws['!cols'] = [{ wpx: 52 }, { wpx: 240 }, { wpx: 170 }, { wpx: 90 }, ...months.map(() => ({ wpx: 54 })), { wpx: 92 }, { wpx: 110 }, { wpx: 120 }, { wpx: 110 }, { wpx: 145 }]
-      for (let c = 1; c <= 20; c++) ws[XLSX.utils.encode_cell({ r: 0, c })] && (ws[XLSX.utils.encode_cell({ r: 0, c })].s = { font: { bold: true, sz: 16 }, alignment: { horizontal: 'center' }, fill: { fgColor: { rgb: 'E5EEF9' } } })
-      for (let c = 0; c <= 20; c++) ws[XLSX.utils.encode_cell({ r: 1, c })] && (ws[XLSX.utils.encode_cell({ r: 1, c })].s = { font: { bold: true, color: { rgb: 'FFFFFF' } }, alignment: { horizontal: 'center', vertical: 'center', wrapText: true }, fill: { fgColor: { rgb: '0F172A' } } })
-      const wb = XLSX.utils.book_new()
-      XLSX.utils.book_append_sheet(wb, ws, `vacaciones ${activeYear}`)
-      XLSX.writeFile(wb, `vacaciones_${activeYear}_ruag.xlsx`)
+
+      ws['!ref'] = XLSX.utils.encode_range({
+        s: { r: 0, c: 0 },
+        e: { r: Math.max(rows.length - 1, 1), c: 20 },
+      })
+
+      if (!wb.SheetNames.includes(targetSheetName)) wb.SheetNames.push(targetSheetName)
+      wb.Sheets[targetSheetName] = ws
+      if (sourceSheetName !== targetSheetName) {
+        wb.SheetNames = wb.SheetNames.filter((name, index, arr) => arr.indexOf(name) === index)
+      }
+
+      XLSX.writeFile(wb, `119 Control de vacaciones al ${format(new Date(), 'dd.MM.yy')} RGA.xlsx`)
       toast.success(`Excel ${activeYear} descargado`)
+    } catch (error: any) {
+      toast.error(error?.message || 'No se pudo exportar el Excel')
     } finally {
       setExporting(false)
     }
-  }, [activeYear, balancesYear, derived, getMonthView, grouped])
+  }, [activeYear, balancesYear, derived, getMonthRequests, getMonthView, groupedAll])
 
   const resolveRequest = useCallback(async (row: RequestRow, estado: 'aprobada' | 'cancelada') => {
     setResolvingId(row.id)
@@ -267,12 +628,145 @@ function VacacionesPageContent() {
     else toast.success(estado === 'aprobada' ? `Vacaciones aprobadas para ${row.trabajador_nombre}` : `Vacaciones rechazadas para ${row.trabajador_nombre}`)
   }, [])
 
+  const openNewEditor = useCallback(() => {
+    setEditorDraft(blankDraft())
+    setEditorOpen(true)
+  }, [])
+
+  const openEditEditor = useCallback((row: Balance) => {
+    setEditorDraft({
+      id: row.id,
+      dni: row.dni,
+      trabajador_nombre: row.trabajador_nombre,
+      area: row.area || '',
+      cargo: row.cargo || '',
+      codigo_excel: row.codigo_excel || '',
+      saldo_arrastre: String(num(row.saldo_arrastre)),
+      dias_pendientes: String(num(row.dias_pendientes)),
+      fecha_vencimiento: row.fecha_vencimiento || '',
+      vacaciones_por_vencer: String(row.vacaciones_por_vencer != null ? num(row.vacaciones_por_vencer) : (row.fecha_vencimiento ? 30 : 0)),
+    })
+    setEditorOpen(true)
+  }, [])
+
+  const saveEditor = useCallback(async () => {
+    if (!editorDraft.dni.trim() || !editorDraft.trabajador_nombre.trim() || !editorDraft.area.trim() || !editorDraft.cargo.trim()) {
+      toast.error('Completa DNI, trabajador, categoria y cargo')
+      return
+    }
+
+    setEditorSaving(true)
+    const profileDni = editorDraft.dni.trim().toUpperCase()
+    const profileName = editorDraft.trabajador_nombre.trim().toUpperCase()
+    const profileArea = editorDraft.area.trim().toUpperCase()
+
+    const { data: existingProfile, error: profileFetchError } = await supabase
+      .from('fotocheck_perfiles')
+      .select('dni, foto_url')
+      .eq('dni', profileDni)
+      .maybeSingle()
+
+    if (profileFetchError) {
+      setEditorSaving(false)
+      toast.error(profileFetchError.message)
+      return
+    }
+
+    const profileMutation = existingProfile
+      ? await supabase
+          .from('fotocheck_perfiles')
+          .update({
+            nombres_completos: profileName,
+            area: profileArea,
+          })
+          .eq('dni', profileDni)
+      : await supabase
+          .from('fotocheck_perfiles')
+          .insert({
+            dni: profileDni,
+            nombres_completos: profileName,
+            area: profileArea,
+            foto_url: '',
+          })
+
+    if (profileMutation.error) {
+      setEditorSaving(false)
+      toast.error(profileMutation.error.message)
+      return
+    }
+
+    const payload = {
+      dni: profileDni,
+      trabajador_nombre: profileName,
+      area: profileArea,
+      cargo: editorDraft.cargo.trim().toUpperCase(),
+      codigo_excel: editorDraft.codigo_excel.trim().toUpperCase() || null,
+      periodo: activeYear,
+      saldo_arrastre: num(editorDraft.saldo_arrastre),
+      dias_extra: 0,
+      gozados_ene: 0,
+      gozados_feb: 0,
+      gozados_mar: 0,
+      gozados_abr: 0,
+      gozados_may: 0,
+      gozados_jun: 0,
+      gozados_jul: 0,
+      gozados_ago: 0,
+      gozados_set: 0,
+      gozados_oct: 0,
+      gozados_nov: 0,
+      gozados_dic: 0,
+      total_gozados: 0,
+      dias_pendientes: num(editorDraft.dias_pendientes),
+      fecha_vencimiento: editorDraft.fecha_vencimiento || null,
+      vacaciones_por_vencer: num(editorDraft.vacaciones_por_vencer),
+      vacaciones_pendientes_periodo: num(editorDraft.dias_pendientes) + num(editorDraft.vacaciones_por_vencer),
+    }
+
+    const { error } = editorDraft.id
+      ? await supabase.from('vacaciones_saldos').update({
+          dni: payload.dni,
+          trabajador_nombre: payload.trabajador_nombre,
+          area: payload.area,
+          cargo: payload.cargo,
+          codigo_excel: payload.codigo_excel,
+          saldo_arrastre: payload.saldo_arrastre,
+          dias_pendientes: payload.dias_pendientes,
+          fecha_vencimiento: payload.fecha_vencimiento,
+          vacaciones_por_vencer: payload.vacaciones_por_vencer,
+          vacaciones_pendientes_periodo: payload.vacaciones_pendientes_periodo,
+        }).eq('id', editorDraft.id)
+      : await supabase.from('vacaciones_saldos').insert(payload)
+
+    setEditorSaving(false)
+
+    if (error) {
+      toast.error(error.message)
+      return
+    }
+
+    toast.success(editorDraft.id ? 'Trabajador actualizado' : 'Trabajador agregado a vacaciones')
+    setEditorOpen(false)
+    setEditorDraft(blankDraft())
+    void fetchAll()
+  }, [activeYear, editorDraft, fetchAll])
+
   if (!mounted) return <div className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-slate-950"><Loader2 className="animate-spin text-blue-600" size={28} /></div>
 
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-6 text-slate-900 dark:bg-slate-950 dark:text-white sm:px-6 lg:px-8">
       <Toaster position="top-center" richColors />
       <MonthModal detail={detail} onClose={() => setDetail(null)} />
+      <EditorModal
+        open={editorOpen}
+        draft={editorDraft}
+        setDraft={setEditorDraft}
+        onClose={() => setEditorOpen(false)}
+        onSave={() => void saveEditor()}
+        saving={editorSaving}
+        isEdit={Boolean(editorDraft.id)}
+        areaSuggestions={areaSuggestions}
+      />
       <div className="mx-auto max-w-[1800px] space-y-6">
         <header className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
@@ -287,6 +781,7 @@ function VacacionesPageContent() {
             <div className="flex flex-wrap gap-2">
               <Link href="/vacaciones/historico" className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black dark:border-slate-700 dark:bg-slate-900"><Archive size={14} /> HISTORICO</Link>
               <button onClick={() => void fetchAll()} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black dark:border-slate-700 dark:bg-slate-900"><RefreshCw size={14} /> ACTUALIZAR</button>
+              <button onClick={openNewEditor} className="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-black text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300"><UserPlus size={14} /> NUEVO RRHH</button>
               <button onClick={exportExcel} disabled={exporting || !balancesYear.length} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white disabled:opacity-50">{exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} EXPORTAR</button>
             </div>
           </div>
@@ -344,7 +839,17 @@ function VacacionesPageContent() {
                         return (
                           <tr key={row.id} className="border-b border-slate-200 align-top dark:border-slate-800">
                             <td className="px-1.5 py-3 text-center font-black text-slate-500">{row.codigo_excel || '-'}</td>
-                            <td className="px-1.5 py-3"><p className="line-clamp-2 font-black">{row.trabajador_nombre}</p><p className="mt-1 font-mono text-[9px] text-slate-400">{row.dni}</p></td>
+                            <td className="px-1.5 py-3">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0">
+                                  <p className="line-clamp-2 font-black">{row.trabajador_nombre}</p>
+                                  <p className="mt-1 font-mono text-[9px] text-slate-400">{row.dni}</p>
+                                </div>
+                                <button onClick={() => openEditEditor(row)} className="shrink-0 rounded-lg border border-slate-200 p-1.5 text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800" title="Editar trabajador">
+                                  <Pencil size={12} />
+                                </button>
+                              </div>
+                            </td>
                             <td className="px-1.5 py-3 text-slate-600 dark:text-slate-300"><span className="line-clamp-2 block">{row.cargo || '--'}</span></td>
                             <td className="px-1.5 py-3 text-center font-black">{num(row.saldo_arrastre)}</td>
                             {months.map((col) => {
