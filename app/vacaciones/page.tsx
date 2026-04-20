@@ -4,7 +4,7 @@ import * as XLSX from 'xlsx-js-style'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { Suspense, useCallback, useEffect, useMemo, useState } from 'react'
-import { format } from 'date-fns'
+import { differenceInCalendarDays, format } from 'date-fns'
 import { es } from 'date-fns/locale'
 import {
   Archive,
@@ -91,6 +91,16 @@ type EditorDraft = {
   vacaciones_por_vencer: string
 }
 
+type ManualRequestDraft = {
+  dni: string
+  trabajador_nombre: string
+  area: string
+  fecha_inicio: string
+  fecha_fin: string
+  comentario: string
+  estado: 'aprobada' | 'solicitada'
+}
+
 const months: MonthCol[] = [
   { key: 'gozados_ene', label: 'ENE', monthIndex: 0 },
   { key: 'gozados_feb', label: 'FEB', monthIndex: 1 },
@@ -155,6 +165,16 @@ const blankDraft = (): EditorDraft => ({
   vacaciones_por_vencer: '0',
 })
 
+const blankManualRequestDraft = (): ManualRequestDraft => ({
+  dni: '',
+  trabajador_nombre: '',
+  area: '',
+  fecha_inicio: '',
+  fecha_fin: '',
+  comentario: '',
+  estado: 'aprobada',
+})
+
 function areaSortValue(value: string | null) {
   const normalized = String(value ?? 'SIN AREA').trim().toUpperCase()
   const index = preferredAreaOrder.indexOf(normalized)
@@ -165,6 +185,12 @@ const asDate = (value: string) => new Date(value.includes('T') ? value : `${valu
 const shortDate = (value: string | null) => (value ? format(asDate(value), 'dd/MM/yy', { locale: es }) : '--')
 const longDate = (value: string) => format(asDate(value), 'dd MMM yyyy', { locale: es })
 const dateTime = (value: string) => format(asDate(value), 'dd MMM yyyy - HH:mm', { locale: es })
+const inputDate = (value: Date) => format(value, 'yyyy-MM-dd')
+const requestedDays = (start: string, end: string) => {
+  if (!start || !end) return 0
+  const days = differenceInCalendarDays(asDate(end), asDate(start)) + 1
+  return days > 0 ? days : 0
+}
 const overlapsYear = (item: RequestRow, year: number) => asDate(item.fecha_inicio) <= new Date(Date.UTC(year, 11, 31, 12)) && asDate(item.fecha_fin) >= new Date(Date.UTC(year, 0, 1, 12))
 const overlapsMonth = (item: RequestRow, year: number, month: number) => asDate(item.fecha_inicio) <= new Date(Date.UTC(year, month + 1, 0, 12)) && asDate(item.fecha_fin) >= new Date(Date.UTC(year, month, 1, 12))
 function overlapDaysInMonth(item: RequestRow, year: number, month: number) {
@@ -185,7 +211,15 @@ const prevStatus = (estado: string) =>
       ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300'
       : 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300'
 
-function MonthModal({ detail, onClose }: { detail: MonthDetail | null; onClose: () => void }) {
+function MonthModal({
+  detail,
+  onClose,
+  onAddManual,
+}: {
+  detail: MonthDetail | null
+  onClose: () => void
+  onAddManual: (row: Balance, monthIndex: number) => void
+}) {
   if (!detail) return null
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/55 p-4 backdrop-blur-sm" onClick={onClose}>
@@ -203,6 +237,15 @@ function MonthModal({ detail, onClose }: { detail: MonthDetail | null; onClose: 
           <div className="rounded-2xl bg-blue-50 p-4 dark:bg-blue-500/10"><p className="text-[10px] font-black uppercase text-blue-500">Aprobado</p><p className="mt-2 text-2xl font-black text-blue-700 dark:text-blue-300">{detail.approved}</p></div>
           <div className="rounded-2xl bg-emerald-50 p-4 dark:bg-emerald-500/10"><p className="text-[10px] font-black uppercase text-emerald-500">Visible</p><p className="mt-2 text-2xl font-black text-emerald-700 dark:text-emerald-300">{detail.imported + detail.approved}</p></div>
         </div>
+        <div className="border-b border-slate-200 p-5 dark:border-slate-800">
+          <button
+            onClick={() => onAddManual(detail.row, detail.col.monthIndex)}
+            className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-black text-white"
+          >
+            <UserPlus size={14} />
+            REGISTRAR VACACIONES MANUAL
+          </button>
+        </div>
         <div className="max-h-[420px] space-y-3 overflow-y-auto p-5">
           {detail.requests.length === 0 ? (
             <div className="rounded-2xl border border-dashed border-slate-300 p-6 text-center text-sm text-slate-400 dark:border-slate-700">No hay solicitudes en este mes.</div>
@@ -219,6 +262,80 @@ function MonthModal({ detail, onClose }: { detail: MonthDetail | null; onClose: 
               <p className="mt-3 text-[11px] text-slate-400">Registrada: {dateTime(item.created_at)}</p>
             </div>
           ))}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function ManualRequestModal({
+  open,
+  draft,
+  setDraft,
+  onClose,
+  onSave,
+  saving,
+}: {
+  open: boolean
+  draft: ManualRequestDraft
+  setDraft: (next: ManualRequestDraft) => void
+  onClose: () => void
+  onSave: () => void
+  saving: boolean
+}) {
+  if (!open) return null
+
+  const totalDias = requestedDays(draft.fecha_inicio, draft.fecha_fin)
+
+  const update = (key: keyof ManualRequestDraft, value: string) => setDraft({ ...draft, [key]: value })
+
+  return (
+    <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm" onClick={onClose}>
+      <div className="w-full max-w-2xl rounded-3xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start justify-between border-b border-slate-200 p-5 dark:border-slate-800">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">RRHH</p>
+            <h3 className="mt-1 text-lg font-black text-slate-900 dark:text-white">Registrar vacaciones manuales</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">{draft.trabajador_nombre || 'Selecciona un trabajador'}{draft.area ? ` - ${draft.area}` : ''}</p>
+          </div>
+          <button onClick={onClose} className="rounded-xl border border-slate-200 p-2 dark:border-slate-700"><X size={16} /></button>
+        </div>
+
+        <div className="grid gap-4 p-5 sm:grid-cols-2">
+          <div>
+            <label className="mb-1 block text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">Fecha inicio</label>
+            <input type="date" value={draft.fecha_inicio} onChange={(e) => update('fecha_inicio', e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium outline-none dark:border-slate-700 dark:bg-slate-950" />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">Fecha fin</label>
+            <input type="date" value={draft.fecha_fin} onChange={(e) => update('fecha_fin', e.target.value)} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium outline-none dark:border-slate-700 dark:bg-slate-950" />
+          </div>
+          <div>
+            <label className="mb-1 block text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">Estado</label>
+            <select value={draft.estado} onChange={(e) => update('estado', e.target.value as ManualRequestDraft['estado'])} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black outline-none dark:border-slate-700 dark:bg-slate-950">
+              <option value="aprobada">APROBADA</option>
+              <option value="solicitada">SOLICITADA</option>
+            </select>
+          </div>
+          <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 dark:border-blue-500/30 dark:bg-blue-500/10">
+            <p className="text-[11px] font-black uppercase tracking-[0.16em] text-blue-500">Dias calculados</p>
+            <p className="mt-2 text-3xl font-black text-blue-700 dark:text-blue-300">{totalDias}</p>
+            <p className="mt-1 text-xs text-blue-600 dark:text-blue-200">Se cuentan dias calendario entre inicio y fin.</p>
+          </div>
+          <div className="sm:col-span-2">
+            <label className="mb-1 block text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">Comentario</label>
+            <textarea value={draft.comentario} onChange={(e) => update('comentario', e.target.value)} rows={3} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-medium outline-none dark:border-slate-700 dark:bg-slate-950" placeholder="Ej. Registro manual de RRHH" />
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 p-5 dark:border-slate-800">
+          <p className="text-xs text-slate-500 dark:text-slate-400">Al guardar, la solicitud se reparte automaticamente en los meses que toque.</p>
+          <div className="flex flex-wrap gap-2">
+            <button onClick={onClose} className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-black dark:border-slate-700">CANCELAR</button>
+            <button onClick={onSave} disabled={saving || totalDias <= 0} className="rounded-xl bg-blue-600 px-4 py-2 text-xs font-black text-white disabled:opacity-50">
+              {saving ? 'GUARDANDO...' : 'GUARDAR VACACIONES'}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -328,6 +445,9 @@ function VacacionesPageContent() {
   const [editorOpen, setEditorOpen] = useState(false)
   const [editorSaving, setEditorSaving] = useState(false)
   const [editorDraft, setEditorDraft] = useState<EditorDraft>(blankDraft())
+  const [manualOpen, setManualOpen] = useState(false)
+  const [manualSaving, setManualSaving] = useState(false)
+  const [manualDraft, setManualDraft] = useState<ManualRequestDraft>(blankManualRequestDraft())
   const currentYear = new Date().getFullYear()
   const requestedYear = Number(searchParams.get('year') || 0) || null
 
@@ -649,6 +769,74 @@ function VacacionesPageContent() {
     setEditorOpen(true)
   }, [])
 
+  const openManualRequest = useCallback((row: Balance, monthIndex?: number) => {
+    const now = new Date()
+    let startDate = activeYear === now.getFullYear() ? now : new Date(activeYear, 0, 1)
+    let endDate = startDate
+
+    if (typeof monthIndex === 'number') {
+      const monthStart = new Date(activeYear, monthIndex, 1)
+      const monthEnd = new Date(activeYear, monthIndex + 1, 0)
+      if (activeYear === now.getFullYear() && monthIndex === now.getMonth()) {
+        startDate = now > monthStart ? now : monthStart
+        endDate = monthEnd
+      } else {
+        startDate = monthStart
+        endDate = monthEnd
+      }
+    }
+
+    setManualDraft({
+      dni: row.dni,
+      trabajador_nombre: row.trabajador_nombre,
+      area: row.area || '',
+      fecha_inicio: inputDate(startDate),
+      fecha_fin: inputDate(endDate),
+      comentario: 'Registro manual RRHH',
+      estado: 'aprobada',
+    })
+    setManualOpen(true)
+  }, [activeYear])
+
+  const saveManualRequest = useCallback(async () => {
+    const totalDias = requestedDays(manualDraft.fecha_inicio, manualDraft.fecha_fin)
+    if (!manualDraft.dni || !manualDraft.trabajador_nombre) {
+      toast.error('Selecciona un trabajador')
+      return
+    }
+    if (!manualDraft.fecha_inicio || !manualDraft.fecha_fin) {
+      toast.error('Completa el rango de fechas')
+      return
+    }
+    if (totalDias <= 0) {
+      toast.error('El rango de fechas no es valido')
+      return
+    }
+
+    setManualSaving(true)
+    const { error } = await supabase.from('vacaciones_solicitudes').insert({
+      dni: manualDraft.dni,
+      trabajador_nombre: manualDraft.trabajador_nombre,
+      area: manualDraft.area || null,
+      fecha_inicio: manualDraft.fecha_inicio,
+      fecha_fin: manualDraft.fecha_fin,
+      dias_solicitados: totalDias,
+      comentario: manualDraft.comentario.trim() || 'Registro manual RRHH',
+      estado: manualDraft.estado,
+    })
+    setManualSaving(false)
+
+    if (error) {
+      toast.error(error.message)
+      return
+    }
+
+    toast.success(manualDraft.estado === 'aprobada' ? 'Vacaciones registradas y aprobadas' : 'Solicitud manual registrada')
+    setManualOpen(false)
+    setManualDraft(blankManualRequestDraft())
+    void fetchAll()
+  }, [fetchAll, manualDraft])
+
   const saveEditor = useCallback(async () => {
     if (!editorDraft.dni.trim() || !editorDraft.trabajador_nombre.trim() || !editorDraft.area.trim() || !editorDraft.cargo.trim()) {
       toast.error('Completa DNI, trabajador, categoria y cargo')
@@ -756,7 +944,7 @@ function VacacionesPageContent() {
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-6 text-slate-900 dark:bg-slate-950 dark:text-white sm:px-6 lg:px-8">
       <Toaster position="top-center" richColors />
-      <MonthModal detail={detail} onClose={() => setDetail(null)} />
+      <MonthModal detail={detail} onClose={() => setDetail(null)} onAddManual={openManualRequest} />
       <EditorModal
         open={editorOpen}
         draft={editorDraft}
@@ -766,6 +954,14 @@ function VacacionesPageContent() {
         saving={editorSaving}
         isEdit={Boolean(editorDraft.id)}
         areaSuggestions={areaSuggestions}
+      />
+      <ManualRequestModal
+        open={manualOpen}
+        draft={manualDraft}
+        setDraft={setManualDraft}
+        onClose={() => setManualOpen(false)}
+        onSave={() => void saveManualRequest()}
+        saving={manualSaving}
       />
       <div className="mx-auto max-w-[1800px] space-y-6">
         <header className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -845,9 +1041,14 @@ function VacacionesPageContent() {
                                   <p className="line-clamp-2 font-black">{row.trabajador_nombre}</p>
                                   <p className="mt-1 font-mono text-[9px] text-slate-400">{row.dni}</p>
                                 </div>
-                                <button onClick={() => openEditEditor(row)} className="shrink-0 rounded-lg border border-slate-200 p-1.5 text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800" title="Editar trabajador">
-                                  <Pencil size={12} />
-                                </button>
+                                <div className="flex shrink-0 gap-1">
+                                  <button onClick={() => openManualRequest(row)} className="rounded-lg border border-blue-200 p-1.5 text-blue-600 hover:bg-blue-50 dark:border-blue-500/30 dark:text-blue-300 dark:hover:bg-blue-500/10" title="Registrar vacaciones manuales">
+                                    <UserPlus size={12} />
+                                  </button>
+                                  <button onClick={() => openEditEditor(row)} className="rounded-lg border border-slate-200 p-1.5 text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800" title="Editar trabajador">
+                                    <Pencil size={12} />
+                                  </button>
+                                </div>
                               </div>
                             </td>
                             <td className="px-1.5 py-3 text-slate-600 dark:text-slate-300"><span className="line-clamp-2 block">{row.cargo || '--'}</span></td>
