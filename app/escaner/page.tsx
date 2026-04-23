@@ -25,12 +25,15 @@ interface VacacionesSaldo {
   trabajador_nombre: string
   area: string | null
   cargo: string | null
+  periodo?: number
   saldo_arrastre: number
   dias_extra: number
   total_gozados: number
   dias_pendientes: number
   fecha_vencimiento: string
   renovaciones_aplicadas: number
+  vacaciones_por_vencer?: number | null
+  vacaciones_pendientes_periodo?: number | null
 }
 interface VacacionSolicitud {
   id: string
@@ -122,6 +125,9 @@ const num = (value: number | string | null | undefined) => {
 const normalizeStatus = (value?: string | null) => String(value ?? '').toLowerCase()
 
 const toDateAtNoon = (value: string) => new Date(value.includes('T') ? value : `${value}T12:00:00`)
+const overlapsVacationYear = (item: VacacionSolicitud, year: number) =>
+  toDateAtNoon(item.fecha_inicio) <= new Date(Date.UTC(year, 11, 31, 12)) &&
+  toDateAtNoon(item.fecha_fin) >= new Date(Date.UTC(year, 0, 1, 12))
 
 const formatShortDate = (value: string) => format(toDateAtNoon(value), 'dd MMM yyyy', { locale: es })
 
@@ -380,6 +386,8 @@ export default function EscanerWeb() {
           .from('vacaciones_saldos')
           .select('*')
           .eq('dni', targetDni)
+          .order('periodo', { ascending: false })
+          .limit(1)
           .maybeSingle(),
         supabase
           .from('vacaciones_solicitudes')
@@ -886,9 +894,26 @@ export default function EscanerWeb() {
   const statusColor = isPuntual ? 'var(--green)' : 'var(--red)'
   const statusBg    = isPuntual ? 'var(--green-light)' : 'var(--red-light)'
   const approvedVacationDays = vacacionesSolicitudes
-    .filter((item) => normalizeStatus(item.estado) === 'aprobada')
+    .filter((item) =>
+      normalizeStatus(item.estado) === 'aprobada' &&
+      overlapsVacationYear(item, vacacionesSaldo?.periodo ?? new Date().getFullYear())
+    )
     .reduce((sum, item) => sum + num(item.dias_solicitados), 0)
-  const pendingDisplay = vacacionesSaldo ? num(vacacionesSaldo.dias_pendientes) - approvedVacationDays : 0
+  const porVencerDb = vacacionesSaldo ? num(vacacionesSaldo.vacaciones_por_vencer) : 0
+  const porVencerDisplay = vacacionesSaldo
+    ? porVencerDb > 0
+      ? porVencerDb
+      : vacacionesSaldo.fecha_vencimiento
+        ? 30
+        : 0
+    : 0
+  const pendingPeriodoDb = vacacionesSaldo ? num(vacacionesSaldo.vacaciones_pendientes_periodo) : 0
+  const pendingBase = vacacionesSaldo
+    ? pendingPeriodoDb > 0
+      ? pendingPeriodoDb
+      : num(vacacionesSaldo.dias_pendientes) + porVencerDisplay
+    : 0
+  const pendingDisplay = pendingBase - approvedVacationDays
   const gozadosDisplay = vacacionesSaldo ? num(vacacionesSaldo.total_gozados) + approvedVacationDays : 0
   const diasSolicitadosPreview = differenceInDays(toDateAtNoon(vacationEnd), toDateAtNoon(vacationStart)) + 1
 
