@@ -25,11 +25,51 @@ import 'mapbox-gl/dist/mapbox-gl.css'
 type TimeOfDay = 'dawn' | 'day' | 'dusk' | 'night'
 type TipoMarcacion = 'ninguna' | 'ingreso_obra' | 'salida_obra' | 'externo' | 'nota' | 'nocturno'
 
+const LIMA_TZ = 'America/Lima'
+const WORKING_DAYS = new Set([1, 2, 3, 4, 5])
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function getLimaHour() {
-  return Number(new Intl.DateTimeFormat('en-US', { timeZone: 'America/Lima', hour: '2-digit', hour12: false })
+  return Number(new Intl.DateTimeFormat('en-US', { timeZone: LIMA_TZ, hour: '2-digit', hour12: false })
     .formatToParts(new Date()).find(p => p.type === 'hour')?.value ?? '12')
+}
+
+function getLimaDateKey(date = new Date()) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: LIMA_TZ,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date)
+
+  const year = parts.find((part) => part.type === 'year')?.value ?? '1970'
+  const month = parts.find((part) => part.type === 'month')?.value ?? '01'
+  const day = parts.find((part) => part.type === 'day')?.value ?? '01'
+
+  return `${year}-${month}-${day}`
+}
+
+function getWeekday(dateKey: string) {
+  return new Date(`${dateKey}T12:00:00-05:00`).getUTCDay()
+}
+
+function buildSyntheticInasistencia(fechaKey: string, perfil: any) {
+  const [year, month, day] = fechaKey.split('-').map(Number)
+
+  return {
+    id: `synthetic-inasistencia-${fechaKey}-${perfil.dni}`,
+    dni: perfil.dni,
+    fecha: fechaKey,
+    hora_ingreso: new Date(Date.UTC(year, month - 1, day, 13, 0, 0, 0)).toISOString(),
+    hora_salida: null,
+    estado_ingreso: 'INASISTENCIA',
+    nombres_completos: perfil.nombres_completos,
+    area: perfil.area ?? '',
+    foto_url: perfil.foto_url ?? '',
+    notas: 'Marcado automaticamente por el sistema - Sin registro en el dia',
+    _syntheticInasistencia: true,
+  }
 }
 
 function getTimeOfDay(): TimeOfDay {
@@ -286,6 +326,7 @@ export default function AdminDashboard() {
   const fetchData = async (fecha: Date) => {
     setLoading(true)
     const fechaStr = format(fecha, 'yyyy-MM-dd')
+    const todayLima = getLimaDateKey()
     const prevStr  = format(subDays(fecha, 1), 'yyyy-MM-dd')
     const nextStr  = format(addDays(fecha, 1), 'yyyy-MM-dd')
     const limaIni     = `${fechaStr}T05:00:00.000Z`
@@ -293,10 +334,18 @@ export default function AdminDashboard() {
     const noctIni     = `${nextStr}T00:00:00.000Z`
     const noctIniPrev = `${fechaStr}T00:00:00.000Z`
 
-    const [q1, q2, q3] = await Promise.all([
+    const shouldBuildAbsences = fechaStr < todayLima && WORKING_DAYS.has(getWeekday(fechaStr))
+
+    const [q1, q2, q3, perfilesRes, vacacionesRes] = await Promise.all([
       supabase.from('registro_asistencias').select('*').eq('fecha', fechaStr).order('hora_ingreso', { ascending: false }),
       supabase.from('registro_asistencias').select('*').eq('fecha', nextStr).gte('hora_ingreso', noctIni).lt('hora_ingreso', limaFin).order('hora_ingreso', { ascending: false }),
       supabase.from('registro_asistencias').select('*').eq('fecha', prevStr).gte('hora_ingreso', noctIniPrev).gte('hora_salida', limaIni).lt('hora_salida', limaFin).order('hora_ingreso', { ascending: false }),
+      shouldBuildAbsences
+        ? supabase.from('fotocheck_perfiles').select('dni, nombres_completos, area, foto_url').order('nombres_completos')
+        : Promise.resolve({ data: [], error: null } as any),
+      shouldBuildAbsences
+        ? supabase.from('vacaciones_solicitudes').select('dni').eq('estado', 'aprobada').lte('fecha_inicio', fechaStr).gte('fecha_fin', fechaStr)
+        : Promise.resolve({ data: [], error: null } as any),
     ])
 
     const seen = new Set<string>()
@@ -306,7 +355,20 @@ export default function AdminDashboard() {
       ...(q3.data ?? []).map((r: any) => ({ ...r, _saleHoy: true })),
     ].filter((r: any) => { if (seen.has(r.id)) return false; seen.add(r.id); return true })
 
-    setAsistencias(todos)
+    const perfiles = perfilesRes?.data ?? []
+    const vacaciones = vacacionesRes?.data ?? []
+    const dnisConRegistro = new Set(todos.map((item: any) => String(item.dni)))
+    const dnisConVacaciones = new Set(vacaciones.map((item: any) => String(item.dni)))
+
+    const syntheticAbsences = shouldBuildAbsences
+      ? perfiles
+          .filter((perfil: any) => !dnisConRegistro.has(String(perfil.dni)) && !dnisConVacaciones.has(String(perfil.dni)))
+          .map((perfil: any) => buildSyntheticInasistencia(fechaStr, perfil))
+      : []
+
+    setAsistencias([...todos, ...syntheticAbsences].sort((a: any, b: any) =>
+      new Date(b.hora_ingreso).getTime() - new Date(a.hora_ingreso).getTime()
+    ))
     setLoading(false)
     if (isInitialLoad) setTimeout(() => setIsInitialLoad(false), 400)
   }
@@ -318,18 +380,22 @@ export default function AdminDashboard() {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'registro_asistencias' }, p => {
         const visible = decorateForVisibleDate(p.new, fechaActual)
         if (!visible) return
-        setAsistencias(prev => upsertAsistencia(prev, visible))
+        setAsistencias(prev => upsertAsistencia(
+          prev.filter(item => !(item._syntheticInasistencia && item.dni === p.new.dni)),
+          visible
+        ))
         new Audio('/notification.mp3').play().catch(() => {})
         toast.success(`📥 ${p.new.nombres_completos}`, { description: p.new.estado_ingreso })
       })
       .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'registro_asistencias' }, p => {
         const visible = decorateForVisibleDate(p.new, fechaActual)
         setAsistencias(prev => {
-          if (!visible) return prev.filter(a => a.id !== p.new.id)
-          const exists = prev.some(a => a.id === p.new.id)
+          const cleaned = prev.filter(item => item.id !== p.new.id && !(item._syntheticInasistencia && item.dni === p.new.dni))
+          if (!visible) return cleaned
+          const exists = cleaned.some(a => a.id === p.new.id)
           return exists
-            ? prev.map(a => a.id === p.new.id ? { ...a, ...visible } : a)
-            : upsertAsistencia(prev, visible)
+            ? cleaned.map(a => a.id === p.new.id ? { ...a, ...visible } : a)
+            : upsertAsistencia(cleaned, visible)
         })
       })
       .subscribe()
@@ -598,7 +664,7 @@ export default function AdminDashboard() {
             <StatCard title="Con Salida"   value={conSalida}          icon={<LogOut size={16} />}       color="bg-slate-500" />
             <StatCard title="Reingresos"   value={reingresos}         icon={<RefreshCw size={16} />}    color="bg-indigo-500" sub="multi-turno" />
             {totalOffline > 0 && <StatCard title="Offline" value={totalOffline} icon={<span className="text-xs">📵</span>} color="bg-violet-500" sub="sincronizados" />}
-            {totalInasistencias > 0 && <StatCard title="Inasistencias" value={totalInasistencias} icon={<span className="text-xs">✗</span>} color="bg-slate-500" sub="sin marcar" />}
+            {totalInasistencias > 0 && <StatCard title="Inasistencias" value={totalInasistencias} icon={<span className="text-xs">✗</span>} color="bg-orange-500" sub="sin marcar" />}
           </div>
 
           {/* Table / Map */}
@@ -1009,6 +1075,7 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
 }) {
   const [editandoNombre, setEditandoNombre] = useState(false)
   const [nombreTemp, setNombreTemp] = useState(data.nombres_completos)
+  const esSintetica = !!data._syntheticInasistencia
   const esInasistencia = data.estado_ingreso === 'INASISTENCIA'
   const isPuntual  = data.estado_ingreso === 'PUNTUAL'
   const entroAyer  = !!data._entroAyer
@@ -1021,8 +1088,9 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
   const esNocturno = data.notas?.startsWith('Turno Nocturno') ?? false
   const esOffline  = (data.notas ?? '').includes('[OFFLINE]')
   const hasBadge = entroAyer || saleHoy || esOffline || esInasistencia
+  const puedeEditarRegistro = modoEdicion && !esSintetica
 
-  const borderClass = esInasistencia ? 'border-slate-300 dark:border-slate-600 bg-slate-50/50 dark:bg-slate-800/30'
+  const borderClass = esInasistencia ? 'border-orange-300 dark:border-orange-500/30 bg-orange-50/70 dark:bg-orange-500/10'
     : entroAyer || saleHoy ? 'border-amber-300 dark:border-amber-500/30 ring-1 ring-amber-100 dark:ring-amber-500/10'
     : esOffline ? 'border-violet-300 dark:border-violet-500/30 ring-1 ring-violet-100 dark:ring-violet-500/10'
     : tieneSalida && isToday(new Date(data.hora_ingreso)) ? 'border-emerald-200 dark:border-emerald-500/20'
@@ -1054,7 +1122,7 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
         </div>
       )}
       {esInasistencia && (
-        <div className="absolute -top-2.5 left-3 z-10 flex items-center gap-1 bg-slate-500 text-white text-[8px] font-black px-2 py-0.5 rounded-full shadow-sm">
+        <div className="absolute -top-2.5 left-3 z-10 flex items-center gap-1 bg-orange-500 text-white text-[8px] font-black px-2 py-0.5 rounded-full shadow-sm">
           ✗ INASISTENCIA · Sin registro en el día
         </div>
       )}
@@ -1066,12 +1134,12 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
             {data.foto_url ? <img src={data.foto_url} alt="" className="w-full h-full object-cover" /> :
               <div className="w-full h-full flex items-center justify-center font-black text-slate-400 text-sm">{getInitials(data.nombres_completos)}</div>}
           </div>
-          <div className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white dark:border-slate-900 ${esInasistencia ? 'bg-slate-400' : isPuntual ? 'bg-emerald-500' : 'bg-red-500'}`} />
+          <div className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white dark:border-slate-900 ${esInasistencia ? 'bg-orange-400' : isPuntual ? 'bg-emerald-500' : 'bg-red-500'}`} />
           {esNocturno && <div className="absolute -top-0.5 -left-0.5 w-3.5 h-3.5 rounded-full bg-amber-400 border-2 border-white dark:border-slate-900 flex items-center justify-center"><Moon size={7} className="text-white" /></div>}
           {esOffline && !esNocturno && <div className="absolute -top-0.5 -left-0.5 w-3.5 h-3.5 rounded-full bg-violet-500 border-2 border-white dark:border-slate-900 flex items-center justify-center text-white text-[7px] font-black leading-none">📵</div>}
         </div>
         <div className="min-w-0 flex-1">
-          {modoEdicion && editandoNombre ? (
+          {puedeEditarRegistro && editandoNombre ? (
             <div className="flex items-center gap-1.5 mb-0.5">
               <input
                 autoFocus
@@ -1097,9 +1165,9 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
             </div>
           ) : (
             <div
-              className={`flex items-center gap-1 group/name ${modoEdicion ? 'cursor-pointer' : ''}`}
-              onClick={() => { if (modoEdicion) { setNombreTemp(data.nombres_completos); setEditandoNombre(true) } }}
-              title={modoEdicion ? 'Clic para editar nombre' : undefined}
+              className={`flex items-center gap-1 group/name ${puedeEditarRegistro ? 'cursor-pointer' : ''}`}
+              onClick={() => { if (puedeEditarRegistro) { setNombreTemp(data.nombres_completos); setEditandoNombre(true) } }}
+              title={puedeEditarRegistro ? 'Clic para editar nombre' : undefined}
             >
               <div className="hidden lg:block max-w-[240px] xl:max-w-[300px]">
                 <p className="font-black text-slate-800 dark:text-slate-100 text-base uppercase tracking-tight truncate">{data.nombres_completos}</p>
@@ -1107,7 +1175,7 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
               <div className="lg:hidden mq-wrap max-w-[130px] sm:max-w-[200px]">
                 <span className="mq-inner font-black text-slate-800 dark:text-slate-100 text-base uppercase tracking-tight">{data.nombres_completos}</span>
               </div>
-              {modoEdicion && <span className="opacity-0 group-hover/name:opacity-100 transition-opacity text-blue-400 shrink-0" title="Editar nombre">✏️</span>}
+              {puedeEditarRegistro && <span className="opacity-0 group-hover/name:opacity-100 transition-opacity text-blue-400 shrink-0" title="Editar nombre">✏️</span>}
             </div>
           )}
           <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
@@ -1115,10 +1183,10 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
             <span className="hidden sm:inline text-[9px] font-bold text-slate-300 dark:text-slate-700">·</span>
             <span className="text-[9px] font-bold text-slate-400 uppercase hidden sm:inline">{data.area}</span>
             {esInasistencia ? (
-              <span className="px-1.5 py-0.5 rounded text-[8px] font-black bg-slate-100 text-slate-500 dark:bg-slate-700 dark:text-slate-400">
+              <span className="px-1.5 py-0.5 rounded text-[8px] font-black bg-orange-100 text-orange-700 dark:bg-orange-500/10 dark:text-orange-300">
                 INASISTENCIA
               </span>
-            ) : modoEdicion ? (
+            ) : puedeEditarRegistro ? (
               <button onClick={() => onCambiarEstado(data.id, data.estado_ingreso)}
                 className={`px-1.5 py-0.5 rounded text-[8px] font-black border transition-all hover:scale-105 active:scale-95
                   ${isPuntual ? 'bg-emerald-100 text-emerald-700 border-emerald-300 hover:bg-red-50 hover:text-red-600 hover:border-red-300' : 'bg-red-100 text-red-700 border-red-300 hover:bg-emerald-50 hover:text-emerald-600 hover:border-emerald-300'}`}>
@@ -1137,12 +1205,12 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
       <div className="flex items-center gap-3 sm:gap-5 shrink-0">
         <div className="flex flex-col items-end">
           <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Entrada</span>
-          {modoEdicion ? (
+          {puedeEditarRegistro ? (
             <input type="time" defaultValue={format(new Date(data.hora_ingreso), 'HH:mm')}
               className="bg-transparent border-b border-blue-500 text-xs font-black text-blue-600 outline-none w-14 text-right"
               onBlur={e => { if (e.target.value !== format(new Date(data.hora_ingreso), 'HH:mm')) onActualizar(data.id, 'hora_ingreso', e.target.value, data.hora_ingreso) }} />
           ) : (
-            <span className={`font-black text-base tabular-nums ${esInasistencia ? 'text-slate-400 dark:text-slate-600' : isPuntual ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+            <span className={`font-black text-base tabular-nums ${esInasistencia ? 'text-orange-500 dark:text-orange-300' : isPuntual ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
               {esInasistencia ? '—' : format(new Date(data.hora_ingreso), 'HH:mm')}
             </span>
           )}
@@ -1152,7 +1220,7 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
 
         <div className="flex flex-col items-end">
           <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Salida</span>
-          {modoEdicion ? (
+          {puedeEditarRegistro ? (
             <div className="flex items-center gap-1">
               <input type="time" defaultValue={data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm') : ''}
                 className="bg-transparent border-b border-blue-500 text-xs font-bold text-slate-600 dark:text-slate-300 outline-none w-14 text-right"
@@ -1177,21 +1245,21 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
         )}
 
         <div className="flex items-center gap-1">
-          {nota.tieneNota && (
+          {!esInasistencia && nota.tieneNota && (
             <>
               <button onClick={() => onAbrirNota({ nombre: data.nombres_completos, nota: nota.textoLimpio, hora: format(new Date(data.hora_ingreso), 'HH:mm'), tipoObra: nota.tipoMarcacion, estadoIngreso: data.estado_ingreso })}
                 className={`p-1.5 rounded-full border transition-all hover:scale-110 ${nota.tipoMarcacion === 'ingreso_obra' ? 'bg-blue-50 text-blue-600 border-blue-200 dark:bg-blue-500/10 dark:border-blue-500/30' : nota.tipoMarcacion === 'externo' ? 'bg-purple-50 text-purple-600 border-purple-200 dark:bg-purple-500/10 dark:border-purple-500/30' : nota.tipoMarcacion === 'nocturno' ? 'bg-amber-50 text-amber-600 border-amber-200 dark:bg-amber-500/10 dark:border-amber-500/30' : 'bg-slate-50 text-slate-500 border-slate-200 dark:bg-slate-500/10 dark:border-slate-500/30'}`}
                 title={tone.label}>
                 <NIcon size={12} />
               </button>
-              {modoEdicion && (
+              {puedeEditarRegistro && (
                 <button onClick={() => onBorrarNota(data.id)} className="p-1.5 rounded-full border border-red-200 dark:border-red-500/30 text-red-400 hover:bg-red-50 hover:scale-110 transition-all">
                   <Trash2 size={11} />
                 </button>
               )}
             </>
           )}
-          {modoEdicion && (
+          {puedeEditarRegistro && (
             <button onClick={() => onBorrarRegistro(data.id, data.nombres_completos)}
               className="p-1.5 rounded-full border border-red-300 dark:border-red-500/40 bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-100 hover:scale-110 transition-all ml-0.5">
               <X size={12} />
