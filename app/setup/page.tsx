@@ -7,6 +7,8 @@ import { toast } from 'sonner'
 import { supabase } from '@/utils/supabase/client'
 import { motion, AnimatePresence } from 'framer-motion'
 
+const INACTIVE_AREA_PREFIX = '__INACTIVO__|'
+
 const AREAS_LIST = [
   "Operaciones/Proyectos", "Presupuesto", "Contabilidad",
   "Ssoma", "Rrhh", "Logística", "Finanzas", "Área comercial",
@@ -122,6 +124,12 @@ export default function SetupProfileWeb() {
 
       if (error || !data) {
         toast.error('No se encontró ningún Fotocheck con ese DNI')
+        setIsRecuperando(false)
+        return
+      }
+
+      if (isInactiveArea(data.area)) {
+        toast.error('Este trabajador fue dado de baja y ya no puede ingresar.')
         setIsRecuperando(false)
         return
       }
@@ -404,4 +412,8 @@ export default function SetupProfileWeb() {
       </motion.div>
     </div>
   )
+}
+
+function isInactiveArea(area?: string | null) {
+  return String(area ?? '').startsWith(INACTIVE_AREA_PREFIX)
 }

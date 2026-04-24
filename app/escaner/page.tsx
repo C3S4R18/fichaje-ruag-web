@@ -54,6 +54,16 @@ interface VacationCalendarDay {
   solicitudes: VacacionSolicitud[]
 }
 
+const INACTIVE_AREA_PREFIX = '__INACTIVO__|'
+
+function isInactiveArea(area?: string | null) {
+  return String(area ?? '').startsWith(INACTIVE_AREA_PREFIX)
+}
+
+function getVisibleArea(area?: string | null) {
+  return isInactiveArea(area) ? String(area).slice(INACTIVE_AREA_PREFIX.length) : String(area ?? '')
+}
+
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 const TODOS_LOS_LOGROS: LogroItem[] = [
@@ -465,20 +475,27 @@ export default function EscanerWeb() {
       if (!dni || !nombre) { router.push('/setup'); return }
 
       let p: Perfil | null = null
-      const area = store.get('RUAG_AREA')
-      const foto = store.get('RUAG_FOTO')
+      const { data } = await supabase.from('fotocheck_perfiles').select('*').eq('dni', dni).maybeSingle()
 
-      if (!area || !foto) {
-        const { data } = await supabase.from('fotocheck_perfiles').select('*').eq('dni', dni).single()
-        if (data) {
-          store.set('RUAG_AREA', data.area)
-          store.set('RUAG_FOTO', data.foto_url || '')
-          p = { dni: data.dni, nombres: data.nombres_completos, area: data.area, foto_url: data.foto_url || '' }
-        } else {
-          p = { dni, nombres: nombre, area: 'Asignando...', foto_url: '' }
+      if (data) {
+        if (isInactiveArea(data.area)) {
+          store.remove('RUAG_DNI')
+          store.remove('RUAG_NOMBRE')
+          store.remove('RUAG_AREA')
+          store.remove('RUAG_FOTO')
+          toast.error('Tu fotocheck fue dado de baja. Contacta con RRHH si lo necesitas.')
+          router.push('/setup')
+          return
         }
+
+        const visibleArea = getVisibleArea(data.area)
+        store.set('RUAG_AREA', visibleArea)
+        store.set('RUAG_FOTO', data.foto_url || '')
+        p = { dni: data.dni, nombres: data.nombres_completos, area: visibleArea, foto_url: data.foto_url || '' }
       } else {
-        p = { dni, nombres: nombre, area, foto_url: foto }
+        const area = store.get('RUAG_AREA')
+        const foto = store.get('RUAG_FOTO')
+        p = { dni, nombres: nombre, area: getVisibleArea(area) || 'Asignando...', foto_url: foto || '' }
       }
 
       if (p) {

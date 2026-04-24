@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server'
 const LIMA_TZ = 'America/Lima'
 const LIMA_UTC_OFFSET_HOURS = 5
 const WORKING_DAYS = new Set([1, 2, 3, 4, 5])
+const INACTIVE_AREA_PREFIX = '__INACTIVO__|'
 
 type WorkerProfile = {
   dni: string
@@ -70,7 +71,7 @@ export async function POST(req: NextRequest) {
 
     const startUtc = toUtcIsoFromLimaDate(processingDate, 0)
     const endUtc = toUtcIsoFromLimaDate(addDays(processingDate, 1), 0)
-    const placeholderIngresoUtc = toUtcIsoFromLimaDate(processingDate, 8)
+    const placeholderIngresoUtc = toUtcIsoFromLimaDate(processingDate, 23, 59)
 
     const [perfilesRes, registrosRes, vacacionesRes] = await Promise.all([
       supabaseAdmin
@@ -106,7 +107,11 @@ export async function POST(req: NextRequest) {
     const dnisConVacaciones = new Set((vacacionesRes.data ?? []).map((item: any) => String(item.dni)))
 
     const ausentes = perfiles.filter(
-      (perfil) => !dnisConRegistro.has(perfil.dni) && !dnisConVacaciones.has(perfil.dni)
+      (perfil) =>
+        !perfil.dni.startsWith('EXCEL-') &&
+        !String(perfil.area ?? '').startsWith(INACTIVE_AREA_PREFIX) &&
+        !dnisConRegistro.has(perfil.dni) &&
+        !dnisConVacaciones.has(perfil.dni)
     )
 
     if (!ausentes.length) {

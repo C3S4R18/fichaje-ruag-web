@@ -27,12 +27,25 @@ type TipoMarcacion = 'ninguna' | 'ingreso_obra' | 'salida_obra' | 'externo' | 'n
 
 const LIMA_TZ = 'America/Lima'
 const WORKING_DAYS = new Set([1, 2, 3, 4, 5])
+const INACTIVE_AREA_PREFIX = '__INACTIVO__|'
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function getLimaHour() {
   return Number(new Intl.DateTimeFormat('en-US', { timeZone: LIMA_TZ, hour: '2-digit', hour12: false })
     .formatToParts(new Date()).find(p => p.type === 'hour')?.value ?? '12')
+}
+
+function isInactiveArea(area?: string | null) {
+  return String(area ?? '').startsWith(INACTIVE_AREA_PREFIX)
+}
+
+function getVisibleArea(area?: string | null) {
+  return isInactiveArea(area) ? String(area).slice(INACTIVE_AREA_PREFIX.length) : String(area ?? '')
+}
+
+function makeInactiveArea(area?: string | null) {
+  return `${INACTIVE_AREA_PREFIX}${getVisibleArea(area) || 'SIN AREA'}`
 }
 
 function getLimaDateKey(date = new Date()) {
@@ -61,11 +74,11 @@ function buildSyntheticInasistencia(fechaKey: string, perfil: any) {
     id: `synthetic-inasistencia-${fechaKey}-${perfil.dni}`,
     dni: perfil.dni,
     fecha: fechaKey,
-    hora_ingreso: new Date(Date.UTC(year, month - 1, day, 13, 0, 0, 0)).toISOString(),
+    hora_ingreso: new Date(Date.UTC(year, month - 1, day, 28, 59, 0, 0)).toISOString(),
     hora_salida: null,
     estado_ingreso: 'INASISTENCIA',
     nombres_completos: perfil.nombres_completos,
-    area: perfil.area ?? '',
+    area: getVisibleArea(perfil.area),
     foto_url: perfil.foto_url ?? '',
     notas: 'Marcado automaticamente por el sistema - Sin registro en el dia',
     _syntheticInasistencia: true,
@@ -362,6 +375,8 @@ export default function AdminDashboard() {
 
     const syntheticAbsences = shouldBuildAbsences
       ? perfiles
+          .filter((perfil: any) => !String(perfil.dni).startsWith('EXCEL-'))
+          .filter((perfil: any) => !isInactiveArea(perfil.area))
           .filter((perfil: any) => !dnisConRegistro.has(String(perfil.dni)) && !dnisConVacaciones.has(String(perfil.dni)))
           .map((perfil: any) => buildSyntheticInasistencia(fechaStr, perfil))
       : []
@@ -406,12 +421,22 @@ export default function AdminDashboard() {
 
   const areas = useMemo(() => ['TODAS', ...Array.from(new Set(asistencias.map(a => a.area).filter(Boolean))).sort()], [asistencias])
 
-  const filtradas = useMemo(() => asistencias.filter(a => {
+  const filtradas = useMemo(() => {
+    const priority: Record<string, number> = { PUNTUAL: 0, TARDANZA: 1, INASISTENCIA: 2 }
     const q = busqueda.toLowerCase()
-    return (!q || a.nombres_completos?.toLowerCase().includes(q) || a.dni?.includes(q)) &&
-      (filtroArea === 'TODAS' || a.area === filtroArea) &&
-      (filtroEstado === 'TODOS' || a.estado_ingreso === filtroEstado)
-  }), [asistencias, busqueda, filtroArea, filtroEstado])
+
+    return asistencias
+      .filter(a =>
+        (!q || a.nombres_completos?.toLowerCase().includes(q) || a.dni?.includes(q)) &&
+        (filtroArea === 'TODAS' || a.area === filtroArea) &&
+        (filtroEstado === 'TODOS' || a.estado_ingreso === filtroEstado)
+      )
+      .sort((a, b) => {
+        const byState = (priority[a.estado_ingreso] ?? 9) - (priority[b.estado_ingreso] ?? 9)
+        if (byState !== 0) return byState
+        return new Date(b.hora_ingreso).getTime() - new Date(a.hora_ingreso).getTime()
+      })
+  }, [asistencias, busqueda, filtroArea, filtroEstado])
 
   const conGPS = useMemo(() => filtradas.map(a => {
     const d = extraerDetalleNota(a.notas)
@@ -454,11 +479,13 @@ export default function AdminDashboard() {
     const tS = { font: { color: { rgb: 'DC2626' }, bold: true }, alignment: { horizontal: 'center' } }
     const cS = { alignment: { horizontal: 'center' } }
     const ord = (s: string) => { const p = s?.trim().split(' '); return !p?.length ? '-' : p.length >= 3 ? `${p.slice(-2).join(' ')}, ${p.slice(0,-2).join(' ')}` : p.length === 2 ? `${p[1]}, ${p[0]}` : s }
-    const tt = (ts: string) => new Date(ts).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit' })
+    const tt = (ts: string, estado?: string) => estado === 'INASISTENCIA'
+      ? '11:59 p. m.'
+      : new Date(ts).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit' })
     const rows: any[][] = [["FECHA","DNI","APELLIDOS Y NOMBRES","ÁREA","INGRESO","ESTADO","SALIDA","DURACIÓN","NOTA","MAPA"]]
     data.forEach(r => {
       const d = extraerDetalleNota(r.notas)
-      rows.push([r.fecha, r.dni, ord(r.nombres_completos), r.area, tt(r.hora_ingreso), r.estado_ingreso,
+      rows.push([r.fecha, r.dni, ord(r.nombres_completos), r.area, tt(r.hora_ingreso, r.estado_ingreso), r.estado_ingreso,
         r.hora_salida ? tt(r.hora_salida) : '—', calcHoras(r.hora_ingreso, r.hora_salida),
         d.tieneNota ? d.textoLimpio : '—',
         d.contieneGPS && d.coordenadas ? `http://maps.google.com/?q=${d.coordenadas}` : '—'])
@@ -516,6 +543,23 @@ export default function AdminDashboard() {
   const borrarRegistro = async (id: string, nombre: string) => {
     if (!confirm(`¿Eliminar registro de ${nombre}?`)) return
     try { await supabase.from('registro_asistencias').delete().eq('id', id); toast.success('Eliminado'); setAsistencias(prev => prev.filter(a => a.id !== id)) } catch { toast.error('Error') }
+  }
+
+  const darDeBajaTrabajador = async (dni: string, nombre: string, areaActual?: string | null) => {
+    if (!confirm(`¿Dar de baja a ${nombre}?\n\nSeguirá conservando su historial, pero ya no aparecerá en inasistencias futuras.`)) return
+    try {
+      const { error } = await supabase
+        .from('fotocheck_perfiles')
+        .update({ area: makeInactiveArea(areaActual) })
+        .eq('dni', dni)
+
+      if (error) throw error
+
+      toast.success(`${nombre} fue dado de baja`)
+      await fetchData(fechaActual)
+    } catch (error: any) {
+      toast.error(error?.message || 'No se pudo dar de baja al trabajador')
+    }
   }
 
   const cambiarEstado = async (id: string, estadoActual: string) => {
@@ -707,7 +751,8 @@ export default function AdminDashboard() {
                         <FotocheckRow key={a.id} data={a} index={i} modoEdicion={modoEdicion}
                           onActualizar={actualizarHora} onCambiarEstado={cambiarEstado}
                           onAbrirNota={n => setNotaModal(n)} onBorrarNota={borrarNota}
-                          onBorrarRegistro={borrarRegistro} onActualizarNombre={actualizarNombre} />
+                          onBorrarRegistro={borrarRegistro} onActualizarNombre={actualizarNombre}
+                          onDarDeBaja={darDeBajaTrabajador} />
                       ))}
                     </AnimatePresence>
                   </motion.div>
@@ -912,7 +957,16 @@ function ModalManual({ onClose, fechaBase, onSuccess }: { onClose: () => void; f
 
   useEffect(() => {
     supabase.from('fotocheck_perfiles').select('dni, nombres_completos, area, foto_url').order('nombres_completos')
-      .then(({ data }) => { if (data) setTrabajadores(data); setLoadingP(false) })
+      .then(({ data }) => {
+        if (data) {
+          setTrabajadores(
+            data
+              .filter((item: any) => !isInactiveArea(item.area))
+              .map((item: any) => ({ ...item, area: getVisibleArea(item.area) }))
+          )
+        }
+        setLoadingP(false)
+      })
   }, [])
 
   useEffect(() => {
@@ -1064,7 +1118,7 @@ function ModalManual({ onClose, fechaBase, onSuccess }: { onClose: () => void; f
 
 // ─── FotocheckRow ─────────────────────────────────────────────────────────────
 
-function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado, onAbrirNota, onBorrarNota, onBorrarRegistro, onActualizarNombre }: {
+function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado, onAbrirNota, onBorrarNota, onBorrarRegistro, onActualizarNombre, onDarDeBaja }: {
   data: any; index: number; modoEdicion: boolean
   onActualizar: (id: string, campo: 'hora_ingreso' | 'hora_salida', hora: string | null, fechaBase: string) => void
   onCambiarEstado: (id: string, estadoActual: string) => void
@@ -1072,6 +1126,7 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
   onBorrarNota: (id: string) => void
   onBorrarRegistro: (id: string, nombre: string) => void
   onActualizarNombre: (id: string, dni: string, nuevoNombre: string) => void
+  onDarDeBaja: (dni: string, nombre: string, areaActual?: string | null) => void
 }) {
   const [editandoNombre, setEditandoNombre] = useState(false)
   const [nombreTemp, setNombreTemp] = useState(data.nombres_completos)
@@ -1263,6 +1318,15 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
             <button onClick={() => onBorrarRegistro(data.id, data.nombres_completos)}
               className="p-1.5 rounded-full border border-red-300 dark:border-red-500/40 bg-red-50 dark:bg-red-500/10 text-red-600 dark:text-red-400 hover:bg-red-100 hover:scale-110 transition-all ml-0.5">
               <X size={12} />
+            </button>
+          )}
+          {modoEdicion && (
+            <button
+              onClick={() => onDarDeBaja(data.dni, data.nombres_completos, data.area)}
+              className="px-2 py-1 rounded-full border border-amber-300 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 text-[8px] font-black text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-500/20 transition-all ml-0.5"
+              title="Dar de baja trabajador"
+            >
+              BAJA
             </button>
           )}
         </div>
