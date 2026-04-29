@@ -12,10 +12,10 @@ import {
   LogOut, UserPlus, Loader2, Search, FileSpreadsheet, SlidersHorizontal,
   Users, ShieldCheck, AlignLeft, MapPin, Map as MapIcon, Download,
   HardHat, Trash2, MessageSquareText, X, Sunrise, Sun, Sunset, MoonStar,
-  Store, Moon, RefreshCw, Activity
+  Store, Moon, RefreshCw, Activity, BarChart3, TrendingUp
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
-import Map, {
+import MapGL, {
   Marker, NavigationControl, FullscreenControl, GeolocateControl, type MapRef
 } from 'react-map-gl/mapbox'
 import 'mapbox-gl/dist/mapbox-gl.css'
@@ -24,10 +24,61 @@ import 'mapbox-gl/dist/mapbox-gl.css'
 
 type TimeOfDay = 'dawn' | 'day' | 'dusk' | 'night'
 type TipoMarcacion = 'ninguna' | 'ingreso_obra' | 'salida_obra' | 'externo' | 'nota' | 'nocturno'
+type EstadoAsistencia = 'PUNTUAL' | 'TARDANZA' | 'INASISTENCIA'
+
+type AsistenciaRecord = {
+  id: string
+  dni: string
+  fecha: string
+  hora_ingreso: string
+  hora_salida: string | null
+  estado_ingreso: EstadoAsistencia | string
+  nombres_completos: string
+  area: string
+  foto_url?: string | null
+  notas?: string | null
+  _syntheticInasistencia?: boolean
+  _entroAyer?: boolean
+  _saleHoy?: boolean
+  [key: string]: any
+}
+
+type TrendPoint = {
+  fecha: string
+  puntuales: number
+  tardanzas: number
+  inasistencias: number
+  total: number
+}
+
+type AreaMetric = {
+  area: string
+  puntuales: number
+  tardanzas: number
+  inasistencias: number
+  total: number
+}
+
+type MetricasData = {
+  resumenDia: {
+    total: number
+    puntuales: number
+    tardanzas: number
+    inasistencias: number
+    conSalida: number
+    reingresos: number
+  }
+  trend: TrendPoint[]
+  areaBreakdown: AreaMetric[]
+  bestDay: TrendPoint | null
+  worstDay: TrendPoint | null
+  rangeLabel: string
+}
 
 const LIMA_TZ = 'America/Lima'
 const WORKING_DAYS = new Set([1, 2, 3, 4, 5])
 const INACTIVE_AREA_PREFIX = '__INACTIVO__|'
+const STATUS_PRIORITY: Record<string, number> = { PUNTUAL: 0, TARDANZA: 1, INASISTENCIA: 2 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -67,7 +118,7 @@ function getWeekday(dateKey: string) {
   return new Date(`${dateKey}T12:00:00-05:00`).getUTCDay()
 }
 
-function buildSyntheticInasistencia(fechaKey: string, perfil: any) {
+function buildSyntheticInasistencia(fechaKey: string, perfil: any): AsistenciaRecord {
   const [year, month, day] = fechaKey.split('-').map(Number)
 
   return {
@@ -83,6 +134,37 @@ function buildSyntheticInasistencia(fechaKey: string, perfil: any) {
     notas: 'Marcado automaticamente por el sistema - Sin registro en el dia',
     _syntheticInasistencia: true,
   }
+}
+
+function dateKeysBetween(startKey: string, endKey: string) {
+  const keys: string[] = []
+  let cursor = new Date(`${startKey}T12:00:00.000Z`)
+  const end = new Date(`${endKey}T12:00:00.000Z`)
+
+  while (cursor <= end) {
+    keys.push(cursor.toISOString().slice(0, 10))
+    cursor.setUTCDate(cursor.getUTCDate() + 1)
+  }
+
+  return keys
+}
+
+function sortRecordsByStatus(records: AsistenciaRecord[]) {
+  return [...records].sort((a, b) => {
+    const byState = (STATUS_PRIORITY[a.estado_ingreso] ?? 9) - (STATUS_PRIORITY[b.estado_ingreso] ?? 9)
+    if (byState !== 0) return byState
+    return new Date(b.hora_ingreso).getTime() - new Date(a.hora_ingreso).getTime()
+  })
+}
+
+function sortRecordsForRange(records: AsistenciaRecord[]) {
+  return [...records].sort((a, b) => {
+    const byDate = String(a.fecha).localeCompare(String(b.fecha))
+    if (byDate !== 0) return byDate
+    const byState = (STATUS_PRIORITY[a.estado_ingreso] ?? 9) - (STATUS_PRIORITY[b.estado_ingreso] ?? 9)
+    if (byState !== 0) return byState
+    return new Date(a.hora_ingreso).getTime() - new Date(b.hora_ingreso).getTime()
+  })
 }
 
 function getTimeOfDay(): TimeOfDay {
@@ -281,7 +363,7 @@ function StatCard({ title, value, icon, color, sub }: { title: string; value: nu
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function AdminDashboard() {
-  const [asistencias, setAsistencias]     = useState<any[]>([])
+  const [asistencias, setAsistencias]     = useState<AsistenciaRecord[]>([])
   const [loading, setLoading]             = useState(true)
   const [isInitialLoad, setIsInitialLoad] = useState(true)
   const [fechaActual, setFechaActual]     = useState(new Date())
@@ -294,6 +376,7 @@ export default function AdminDashboard() {
   const [notaModal, setNotaModal]         = useState<any>(null)
   const [showExportar, setShowExportar]   = useState(false)
   const [showManual, setShowManual]       = useState(false)
+  const [showMetricas, setShowMetricas]   = useState(false)
   const [busqueda, setBusqueda]           = useState('')
   const [filtroArea, setFiltroArea]       = useState('TODAS')
   const [filtroEstado, setFiltroEstado]   = useState('TODOS')
@@ -301,6 +384,8 @@ export default function AdminDashboard() {
   const [exportHasta, setExportHasta]     = useState(format(new Date(), 'yyyy-MM-dd'))
   const [exportando, setExportando]       = useState(false)
   const [tipoExport, setTipoExport]       = useState<'dia' | 'rango'>('dia')
+  const [metricasLoading, setMetricasLoading] = useState(false)
+  const [metricasData, setMetricasData] = useState<MetricasData | null>(null)
 
   useEffect(() => {
     setMounted(true)
@@ -388,6 +473,51 @@ export default function AdminDashboard() {
     if (isInitialLoad) setTimeout(() => setIsInitialLoad(false), 400)
   }
 
+  const loadRangeDataset = async (fromKey: string, toKey: string): Promise<AsistenciaRecord[]> => {
+    const todayLima = getLimaDateKey()
+    const [recordsRes, perfilesRes, vacacionesRes] = await Promise.all([
+      supabase.from('registro_asistencias').select('*').gte('fecha', fromKey).lte('fecha', toKey),
+      supabase.from('fotocheck_perfiles').select('dni, nombres_completos, area, foto_url').order('nombres_completos'),
+      supabase.from('vacaciones_solicitudes')
+        .select('dni, fecha_inicio, fecha_fin, estado')
+        .eq('estado', 'aprobada')
+        .lte('fecha_inicio', toKey)
+        .gte('fecha_fin', fromKey),
+    ])
+
+    if (recordsRes.error) throw recordsRes.error
+    if (perfilesRes.error) throw perfilesRes.error
+    if (vacacionesRes.error) throw vacacionesRes.error
+
+    const records = (recordsRes.data ?? []) as AsistenciaRecord[]
+    const perfiles = (perfilesRes.data ?? [])
+      .filter((perfil: any) => !String(perfil.dni).startsWith('EXCEL-'))
+      .filter((perfil: any) => !isInactiveArea(perfil.area))
+
+    const vacations = vacacionesRes.data ?? []
+    const existingKeys = new Set(records.map((row: any) => `${row.fecha}::${row.dni}`))
+    const vacationKeys = new Set<string>()
+
+    vacations.forEach((row: any) => {
+      for (const dateKey of dateKeysBetween(String(row.fecha_inicio), String(row.fecha_fin))) {
+        vacationKeys.add(`${dateKey}::${row.dni}`)
+      }
+    })
+
+    const synthetic: AsistenciaRecord[] = []
+    for (const dateKey of dateKeysBetween(fromKey, toKey)) {
+      if (!(dateKey < todayLima) || !WORKING_DAYS.has(getWeekday(dateKey))) continue
+      perfiles.forEach((perfil: any) => {
+        const key = `${dateKey}::${perfil.dni}`
+        if (!existingKeys.has(key) && !vacationKeys.has(key)) {
+          synthetic.push(buildSyntheticInasistencia(dateKey, perfil))
+        }
+      })
+    }
+
+    return [...records, ...synthetic]
+  }
+
   useEffect(() => {
     fetchData(fechaActual)
     if (!isToday(fechaActual)) return
@@ -422,20 +552,14 @@ export default function AdminDashboard() {
   const areas = useMemo(() => ['TODAS', ...Array.from(new Set(asistencias.map(a => a.area).filter(Boolean))).sort()], [asistencias])
 
   const filtradas = useMemo(() => {
-    const priority: Record<string, number> = { PUNTUAL: 0, TARDANZA: 1, INASISTENCIA: 2 }
     const q = busqueda.toLowerCase()
 
-    return asistencias
+    return sortRecordsByStatus(asistencias
       .filter(a =>
         (!q || a.nombres_completos?.toLowerCase().includes(q) || a.dni?.includes(q)) &&
         (filtroArea === 'TODAS' || a.area === filtroArea) &&
         (filtroEstado === 'TODOS' || a.estado_ingreso === filtroEstado)
-      )
-      .sort((a, b) => {
-        const byState = (priority[a.estado_ingreso] ?? 9) - (priority[b.estado_ingreso] ?? 9)
-        if (byState !== 0) return byState
-        return new Date(b.hora_ingreso).getTime() - new Date(a.hora_ingreso).getTime()
-      })
+      ))
   }, [asistencias, busqueda, filtroArea, filtroEstado])
 
   const conGPS = useMemo(() => filtradas.map(a => {
@@ -472,11 +596,12 @@ export default function AdminDashboard() {
 
   // ── Excel ─────────────────────────────────────────────────────────────────
 
-  const exportarExcel = (data: any[], nombre: string) => {
+  const exportarExcel = (data: AsistenciaRecord[], nombre: string) => {
     if (!data.length) { toast.error('Sin registros'); return false }
     const hS = { font: { bold: true, color: { rgb: 'FFFFFF' }, sz: 11 }, fill: { fgColor: { rgb: '1E293B' } }, alignment: { horizontal: 'center', vertical: 'center' } }
     const pS = { font: { color: { rgb: '059669' }, bold: true }, alignment: { horizontal: 'center' } }
     const tS = { font: { color: { rgb: 'DC2626' }, bold: true }, alignment: { horizontal: 'center' } }
+    const iS = { font: { color: { rgb: 'EA580C' }, bold: true }, alignment: { horizontal: 'center' } }
     const cS = { alignment: { horizontal: 'center' } }
     const ord = (s: string) => { const p = s?.trim().split(' '); return !p?.length ? '-' : p.length >= 3 ? `${p.slice(-2).join(' ')}, ${p.slice(0,-2).join(' ')}` : p.length === 2 ? `${p[1]}, ${p[0]}` : s }
     const tt = (ts: string, estado?: string) => estado === 'INASISTENCIA'
@@ -497,7 +622,7 @@ export default function AdminDashboard() {
         if (!ws[cell]) continue
         if (R === 0) ws[cell].s = hS
         else {
-          if (C === 5) ws[cell].s = ws[cell].v === 'PUNTUAL' ? pS : tS
+          if (C === 5) ws[cell].s = ws[cell].v === 'PUNTUAL' ? pS : ws[cell].v === 'INASISTENCIA' ? iS : tS
           else if ([0,1,3,4,6,7].includes(C)) ws[cell].s = cS
           if (C === 9 && ws[cell].v !== '—') { ws[cell].l = { Target: ws[cell].v }; ws[cell].v = '📍 Ver'; ws[cell].s = { font: { color: { rgb: '2563EB' }, underline: true }, alignment: { horizontal: 'center' } } }
         }
@@ -510,14 +635,16 @@ export default function AdminDashboard() {
 
   const ejecutarExport = async () => {
     try {
-      if (tipoExport === 'dia') { const ok = exportarExcel(filtradas, `RUAG_${format(fechaActual,'yyyy-MM-dd')}`); if (ok) { toast.success('Excel descargado'); setShowExportar(false) } }
+      if (tipoExport === 'dia') {
+        const ok = exportarExcel(sortRecordsForRange(filtradas), `RUAG_${format(fechaActual,'yyyy-MM-dd')}`)
+        if (ok) { toast.success('Excel descargado'); setShowExportar(false) }
+      }
       else {
         if (!exportDesde || !exportHasta) { toast.error('Selecciona fechas'); return }
         setExportando(true); toast.loading('Descargando...', { id: 'dl' })
-        const { data, error } = await supabase.from('registro_asistencias').select('*').gte('fecha', exportDesde).lte('fecha', exportHasta).order('fecha').order('hora_ingreso')
-        if (error) throw error
+        const data = await loadRangeDataset(exportDesde, exportHasta)
         toast.dismiss('dl')
-        const ok = exportarExcel(data, `RUAG_${exportDesde}_AL_${exportHasta}`)
+        const ok = exportarExcel(sortRecordsForRange(data), `RUAG_${exportDesde}_AL_${exportHasta}`)
         if (ok) { toast.success(`${data.length} registros`); setShowExportar(false) }
       }
     } catch { toast.dismiss('dl'); toast.error('Error al exportar') } finally { setExportando(false) }
@@ -578,6 +705,66 @@ export default function AdminDashboard() {
       toast.success('Nombre actualizado')
       setAsistencias(prev => prev.map(a => a.id === id ? { ...a, nombres_completos: nombre } : a))
     } catch { toast.error('Error al actualizar nombre') }
+  }
+
+  const cargarMetricas = async () => {
+    setMetricasLoading(true)
+    try {
+      const endKey = format(fechaActual, 'yyyy-MM-dd')
+      const startKey = format(subDays(fechaActual, 13), 'yyyy-MM-dd')
+      const rangeData = sortRecordsForRange(await loadRangeDataset(startKey, endKey))
+      const createTrendPoint = (fecha: string): TrendPoint => ({ fecha, puntuales: 0, tardanzas: 0, inasistencias: 0, total: 0 })
+      const createAreaMetric = (area: string): AreaMetric => ({ area, puntuales: 0, tardanzas: 0, inasistencias: 0, total: 0 })
+
+      const resumenDia = {
+        total: asistencias.length,
+        puntuales,
+        tardanzas,
+        inasistencias: totalInasistencias,
+        conSalida,
+        reingresos,
+      }
+
+      const trendMap = new Map<string, TrendPoint>()
+      rangeData.forEach((row) => {
+        const current = trendMap.get(row.fecha) ?? createTrendPoint(row.fecha)
+        if (row.estado_ingreso === 'PUNTUAL') current.puntuales += 1
+        else if (row.estado_ingreso === 'TARDANZA') current.tardanzas += 1
+        else if (row.estado_ingreso === 'INASISTENCIA') current.inasistencias += 1
+        current.total += 1
+        trendMap.set(row.fecha, current)
+      })
+
+      const areaMap = new Map<string, AreaMetric>()
+      asistencias.forEach((row) => {
+        const key = row.area || 'SIN AREA'
+        const current = areaMap.get(key) ?? createAreaMetric(key)
+        if (row.estado_ingreso === 'PUNTUAL') current.puntuales += 1
+        else if (row.estado_ingreso === 'TARDANZA') current.tardanzas += 1
+        else if (row.estado_ingreso === 'INASISTENCIA') current.inasistencias += 1
+        current.total += 1
+        areaMap.set(key, current)
+      })
+
+      const trend = Array.from(trendMap.values()).sort((a, b) => a.fecha.localeCompare(b.fecha))
+      const areaBreakdown = Array.from(areaMap.values()).sort((a, b) => b.total - a.total).slice(0, 8)
+      const bestDay = trend.reduce<TrendPoint | null>((best, item) => item.puntuales > (best?.puntuales ?? -1) ? item : best, null)
+      const worstDay = trend.reduce<TrendPoint | null>((worst, item) => item.inasistencias > (worst?.inasistencias ?? -1) ? item : worst, null)
+
+      setMetricasData({
+        resumenDia,
+        trend,
+        areaBreakdown,
+        bestDay,
+        worstDay,
+        rangeLabel: `${startKey} al ${endKey}`,
+      })
+      setShowMetricas(true)
+    } catch (error: any) {
+      toast.error(error?.message || 'No se pudieron cargar las métricas')
+    } finally {
+      setMetricasLoading(false)
+    }
   }
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -680,6 +867,15 @@ export default function AdminDashboard() {
               className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-sky-50 dark:bg-sky-500/10 text-sky-700 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-500/20 border border-sky-200 dark:border-sky-500/20 text-[11px] font-black transition-all active:scale-95 tracking-wider">
               <CalendarDays size={13} /> VACACIONES
             </Link>
+            <Link
+              href={`/metricas?from=${format(subDays(fechaActual, 29), 'yyyy-MM-dd')}&to=${format(fechaActual, 'yyyy-MM-dd')}`}
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 border border-indigo-200 dark:border-indigo-500/20 text-[11px] font-black transition-all active:scale-95 tracking-wider">
+              <BarChart3 size={13} /> ANALÍTICA
+            </Link>
+            <button onClick={cargarMetricas} hidden
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 border border-indigo-200 dark:border-indigo-500/20 text-[11px] font-black transition-all active:scale-95 tracking-wider">
+              {metricasLoading ? <Loader2 size={13} className="animate-spin" /> : <BarChart3 size={13} />} MÉTRICAS
+            </button>
             <button onClick={() => fetchData(fechaActual)}
               className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-[11px] font-black transition-all active:scale-95 tracking-wider">
               <RefreshCw size={12} /> ACTUALIZAR
@@ -760,7 +956,7 @@ export default function AdminDashboard() {
               ) : (
                 <div className="w-full h-full min-h-[400px] relative">
                   {process.env.NEXT_PUBLIC_MAPBOX_TOKEN ? (
-                    <Map ref={mapRef}
+                    <MapGL ref={mapRef}
                       mapboxAccessToken={process.env.NEXT_PUBLIC_MAPBOX_TOKEN}
                       initialViewState={{ longitude: centroMapa.longitude, latitude: centroMapa.latitude, zoom: 14.5, pitch: 65, bearing: -20 }}
                       mapStyle="mapbox://styles/mapbox/standard"
@@ -808,7 +1004,7 @@ export default function AdminDashboard() {
                       <FullscreenControl position="top-right" />
                       <NavigationControl position="top-right" visualizePitch />
                       <GeolocateControl position="top-right" />
-                    </Map>
+                    </MapGL>
                   ) : (
                     <div className="h-full flex flex-col items-center justify-center text-slate-400 p-8 text-center">
                       <MapIcon size={36} className="mb-3 opacity-40" />
@@ -879,6 +1075,122 @@ export default function AdminDashboard() {
                   className="w-full mt-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black py-3 rounded-xl flex justify-center items-center gap-2 transition-all active:scale-95 disabled:opacity-50 text-sm">
                   {exportando ? <Loader2 className="animate-spin" size={16} /> : <><Download size={14} /> DESCARGAR</>}
                 </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showMetricas && (
+          <motion.div className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+            style={{ background: 'rgba(15,23,42,0.68)', backdropFilter: 'blur(12px)' }}
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={() => setShowMetricas(false)}>
+            <motion.div className="bg-white dark:bg-slate-900 w-full max-w-5xl rounded-[28px] shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden"
+              initial={{ scale: 0.94, y: 18 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.94, y: 18 }}
+              transition={{ type: 'spring', stiffness: 360, damping: 30 }}
+              onClick={e => e.stopPropagation()}>
+              <div className="bg-gradient-to-r from-indigo-600 via-sky-500 to-emerald-500 h-1.5" />
+              <div className="p-6 sm:p-7 max-h-[85vh] overflow-y-auto">
+                <div className="flex items-start justify-between gap-4 mb-6">
+                  <div>
+                    <div className="inline-flex items-center gap-2 rounded-full bg-indigo-50 dark:bg-indigo-500/10 px-3 py-1 text-[11px] font-black tracking-[0.14em] text-indigo-700 dark:text-indigo-300 uppercase">
+                      <TrendingUp size={12} /> Analítica Operativa
+                    </div>
+                    <h3 className="mt-3 text-2xl sm:text-3xl font-black tracking-tight text-slate-900 dark:text-white">Métricas de Asistencia</h3>
+                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Vista del día seleccionado y tendencia reciente: {metricasData?.rangeLabel}</p>
+                  </div>
+                  <button onClick={() => setShowMetricas(false)} className="p-2 rounded-xl text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"><X size={18} /></button>
+                </div>
+
+                {metricasData && (
+                  <>
+                    <div className="grid grid-cols-2 xl:grid-cols-6 gap-4 mb-6">
+                      {[
+                        { label: 'Total Día', value: metricasData.resumenDia.total, color: 'from-slate-700 to-slate-900' },
+                        { label: 'Puntuales', value: metricasData.resumenDia.puntuales, color: 'from-emerald-500 to-teal-500' },
+                        { label: 'Tardanzas', value: metricasData.resumenDia.tardanzas, color: 'from-rose-500 to-red-500' },
+                        { label: 'Inasistencias', value: metricasData.resumenDia.inasistencias, color: 'from-orange-500 to-amber-500' },
+                        { label: 'Con Salida', value: metricasData.resumenDia.conSalida, color: 'from-blue-500 to-indigo-500' },
+                        { label: 'Reingresos', value: metricasData.resumenDia.reingresos, color: 'from-violet-500 to-fuchsia-500' },
+                      ].map((item, index) => (
+                        <motion.div
+                          key={item.label}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: index * 0.04 }}
+                          className="rounded-2xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-4 shadow-sm"
+                        >
+                          <div className={`h-1.5 rounded-full bg-gradient-to-r ${item.color} mb-4`} />
+                          <p className="text-[10px] font-black tracking-[0.14em] uppercase text-slate-400">{item.label}</p>
+                          <p className="mt-2 text-3xl font-black tracking-tight text-slate-900 dark:text-white tabular-nums">{item.value}</p>
+                        </motion.div>
+                      ))}
+                    </div>
+
+                    <div className="grid grid-cols-1 xl:grid-cols-[1.35fr_0.95fr] gap-5">
+                      <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-slate-50/70 dark:bg-slate-950/60 p-5">
+                        <div className="flex items-center justify-between gap-3 mb-4">
+                          <div>
+                            <p className="text-[10px] font-black tracking-[0.14em] uppercase text-slate-400">Tendencia 14 días</p>
+                            <h4 className="text-lg font-black text-slate-900 dark:text-white">Puntualidad vs tardanza vs inasistencia</h4>
+                          </div>
+                          <div className="text-right text-[11px] text-slate-400">
+                            <div>Mejor: <span className="font-black text-emerald-600">{metricasData.bestDay?.fecha ?? '-'}</span></div>
+                            <div>Crítico: <span className="font-black text-orange-600">{metricasData.worstDay?.fecha ?? '-'}</span></div>
+                          </div>
+                        </div>
+                        <div className="space-y-3">
+                          {metricasData.trend.map((item: any, index: number) => {
+                            const max = Math.max(item.total, 1)
+                            return (
+                              <motion.div key={item.fecha} initial={{ opacity: 0, x: -8 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: index * 0.02 }}>
+                                <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 mb-1">
+                                  <span>{item.fecha}</span>
+                                  <span>{item.total} registros</span>
+                                </div>
+                                <div className="flex h-3 overflow-hidden rounded-full bg-slate-200 dark:bg-slate-800">
+                                  <div className="bg-emerald-500" style={{ width: `${(item.puntuales / max) * 100}%` }} />
+                                  <div className="bg-red-500" style={{ width: `${(item.tardanzas / max) * 100}%` }} />
+                                  <div className="bg-orange-500" style={{ width: `${(item.inasistencias / max) * 100}%` }} />
+                                </div>
+                              </motion.div>
+                            )
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="rounded-3xl border border-slate-200 dark:border-slate-800 bg-white dark:bg-slate-950 p-5">
+                        <p className="text-[10px] font-black tracking-[0.14em] uppercase text-slate-400">Áreas del día</p>
+                        <h4 className="text-lg font-black text-slate-900 dark:text-white mb-4">Distribución operativa</h4>
+                        <div className="space-y-3">
+                          {metricasData.areaBreakdown.length === 0 ? (
+                            <div className="rounded-2xl border border-dashed border-slate-200 dark:border-slate-800 px-4 py-6 text-center text-sm text-slate-400">Sin datos para el día seleccionado</div>
+                          ) : metricasData.areaBreakdown.map((item: any, index: number) => {
+                            const ratio = metricasData.resumenDia.total > 0 ? (item.total / metricasData.resumenDia.total) * 100 : 0
+                            return (
+                              <motion.div key={item.area} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.03 }}>
+                                <div className="flex items-center justify-between text-[11px] font-bold text-slate-500 mb-1">
+                                  <span className="truncate pr-3">{item.area}</span>
+                                  <span className="tabular-nums">{item.total}</span>
+                                </div>
+                                <div className="h-2.5 rounded-full bg-slate-100 dark:bg-slate-800 overflow-hidden">
+                                  <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 via-sky-500 to-emerald-400" style={{ width: `${ratio}%` }} />
+                                </div>
+                                <div className="mt-1 flex gap-3 text-[10px] font-bold text-slate-400">
+                                  <span className="text-emerald-600">P {item.puntuales}</span>
+                                  <span className="text-red-500">T {item.tardanzas}</span>
+                                  <span className="text-orange-500">I {item.inasistencias}</span>
+                                </div>
+                              </motion.div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             </motion.div>
           </motion.div>
