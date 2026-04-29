@@ -386,6 +386,9 @@ export default function AdminDashboard() {
   const [tipoExport, setTipoExport]       = useState<'dia' | 'rango'>('dia')
   const [metricasLoading, setMetricasLoading] = useState(false)
   const [metricasData, setMetricasData] = useState<MetricasData | null>(null)
+  const [vacacionesPendientes, setVacacionesPendientes] = useState(0)
+  const [vacacionesPendientesPreview, setVacacionesPendientesPreview] = useState<string[]>([])
+  const pendingVacacionesRef = useRef(0)
 
   useEffect(() => {
     setMounted(true)
@@ -417,6 +420,31 @@ export default function AdminDashboard() {
 
   const toggleTheme = () => {
     setIsDark(p => { const n = !p; document.documentElement.classList.toggle('dark', n); localStorage.setItem('ruag_theme', n ? 'dark' : 'light'); return n })
+  }
+
+  const fetchPendingVacaciones = async (showToast = false) => {
+    const { data, error, count } = await supabase
+      .from('vacaciones_solicitudes')
+      .select('id, trabajador_nombre, created_at', { count: 'exact' })
+      .eq('estado', 'solicitada')
+      .order('created_at', { ascending: false })
+      .limit(3)
+
+    if (error) return
+
+    const nextCount = count ?? data?.length ?? 0
+    const prevCount = pendingVacacionesRef.current
+
+    setVacacionesPendientes(nextCount)
+    setVacacionesPendientesPreview((data ?? []).map((item: any) => String(item.trabajador_nombre)))
+    pendingVacacionesRef.current = nextCount
+
+    if (showToast && nextCount > prevCount) {
+      const latestName = data?.[0]?.trabajador_nombre
+      toast.info('Nueva solicitud de vacaciones', {
+        description: latestName ? String(latestName) : `${nextCount} pendientes`,
+      })
+    }
   }
 
   // ── Fetch con soporte multi-turno ─────────────────────────────────────────
@@ -546,6 +574,18 @@ export default function AdminDashboard() {
       .subscribe()
     return () => { supabase.removeChannel(canal) }
   }, [fechaActual])
+
+  useEffect(() => {
+    fetchPendingVacaciones()
+    const canalVacaciones = supabase.channel('admin-vacaciones-alerta')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'vacaciones_solicitudes' }, (payload) => {
+        const isNewRequest = payload.eventType === 'INSERT' && payload.new?.estado === 'solicitada'
+        void fetchPendingVacaciones(isNewRequest)
+      })
+      .subscribe()
+
+    return () => { supabase.removeChannel(canalVacaciones) }
+  }, [])
 
   // ── Memos ─────────────────────────────────────────────────────────────────
 
@@ -863,9 +903,32 @@ export default function AdminDashboard() {
               className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 border border-emerald-200 dark:border-emerald-500/20 text-[11px] font-black transition-all active:scale-95 tracking-wider">
               <FileSpreadsheet size={13} /> EXCEL
             </button>
-            <Link href="/vacaciones"
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-sky-50 dark:bg-sky-500/10 text-sky-700 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-500/20 border border-sky-200 dark:border-sky-500/20 text-[11px] font-black transition-all active:scale-95 tracking-wider">
-              <CalendarDays size={13} /> VACACIONES
+            <Link
+              href="/vacaciones"
+              title={vacacionesPendientesPreview.length ? `Pendientes: ${vacacionesPendientesPreview.join(', ')}` : 'Sin solicitudes pendientes'}
+              className={`w-full flex items-center justify-between gap-3 py-2.5 px-3 rounded-xl border text-[11px] font-black transition-all active:scale-95 tracking-wider ${
+                vacacionesPendientes > 0
+                  ? 'bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-500/20 border-amber-200 dark:border-amber-500/30 shadow-[0_0_0_1px_rgba(245,158,11,0.16)]'
+                  : 'bg-sky-50 dark:bg-sky-500/10 text-sky-700 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-500/20 border-sky-200 dark:border-sky-500/20'
+              }`}
+            >
+              <span className="flex items-center gap-2">
+                <CalendarDays size={13} />
+                {vacacionesPendientes > 0 ? 'VACACIONES ALERTA' : 'VACACIONES'}
+              </span>
+              {vacacionesPendientes > 0 ? (
+                <span className="flex items-center gap-2">
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-500 opacity-75" />
+                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-amber-500" />
+                  </span>
+                  <span className="rounded-full bg-white/80 dark:bg-slate-950/60 px-2 py-0.5 text-[10px] font-black tabular-nums">
+                    {vacacionesPendientes}
+                  </span>
+                </span>
+              ) : (
+                <span className="text-[10px] font-bold opacity-70">OK</span>
+              )}
             </Link>
             <Link
               href={`/metricas?from=${format(subDays(fechaActual, 29), 'yyyy-MM-dd')}&to=${format(fechaActual, 'yyyy-MM-dd')}`}
