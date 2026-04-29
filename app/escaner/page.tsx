@@ -962,13 +962,8 @@ export default function EscanerWeb() {
           <div className="flex items-center justify-between mb-5">
             <div className="flex items-center gap-3">
               <div className="w-11 h-11 rounded-2xl flex items-center justify-center"
-                style={{ background: 'var(--blue)', boxShadow: 'var(--shadow-md)' }}>
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <rect x="3" y="3" width="7" height="7" rx="1.5"/>
-                  <rect x="14" y="3" width="7" height="7" rx="1.5"/>
-                  <rect x="14" y="14" width="7" height="7" rx="1.5"/>
-                  <rect x="3" y="14" width="7" height="7" rx="1.5"/>
-                </svg>
+                style={{ background: 'var(--surface)', boxShadow: 'var(--shadow-md)', overflow: 'hidden' }}>
+                <img src="/ruag-logo.png" alt="RUAG" className="h-full w-full object-cover" />
               </div>
               <div>
                 <h1 className="font-black text-base leading-none" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>RUAG</h1>

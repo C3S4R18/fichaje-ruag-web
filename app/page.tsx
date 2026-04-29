@@ -827,8 +827,8 @@ export default function AdminDashboard() {
         <div className="max-w-[1600px] mx-auto px-4 sm:px-6 h-16 sm:h-20 flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <motion.div animate={modoEdicion ? { rotate: [0, -5, 5, 0] } : {}} transition={{ duration: 0.4 }}
-              className={`w-9 h-9 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center text-white shadow-md ${modoEdicion ? 'bg-blue-600' : 'bg-gradient-to-br from-blue-600 to-indigo-700'}`}>
-              <ShieldCheck size={20} />
+              className={`w-9 h-9 sm:w-11 sm:h-11 rounded-xl flex items-center justify-center overflow-hidden bg-white shadow-md ring-1 ${modoEdicion ? 'ring-blue-200' : 'ring-slate-200 dark:ring-slate-700'}`}>
+              <img src="/ruag-logo.png" alt="RUAG" className="h-full w-full object-cover" />
             </motion.div>
             <div>
               <h1 className="text-sm sm:text-base font-black tracking-tight text-slate-800 dark:text-white">{modoEdicion ? '⚡ MODO ADMIN' : 'RUAG Control'}</h1>

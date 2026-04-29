@@ -968,6 +968,9 @@ function VacacionesPageContent() {
           <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
             <div className="flex items-start gap-4">
               <Link href="/" className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-slate-200 bg-slate-50 dark:border-slate-700 dark:bg-slate-800"><ArrowLeft size={18} /></Link>
+              <div className="hidden h-11 w-11 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-700 sm:block">
+                <img src="/ruag-logo.png" alt="RUAG" className="h-full w-full object-cover" />
+              </div>
               <div>
                 <p className="text-[11px] font-black uppercase tracking-[0.22em] text-blue-500">RUAG</p>
                 <h1 className="text-3xl font-black tracking-tight">Vacaciones {activeYear}</h1>

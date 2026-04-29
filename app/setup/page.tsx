@@ -231,11 +231,8 @@ export default function SetupProfileWeb() {
       >
         {/* Logo */}
         <div className="w-12 h-12 rounded-2xl flex items-center justify-center mb-8"
-          style={{ background: 'var(--blue)', boxShadow: 'var(--shadow-glow)' }}>
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="white" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
-            <circle cx="12" cy="7" r="4"/>
-          </svg>
+          style={{ background: 'var(--surface)', boxShadow: 'var(--shadow-glow)', overflow: 'hidden' }}>
+          <img src="/ruag-logo.png" alt="RUAG" className="h-full w-full object-cover" />
         </div>
 
         <h1 className="text-3xl font-black text-center tracking-tight mb-2"

@@ -1,13 +1,13 @@
 {
-  "id": "/escaner?pwa=trabajador",
-  "name": "RUAG Asistencia",
-  "short_name": "RUAG",
-  "description": "Registro de asistencia del trabajador RUAG",
-  "start_url": "/escaner",
+  "id": "/?pwa=admin",
+  "name": "RUAG Panel",
+  "short_name": "RUAG Panel",
+  "description": "Panel de asistencia, vacaciones y metricas RUAG",
+  "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#020617",
-  "theme_color": "#2563EB",
+  "background_color": "#F8FAFC",
+  "theme_color": "#0F172A",
   "icons": [
     {
       "src": "/ruag-icon-192.png",

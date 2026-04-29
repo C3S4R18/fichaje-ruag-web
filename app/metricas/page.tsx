@@ -829,8 +829,11 @@ function MetricasPageContent() {
           <div className="h-1.5 bg-gradient-to-r from-indigo-600 via-sky-500 to-emerald-500" />
           <div className="flex flex-col gap-6 p-6 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <div className="inline-flex items-center gap-2 rounded-full bg-slate-950 px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.16em] text-white">
-                <BarChart3 size={12} /> Centro Analítico
+              <div className="inline-flex items-center gap-2 rounded-full bg-slate-950 py-1.5 pl-1.5 pr-3 text-[11px] font-black uppercase tracking-[0.16em] text-white">
+                <span className="h-6 w-6 overflow-hidden rounded-full bg-white">
+                  <img src="/ruag-logo.png" alt="RUAG" className="h-full w-full object-cover" />
+                </span>
+                Centro Analítico
               </div>
               <h1 className="mt-4 text-3xl font-black tracking-tight text-slate-900 sm:text-5xl">Analítica de Asistencia</h1>
               <p className="mt-3 max-w-3xl text-sm text-slate-500 sm:text-base">
