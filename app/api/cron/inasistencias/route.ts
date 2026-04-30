@@ -5,6 +5,7 @@ const LIMA_TZ = 'America/Lima'
 const LIMA_UTC_OFFSET_HOURS = 5
 const WORKING_DAYS = new Set([1, 2, 3, 4, 5])
 const INACTIVE_AREA_PREFIX = '__INACTIVO__|'
+const HOLIDAY_TYPE = 'FERIADO_ASISTENCIA'
 
 type WorkerProfile = {
   dni: string
@@ -60,6 +61,23 @@ export async function POST(req: NextRequest) {
     const todayLima = getLimaDateKey(new Date())
     const processingDate = addDays(todayLima, -1)
     const weekday = getWeekday(processingDate)
+
+    const { data: holiday, error: holidayError } = await supabaseAdmin
+      .from('sys_doc_cache')
+      .select('id, data_raw')
+      .eq('tipo_documento', HOLIDAY_TYPE)
+      .eq('numero_documento', processingDate)
+      .maybeSingle()
+
+    if (holidayError) throw holidayError
+
+    if (holiday && (holiday as any).data_raw?.activo !== false) {
+      return NextResponse.json({
+        ok: true,
+        fecha: processingDate,
+        mensaje: 'Feriado registrado: no se marcan inasistencias',
+      })
+    }
 
     if (!WORKING_DAYS.has(weekday)) {
       return NextResponse.json({

@@ -105,8 +105,16 @@ export function sortRecordsForRange(records: AsistenciaRecord[]) {
   })
 }
 
+export async function loadHolidayKeys(fromKey: string, toKey: string): Promise<Set<string>> {
+  const response = await fetch(`/api/feriados?from=${encodeURIComponent(fromKey)}&to=${encodeURIComponent(toKey)}`)
+  if (!response.ok) throw new Error('No se pudieron cargar los feriados')
+  const payload = await response.json()
+  return new Set((payload.feriados ?? []).map((item: any) => String(item.fecha)))
+}
+
 export async function loadAttendanceRangeDataset(fromKey: string, toKey: string): Promise<AsistenciaRecord[]> {
   const todayLima = getLimaDateKey()
+  const holidayKeys = await loadHolidayKeys(fromKey, toKey)
   const [recordsRes, perfilesRes, vacacionesRes] = await Promise.all([
     supabase.from('registro_asistencias').select('*').gte('fecha', fromKey).lte('fecha', toKey),
     supabase.from('fotocheck_perfiles').select('dni, nombres_completos, area, foto_url').order('nombres_completos'),
@@ -138,6 +146,7 @@ export async function loadAttendanceRangeDataset(fromKey: string, toKey: string)
 
   const synthetic: AsistenciaRecord[] = []
   for (const dateKey of dateKeysBetween(fromKey, toKey)) {
+    if (holidayKeys.has(dateKey)) continue
     if (!(dateKey < todayLima) || !WORKING_DAYS.has(getWeekday(dateKey))) continue
     perfiles.forEach((perfil: any) => {
       const key = `${dateKey}::${perfil.dni}`

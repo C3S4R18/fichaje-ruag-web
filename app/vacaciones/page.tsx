@@ -92,13 +92,14 @@ type EditorDraft = {
 }
 
 type ManualRequestDraft = {
+  id?: string
   dni: string
   trabajador_nombre: string
   area: string
   fecha_inicio: string
   fecha_fin: string
   comentario: string
-  estado: 'aprobada' | 'solicitada'
+  estado: 'aprobada' | 'solicitada' | 'cancelada'
 }
 
 const months: MonthCol[] = [
@@ -215,10 +216,12 @@ function MonthModal({
   detail,
   onClose,
   onAddManual,
+  onEditRequest,
 }: {
   detail: MonthDetail | null
   onClose: () => void
   onAddManual: (row: Balance, monthIndex: number) => void
+  onEditRequest: (row: RequestRow) => void
 }) {
   if (!detail) return null
   return (
@@ -256,7 +259,12 @@ function MonthModal({
                   <p className="text-sm font-black text-slate-900 dark:text-white">{longDate(item.fecha_inicio)} al {longDate(item.fecha_fin)}</p>
                   <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Pedido: {item.dias_solicitados} dias - En este mes: {overlapDaysInMonth(item, detail.row.periodo, detail.col.monthIndex)} dias</p>
                 </div>
-                <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase ${prevStatus(item.estado)}`}>{item.estado}</span>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button onClick={() => onEditRequest(item)} className="rounded-lg border border-blue-200 p-1.5 text-blue-600 hover:bg-blue-50 dark:border-blue-500/30 dark:text-blue-300 dark:hover:bg-blue-500/10" title="Editar solicitud">
+                    <Pencil size={12} />
+                  </button>
+                  <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase ${prevStatus(item.estado)}`}>{item.estado}</span>
+                </div>
               </div>
               {item.comentario && <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600 dark:bg-slate-950 dark:text-slate-300">{item.comentario}</p>}
               <p className="mt-3 text-[11px] text-slate-400">Registrada: {dateTime(item.created_at)}</p>
@@ -275,6 +283,7 @@ function ManualRequestModal({
   onClose,
   onSave,
   saving,
+  isEdit = false,
 }: {
   open: boolean
   draft: ManualRequestDraft
@@ -282,6 +291,7 @@ function ManualRequestModal({
   onClose: () => void
   onSave: () => void
   saving: boolean
+  isEdit?: boolean
 }) {
   if (!open) return null
 
@@ -295,7 +305,7 @@ function ManualRequestModal({
         <div className="flex items-start justify-between border-b border-slate-200 p-5 dark:border-slate-800">
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.18em] text-slate-400">RRHH</p>
-            <h3 className="mt-1 text-lg font-black text-slate-900 dark:text-white">Registrar vacaciones manuales</h3>
+            <h3 className="mt-1 text-lg font-black text-slate-900 dark:text-white">{isEdit ? 'Editar solicitud de vacaciones' : 'Registrar vacaciones manuales'}</h3>
             <p className="text-sm text-slate-500 dark:text-slate-400">{draft.trabajador_nombre || 'Selecciona un trabajador'}{draft.area ? ` - ${draft.area}` : ''}</p>
           </div>
           <button onClick={onClose} className="rounded-xl border border-slate-200 p-2 dark:border-slate-700"><X size={16} /></button>
@@ -315,6 +325,7 @@ function ManualRequestModal({
             <select value={draft.estado} onChange={(e) => update('estado', e.target.value as ManualRequestDraft['estado'])} className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black outline-none dark:border-slate-700 dark:bg-slate-950">
               <option value="aprobada">APROBADA</option>
               <option value="solicitada">SOLICITADA</option>
+              <option value="cancelada">CANCELADA</option>
             </select>
           </div>
           <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 dark:border-blue-500/30 dark:bg-blue-500/10">
@@ -329,11 +340,11 @@ function ManualRequestModal({
         </div>
 
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 p-5 dark:border-slate-800">
-          <p className="text-xs text-slate-500 dark:text-slate-400">Al guardar, la solicitud se reparte automaticamente en los meses que toque.</p>
+          <p className="text-xs text-slate-500 dark:text-slate-400">Al guardar, los dias se recalculan automaticamente entre fecha inicio y fin.</p>
           <div className="flex flex-wrap gap-2">
             <button onClick={onClose} className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-black dark:border-slate-700">CANCELAR</button>
             <button onClick={onSave} disabled={saving || totalDias <= 0} className="rounded-xl bg-blue-600 px-4 py-2 text-xs font-black text-white disabled:opacity-50">
-              {saving ? 'GUARDANDO...' : 'GUARDAR VACACIONES'}
+              {saving ? 'GUARDANDO...' : isEdit ? 'GUARDAR CAMBIOS' : 'GUARDAR VACACIONES'}
             </button>
           </div>
         </div>
@@ -448,6 +459,7 @@ function VacacionesPageContent() {
   const [manualOpen, setManualOpen] = useState(false)
   const [manualSaving, setManualSaving] = useState(false)
   const [manualDraft, setManualDraft] = useState<ManualRequestDraft>(blankManualRequestDraft())
+  const [editingRequestId, setEditingRequestId] = useState<string | null>(null)
   const currentYear = new Date().getFullYear()
   const requestedYear = Number(searchParams.get('year') || 0) || null
 
@@ -795,8 +807,24 @@ function VacacionesPageContent() {
       comentario: 'Registro manual RRHH',
       estado: 'aprobada',
     })
+    setEditingRequestId(null)
     setManualOpen(true)
   }, [activeYear])
+
+  const openEditRequest = useCallback((row: RequestRow) => {
+    setManualDraft({
+      id: row.id,
+      dni: row.dni,
+      trabajador_nombre: row.trabajador_nombre,
+      area: row.area || '',
+      fecha_inicio: row.fecha_inicio,
+      fecha_fin: row.fecha_fin,
+      comentario: row.comentario || '',
+      estado: row.estado === 'cancelada' ? 'cancelada' : row.estado === 'solicitada' ? 'solicitada' : 'aprobada',
+    })
+    setEditingRequestId(row.id)
+    setManualOpen(true)
+  }, [])
 
   const saveManualRequest = useCallback(async () => {
     const totalDias = requestedDays(manualDraft.fecha_inicio, manualDraft.fecha_fin)
@@ -814,16 +842,19 @@ function VacacionesPageContent() {
     }
 
     setManualSaving(true)
-    const { error } = await supabase.from('vacaciones_solicitudes').insert({
+    const payload = {
       dni: manualDraft.dni,
       trabajador_nombre: manualDraft.trabajador_nombre,
       area: manualDraft.area || null,
       fecha_inicio: manualDraft.fecha_inicio,
       fecha_fin: manualDraft.fecha_fin,
       dias_solicitados: totalDias,
-      comentario: manualDraft.comentario.trim() || 'Registro manual RRHH',
+      comentario: manualDraft.comentario.trim() || (editingRequestId ? 'Actualizado por RRHH' : 'Registro manual RRHH'),
       estado: manualDraft.estado,
-    })
+    }
+    const { error } = editingRequestId
+      ? await supabase.from('vacaciones_solicitudes').update(payload).eq('id', editingRequestId)
+      : await supabase.from('vacaciones_solicitudes').insert(payload)
     setManualSaving(false)
 
     if (error) {
@@ -831,11 +862,12 @@ function VacacionesPageContent() {
       return
     }
 
-    toast.success(manualDraft.estado === 'aprobada' ? 'Vacaciones registradas y aprobadas' : 'Solicitud manual registrada')
+    toast.success(editingRequestId ? 'Solicitud de vacaciones actualizada' : manualDraft.estado === 'aprobada' ? 'Vacaciones registradas y aprobadas' : 'Solicitud manual registrada')
     setManualOpen(false)
     setManualDraft(blankManualRequestDraft())
+    setEditingRequestId(null)
     void fetchAll()
-  }, [fetchAll, manualDraft])
+  }, [editingRequestId, fetchAll, manualDraft])
 
   const saveEditor = useCallback(async () => {
     if (!editorDraft.dni.trim() || !editorDraft.trabajador_nombre.trim() || !editorDraft.area.trim() || !editorDraft.cargo.trim()) {
@@ -944,7 +976,7 @@ function VacacionesPageContent() {
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-6 text-slate-900 dark:bg-slate-950 dark:text-white sm:px-6 lg:px-8">
       <Toaster position="top-center" richColors />
-      <MonthModal detail={detail} onClose={() => setDetail(null)} onAddManual={openManualRequest} />
+      <MonthModal detail={detail} onClose={() => setDetail(null)} onAddManual={openManualRequest} onEditRequest={openEditRequest} />
       <EditorModal
         open={editorOpen}
         draft={editorDraft}
@@ -959,9 +991,10 @@ function VacacionesPageContent() {
         open={manualOpen}
         draft={manualDraft}
         setDraft={setManualDraft}
-        onClose={() => setManualOpen(false)}
+        onClose={() => { setManualOpen(false); setEditingRequestId(null); setManualDraft(blankManualRequestDraft()) }}
         onSave={() => void saveManualRequest()}
         saving={manualSaving}
+        isEdit={Boolean(editingRequestId)}
       />
       <div className="mx-auto max-w-[1800px] space-y-6">
         <header className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -1085,7 +1118,12 @@ function VacacionesPageContent() {
                   <div key={item.id} className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
                     <div className="flex items-start justify-between gap-3">
                       <div><p className="font-black">{item.trabajador_nombre}</p><p className="mt-1 text-xs text-slate-500 dark:text-slate-400">{longDate(item.fecha_inicio)} al {longDate(item.fecha_fin)}</p></div>
-                      <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase ${prevStatus(item.estado)}`}>{item.estado}</span>
+                      <div className="flex shrink-0 items-center gap-2">
+                        <button onClick={() => openEditRequest(item)} className="rounded-lg border border-blue-200 p-1.5 text-blue-600 hover:bg-blue-50 dark:border-blue-500/30 dark:text-blue-300 dark:hover:bg-blue-500/10" title="Editar solicitud">
+                          <Pencil size={12} />
+                        </button>
+                        <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase ${prevStatus(item.estado)}`}>{item.estado}</span>
+                      </div>
                     </div>
                     <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] text-slate-500 dark:text-slate-400"><span>{item.dias_solicitados} dias</span><span>-</span><span>{item.area || 'SIN AREA'}</span></div>
                     {item.comentario && <p className="mt-3 rounded-xl bg-slate-50 px-3 py-2 text-sm text-slate-600 dark:bg-slate-950 dark:text-slate-300">{item.comentario}</p>}

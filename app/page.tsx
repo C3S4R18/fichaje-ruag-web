@@ -7,6 +7,7 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { format, isToday, subDays, addDays } from 'date-fns'
 import { es } from 'date-fns/locale'
 import Link from 'next/link'
+import { loadHolidayKeys } from '@/utils/attendance'
 import {
   CalendarDays, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle,
   LogOut, UserPlus, Loader2, Search, FileSpreadsheet, SlidersHorizontal,
@@ -232,7 +233,7 @@ function decorateForVisibleDate(record: any, fecha: Date) {
 }
 
 function upsertAsistencia(prev: any[], next: any) {
-  return [next, ...prev.filter((item) => item.id !== next.id)]
+  return sortRecordsByStatus([next, ...prev.filter((item) => item.id !== next.id)])
 }
 
 function extraerDetalleNota(notas?: string | null) {
@@ -376,6 +377,10 @@ export default function AdminDashboard() {
   const [notaModal, setNotaModal]         = useState<any>(null)
   const [showExportar, setShowExportar]   = useState(false)
   const [showManual, setShowManual]       = useState(false)
+  const [showFeriado, setShowFeriado]     = useState(false)
+  const [feriadoFecha, setFeriadoFecha]   = useState(format(addDays(new Date(), 1), 'yyyy-MM-dd'))
+  const [feriadoMotivo, setFeriadoMotivo] = useState('Feriado')
+  const [feriadoSaving, setFeriadoSaving] = useState(false)
   const [showMetricas, setShowMetricas]   = useState(false)
   const [busqueda, setBusqueda]           = useState('')
   const [filtroArea, setFiltroArea]       = useState('TODAS')
@@ -460,7 +465,8 @@ export default function AdminDashboard() {
     const noctIni     = `${nextStr}T00:00:00.000Z`
     const noctIniPrev = `${fechaStr}T00:00:00.000Z`
 
-    const shouldBuildAbsences = fechaStr < todayLima && WORKING_DAYS.has(getWeekday(fechaStr))
+    const holidayKeys = await loadHolidayKeys(fechaStr, fechaStr).catch(() => new Set<string>())
+    const shouldBuildAbsences = fechaStr < todayLima && WORKING_DAYS.has(getWeekday(fechaStr)) && !holidayKeys.has(fechaStr)
 
     const [q1, q2, q3, perfilesRes, vacacionesRes] = await Promise.all([
       supabase.from('registro_asistencias').select('*').eq('fecha', fechaStr).order('hora_ingreso', { ascending: false }),
@@ -494,15 +500,14 @@ export default function AdminDashboard() {
           .map((perfil: any) => buildSyntheticInasistencia(fechaStr, perfil))
       : []
 
-    setAsistencias([...todos, ...syntheticAbsences].sort((a: any, b: any) =>
-      new Date(b.hora_ingreso).getTime() - new Date(a.hora_ingreso).getTime()
-    ))
+    setAsistencias(sortRecordsByStatus([...todos, ...syntheticAbsences]))
     setLoading(false)
     if (isInitialLoad) setTimeout(() => setIsInitialLoad(false), 400)
   }
 
   const loadRangeDataset = async (fromKey: string, toKey: string): Promise<AsistenciaRecord[]> => {
     const todayLima = getLimaDateKey()
+    const holidayKeys = await loadHolidayKeys(fromKey, toKey).catch(() => new Set<string>())
     const [recordsRes, perfilesRes, vacacionesRes] = await Promise.all([
       supabase.from('registro_asistencias').select('*').gte('fecha', fromKey).lte('fecha', toKey),
       supabase.from('fotocheck_perfiles').select('dni, nombres_completos, area, foto_url').order('nombres_completos'),
@@ -534,6 +539,7 @@ export default function AdminDashboard() {
 
     const synthetic: AsistenciaRecord[] = []
     for (const dateKey of dateKeysBetween(fromKey, toKey)) {
+      if (holidayKeys.has(dateKey)) continue
       if (!(dateKey < todayLima) || !WORKING_DAYS.has(getWeekday(dateKey))) continue
       perfiles.forEach((perfil: any) => {
         const key = `${dateKey}::${perfil.dni}`
@@ -694,12 +700,40 @@ export default function AdminDashboard() {
 
   const actualizarHora = async (id: string, campo: 'hora_ingreso' | 'hora_salida', hora: string | null, fechaBase: string) => {
     try {
+      const current = asistencias.find(item => item.id === id)
+      if (current?._syntheticInasistencia) {
+        if (campo === 'hora_salida') {
+          toast.info('Primero guarda la hora de entrada')
+          return
+        }
+        if (!hora) return
+        const [h, m] = hora.split(':').map(Number)
+        const [year, month, day] = String(current.fecha).split('-').map(Number)
+        const ingreso = new Date(Date.UTC(year, month - 1, day, h + 5, m, 0, 0))
+        const estado = (h < 9 || (h === 9 && m <= 5)) ? 'PUNTUAL' : 'TARDANZA'
+        const { data, error } = await supabase.from('registro_asistencias').insert({
+          dni: current.dni,
+          nombres_completos: current.nombres_completos,
+          area: current.area,
+          foto_url: current.foto_url ?? '',
+          fecha: current.fecha,
+          hora_ingreso: ingreso.toISOString(),
+          estado_ingreso: estado,
+          notas: 'Registro corregido desde inasistencia',
+        }).select().single()
+
+        if (error) throw error
+        toast.success('Inasistencia convertida en asistencia')
+        setAsistencias(prev => sortRecordsByStatus(prev.map(item => item.id === id ? data as AsistenciaRecord : item)))
+        return
+      }
+
       let upd: any = hora === null ? { [campo]: null } : (() => {
         const [h, m] = hora.split(':').map(Number); const d = new Date(fechaBase); d.setHours(h, m, 0)
         return { [campo]: d.toISOString(), ...(campo === 'hora_ingreso' ? { estado_ingreso: (h < 9 || (h === 9 && m <= 5)) ? 'PUNTUAL' : 'TARDANZA' } : {}) }
       })()
       await supabase.from('registro_asistencias').update(upd).eq('id', id)
-      toast.success('Actualizado'); setAsistencias(prev => prev.map(a => a.id === id ? { ...a, ...upd } : a))
+      toast.success('Actualizado'); setAsistencias(prev => sortRecordsByStatus(prev.map(a => a.id === id ? { ...a, ...upd } : a)))
     } catch { toast.error('Error') }
   }
 
@@ -731,7 +765,7 @@ export default function AdminDashboard() {
 
   const cambiarEstado = async (id: string, estadoActual: string) => {
     const n = estadoActual === 'PUNTUAL' ? 'TARDANZA' : 'PUNTUAL'
-    try { await supabase.from('registro_asistencias').update({ estado_ingreso: n }).eq('id', id); toast.success(`→ ${n}`); setAsistencias(prev => prev.map(a => a.id === id ? { ...a, estado_ingreso: n } : a)) } catch { toast.error('Error') }
+    try { await supabase.from('registro_asistencias').update({ estado_ingreso: n }).eq('id', id); toast.success(`→ ${n}`); setAsistencias(prev => sortRecordsByStatus(prev.map(a => a.id === id ? { ...a, estado_ingreso: n } : a))) } catch { toast.error('Error') }
   }
 
   const actualizarNombre = async (id: string, dni: string, nuevoNombre: string) => {
@@ -745,6 +779,27 @@ export default function AdminDashboard() {
       toast.success('Nombre actualizado')
       setAsistencias(prev => prev.map(a => a.id === id ? { ...a, nombres_completos: nombre } : a))
     } catch { toast.error('Error al actualizar nombre') }
+  }
+
+  const guardarFeriado = async () => {
+    if (!feriadoFecha) { toast.error('Selecciona una fecha'); return }
+    setFeriadoSaving(true)
+    try {
+      const response = await fetch('/api/feriados', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ fecha: feriadoFecha, motivo: feriadoMotivo }),
+      })
+      const payload = await response.json().catch(() => ({}))
+      if (!response.ok) throw new Error(payload.error || 'No se pudo guardar el feriado')
+      toast.success(`Feriado activado: ${feriadoFecha}`)
+      setShowFeriado(false)
+      await fetchData(fechaActual)
+    } catch (error: any) {
+      toast.error(error?.message || 'No se pudo guardar el feriado')
+    } finally {
+      setFeriadoSaving(false)
+    }
   }
 
   const cargarMetricas = async () => {
@@ -939,9 +994,9 @@ export default function AdminDashboard() {
               className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 border border-indigo-200 dark:border-indigo-500/20 text-[11px] font-black transition-all active:scale-95 tracking-wider">
               {metricasLoading ? <Loader2 size={13} className="animate-spin" /> : <BarChart3 size={13} />} MÉTRICAS
             </button>
-            <button onClick={() => fetchData(fechaActual)}
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 text-slate-600 dark:text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-700 border border-slate-200 dark:border-slate-700 text-[11px] font-black transition-all active:scale-95 tracking-wider">
-              <RefreshCw size={12} /> ACTUALIZAR
+            <button onClick={() => { setFeriadoFecha(format(addDays(fechaActual, 1), 'yyyy-MM-dd')); setShowFeriado(true) }}
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-500/20 border border-amber-200 dark:border-amber-500/30 text-[11px] font-black transition-all active:scale-95 tracking-wider">
+              <CalendarDays size={12} /> MODO FERIADO
             </button>
             <AnimatePresence>
               {modoEdicion && (
@@ -1262,7 +1317,48 @@ export default function AdminDashboard() {
 
       {/* Manual */}
       <AnimatePresence>
-        {showManual && <ModalManual onClose={() => setShowManual(false)} fechaBase={format(fechaActual, 'yyyy-MM-dd')} onSuccess={r => { setAsistencias(p => [r, ...p]); setShowManual(false) }} />}
+        {showManual && <ModalManual onClose={() => setShowManual(false)} fechaBase={format(fechaActual, 'yyyy-MM-dd')} onSuccess={r => { setAsistencias(p => sortRecordsByStatus([r, ...p])); setShowManual(false) }} />}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showFeriado && (
+          <motion.div className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+            style={{ background: 'rgba(15,23,42,0.58)', backdropFilter: 'blur(10px)' }}
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={() => setShowFeriado(false)}>
+            <motion.div className="w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+              initial={{ scale: 0.94, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.94, y: 12 }}
+              onClick={e => e.stopPropagation()}>
+              <div className="mb-5 flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[0.18em] text-amber-600">Calendario laboral</p>
+                  <h3 className="mt-1 text-lg font-black text-slate-900 dark:text-white">Modo feriado</h3>
+                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">La fecha elegida no generara inasistencias automaticas.</p>
+                </div>
+                <button onClick={() => setShowFeriado(false)} className="rounded-xl border border-slate-200 p-2 text-slate-400 dark:border-slate-700"><X size={16} /></button>
+              </div>
+              <div className="space-y-4">
+                <label className="block">
+                  <span className="mb-1 block text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">Fecha</span>
+                  <input type="date" value={feriadoFecha} onChange={e => setFeriadoFecha(e.target.value)}
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black outline-none dark:border-slate-700 dark:bg-slate-950" />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">Motivo</span>
+                  <input value={feriadoMotivo} onChange={e => setFeriadoMotivo(e.target.value)}
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold outline-none dark:border-slate-700 dark:bg-slate-950"
+                    placeholder="Feriado" />
+                </label>
+              </div>
+              <div className="mt-5 grid grid-cols-2 gap-3">
+                <button onClick={() => setShowFeriado(false)} className="rounded-xl border border-slate-200 px-4 py-3 text-xs font-black dark:border-slate-700">CANCELAR</button>
+                <button onClick={guardarFeriado} disabled={feriadoSaving} className="rounded-xl bg-amber-600 px-4 py-3 text-xs font-black text-white disabled:opacity-50">
+                  {feriadoSaving ? 'GUARDANDO...' : 'ACTIVAR'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
       </AnimatePresence>
 
       {/* Nota */}
@@ -1518,7 +1614,7 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
   const esNocturno = data.notas?.startsWith('Turno Nocturno') ?? false
   const esOffline  = (data.notas ?? '').includes('[OFFLINE]')
   const hasBadge = entroAyer || saleHoy || esOffline || esInasistencia
-  const puedeEditarRegistro = modoEdicion && !esSintetica
+  const puedeEditarRegistro = modoEdicion && (!esSintetica || esInasistencia)
 
   const borderClass = esInasistencia ? 'border-orange-300 dark:border-orange-500/30 bg-orange-50/70 dark:bg-orange-500/10'
     : entroAyer || saleHoy ? 'border-amber-300 dark:border-amber-500/30 ring-1 ring-amber-100 dark:ring-amber-500/10'
@@ -1636,9 +1732,12 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
         <div className="flex flex-col items-end">
           <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Entrada</span>
           {puedeEditarRegistro ? (
-            <input type="time" defaultValue={format(new Date(data.hora_ingreso), 'HH:mm')}
+            <input type="time" defaultValue={esInasistencia ? '' : format(new Date(data.hora_ingreso), 'HH:mm')}
               className="bg-transparent border-b border-blue-500 text-xs font-black text-blue-600 outline-none w-14 text-right"
-              onBlur={e => { if (e.target.value !== format(new Date(data.hora_ingreso), 'HH:mm')) onActualizar(data.id, 'hora_ingreso', e.target.value, data.hora_ingreso) }} />
+              onBlur={e => {
+                const current = esInasistencia ? '' : format(new Date(data.hora_ingreso), 'HH:mm')
+                if (e.target.value && e.target.value !== current) onActualizar(data.id, 'hora_ingreso', e.target.value, data.hora_ingreso)
+              }} />
           ) : (
             <span className={`font-black text-base tabular-nums ${esInasistencia ? 'text-orange-500 dark:text-orange-300' : isPuntual ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
               {esInasistencia ? '—' : format(new Date(data.hora_ingreso), 'HH:mm')}
