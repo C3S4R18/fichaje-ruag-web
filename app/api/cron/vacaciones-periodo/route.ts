@@ -160,7 +160,7 @@ export async function POST(req: NextRequest) {
         fecha_vencimiento: nextFechaVencimiento,
         renovaciones_aplicadas: 0,
         vacaciones_por_vencer: vacacionesPorVencer,
-        vacaciones_pendientes_periodo: carry + vacacionesPorVencer,
+        vacaciones_pendientes_periodo: carry,
       }
     })
 

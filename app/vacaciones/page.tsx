@@ -49,6 +49,7 @@ type Balance = {
   fecha_vencimiento: string | null
   vacaciones_por_vencer?: number | null
   vacaciones_pendientes_periodo?: number | null
+  renovaciones_aplicadas?: number | null
 }
 
 type RequestRow = {
@@ -187,10 +188,19 @@ const shortDate = (value: string | null) => (value ? format(asDate(value), 'dd/M
 const longDate = (value: string) => format(asDate(value), 'dd MMM yyyy', { locale: es })
 const dateTime = (value: string) => format(asDate(value), 'dd MMM yyyy - HH:mm', { locale: es })
 const inputDate = (value: Date) => format(value, 'yyyy-MM-dd')
+const todayKey = () => format(new Date(), 'yyyy-MM-dd')
 const requestedDays = (start: string, end: string) => {
   if (!start || !end) return 0
   const days = differenceInCalendarDays(asDate(end), asDate(start)) + 1
   return days > 0 ? days : 0
+}
+function renewalAmount(row: Pick<Balance, 'fecha_vencimiento' | 'vacaciones_por_vencer' | 'renovaciones_aplicadas'>) {
+  if (!row.fecha_vencimiento || num(row.renovaciones_aplicadas) > 0) return 0
+  const configured = num(row.vacaciones_por_vencer)
+  return configured > 0 ? configured : 30
+}
+function renewalDue(row: Pick<Balance, 'fecha_vencimiento' | 'vacaciones_por_vencer' | 'renovaciones_aplicadas'>, today = todayKey()) {
+  return Boolean(row.fecha_vencimiento && row.fecha_vencimiento <= today && renewalAmount(row) > 0)
 }
 const overlapsYear = (item: RequestRow, year: number) => asDate(item.fecha_inicio) <= new Date(Date.UTC(year, 11, 31, 12)) && asDate(item.fecha_fin) >= new Date(Date.UTC(year, 0, 1, 12))
 const overlapsMonth = (item: RequestRow, year: number, month: number) => asDate(item.fecha_inicio) <= new Date(Date.UTC(year, month + 1, 0, 12)) && asDate(item.fecha_fin) >= new Date(Date.UTC(year, month, 1, 12))
@@ -471,8 +481,35 @@ function VacacionesPageContent() {
     ])
     if (balancesRes.error) toast.error(balancesRes.error.message)
     if (requestsRes.error) toast.error(requestsRes.error.message)
-    setBalances((balancesRes.data ?? []) as Balance[])
-    setRequests((requestsRes.data ?? []) as RequestRow[])
+    let nextBalances = (balancesRes.data ?? []) as Balance[]
+    const nextRequests = (requestsRes.data ?? []) as RequestRow[]
+    const today = todayKey()
+    const dueRows = nextBalances.filter((row) => renewalDue(row, today))
+
+    if (dueRows.length) {
+      const updates = await Promise.all(dueRows.map((row) => {
+        const newPendingPeriod = num(row.dias_pendientes) + renewalAmount(row)
+        return supabase
+          .from('vacaciones_saldos')
+          .update({
+            vacaciones_por_vencer: 0,
+            vacaciones_pendientes_periodo: newPendingPeriod,
+            renovaciones_aplicadas: num(row.renovaciones_aplicadas) + 1,
+          })
+          .eq('id', row.id)
+          .select('*')
+          .single()
+      }))
+
+      const failed = updates.find((item) => item.error)
+      if (failed?.error) toast.error(failed.error.message)
+      const updatedById = new Map(updates.filter((item) => item.data).map((item) => [(item.data as Balance).id, item.data as Balance]))
+      nextBalances = nextBalances.map((row) => updatedById.get(row.id) ?? row)
+      if (updatedById.size) toast.success(`${updatedById.size} vencimiento(s) de vacaciones actualizado(s)`)
+    }
+
+    setBalances(nextBalances)
+    setRequests(nextRequests)
     setLoading(false)
   }, [])
 
@@ -538,8 +575,13 @@ function VacacionesPageContent() {
   const derived = useCallback((row: Balance) => {
     const approvedDays = requestsYear.filter((item) => item.dni === row.dni && item.estado === 'aprobada').reduce((sum, item) => sum + num(item.dias_solicitados), 0)
     const pendientesPrev = num(row.dias_pendientes) - approvedDays
-    const porVencer = row.vacaciones_por_vencer != null ? num(row.vacaciones_por_vencer) : (row.fecha_vencimiento ? 30 : 0)
-    const pendientesPeriodo = (row.vacaciones_pendientes_periodo != null ? num(row.vacaciones_pendientes_periodo) : (num(row.dias_pendientes) + porVencer)) - approvedDays
+    const amount = renewalAmount(row)
+    const isDue = renewalDue(row)
+    const porVencer = isDue ? 0 : amount
+    const pendingBase = num(row.renovaciones_aplicadas) > 0 && row.vacaciones_pendientes_periodo != null
+      ? num(row.vacaciones_pendientes_periodo)
+      : num(row.dias_pendientes) + (isDue ? amount : 0)
+    const pendientesPeriodo = pendingBase - approvedDays
     return { approvedDays, pendientesPrev, pendientesPeriodo, gozados: num(row.total_gozados) + approvedDays, porVencer }
   }, [requestsYear])
 
@@ -940,7 +982,7 @@ function VacacionesPageContent() {
       dias_pendientes: num(editorDraft.dias_pendientes),
       fecha_vencimiento: editorDraft.fecha_vencimiento || null,
       vacaciones_por_vencer: num(editorDraft.vacaciones_por_vencer),
-      vacaciones_pendientes_periodo: num(editorDraft.dias_pendientes) + num(editorDraft.vacaciones_por_vencer),
+      vacaciones_pendientes_periodo: num(editorDraft.dias_pendientes),
     }
 
     const { error } = editorDraft.id
