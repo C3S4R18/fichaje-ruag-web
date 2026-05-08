@@ -13,7 +13,7 @@ import {
   LogOut, UserPlus, Loader2, Search, FileSpreadsheet, SlidersHorizontal,
   Users, ShieldCheck, AlignLeft, MapPin, Map as MapIcon, Download,
   HardHat, Trash2, MessageSquareText, X, Sunrise, Sun, Sunset, MoonStar,
-  Store, Moon, RefreshCw, Activity, BarChart3, TrendingUp
+  Store, Moon, RefreshCw, Activity, BarChart3, TrendingUp, Trophy
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 import MapGL, {
@@ -989,6 +989,11 @@ export default function AdminDashboard() {
               href={`/metricas?from=${format(subDays(fechaActual, 29), 'yyyy-MM-dd')}&to=${format(fechaActual, 'yyyy-MM-dd')}`}
               className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 border border-indigo-200 dark:border-indigo-500/20 text-[11px] font-black transition-all active:scale-95 tracking-wider">
               <BarChart3 size={13} /> ANALÍTICA
+            </Link>
+            <Link
+              href={`/ranking?date=${format(fechaActual, 'yyyy-MM-dd')}&from=admin`}
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-yellow-50 dark:bg-yellow-500/10 text-yellow-700 dark:text-yellow-300 hover:bg-yellow-100 dark:hover:bg-yellow-500/20 border border-yellow-200 dark:border-yellow-500/20 text-[11px] font-black transition-all active:scale-95 tracking-wider">
+              <Trophy size={13} /> RANKING
             </Link>
             <button onClick={cargarMetricas} hidden
               className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 border border-indigo-200 dark:border-indigo-500/20 text-[11px] font-black transition-all active:scale-95 tracking-wider">

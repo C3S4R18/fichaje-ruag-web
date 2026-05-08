@@ -14,6 +14,7 @@ import { es } from 'date-fns/locale'
 import { toast } from 'sonner'
 import { motion, AnimatePresence } from 'framer-motion'
 import { supabase } from '@/utils/supabase/client'
+import { activateDeviceSession, clearWorkerSession, hasDeviceSessionToken, isCurrentDeviceSession } from '@/utils/device-session'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -473,6 +474,16 @@ export default function EscanerWeb() {
       const dni    = store.get('RUAG_DNI')
       const nombre = store.get('RUAG_NOMBRE')
       if (!dni || !nombre) { router.push('/setup'); return }
+      if (!hasDeviceSessionToken()) {
+        await activateDeviceSession(dni, nombre, 'web-pwa')
+      }
+      const activeSession = await isCurrentDeviceSession(dni)
+      if (!activeSession) {
+        clearWorkerSession()
+        toast.error('Tu sesion se abrio en otro dispositivo.')
+        router.push('/setup')
+        return
+      }
 
       let p: Perfil | null = null
       const { data } = await supabase.from('fotocheck_perfiles').select('*').eq('dni', dni).maybeSingle()
@@ -516,6 +527,24 @@ export default function EscanerWeb() {
     }
     cargar()
   }, [router])
+
+  useEffect(() => {
+    if (!perfil?.dni) return
+    let cancelled = false
+    const check = async () => {
+      const activeSession = await isCurrentDeviceSession(perfil.dni)
+      if (!cancelled && !activeSession) {
+        clearWorkerSession()
+        toast.error('Sesion cerrada: se inicio en otro dispositivo.')
+        router.push('/setup')
+      }
+    }
+    const id = window.setInterval(check, 15000)
+    return () => {
+      cancelled = true
+      window.clearInterval(id)
+    }
+  }, [perfil?.dni, router])
 
   // FIX: Calendario recarga por mes al cambiar targetDate
   useEffect(() => {
@@ -639,6 +668,7 @@ export default function EscanerWeb() {
       const { data, error } = await supabase.from('registro_asistencias').insert({
         dni: perfil.dni, nombres_completos: perfil.nombres, area: perfil.area,
         foto_url: perfil.foto_url, estado_ingreso: est, fecha: hoy,
+        notas: 'Escaner Oficina',
       }).select().single()
       if (error) throw error
 
@@ -972,6 +1002,13 @@ export default function EscanerWeb() {
             </div>
             <div className="flex gap-2">
               <motion.button
+                onClick={() => router.push('/ranking')}
+                className="w-10 h-10 rounded-2xl flex items-center justify-center border transition-all"
+                style={{ background: 'linear-gradient(135deg, #111827, #334155)', borderColor: '#CBD5E1', color: 'white', boxShadow: 'var(--shadow-sm)' }}
+                whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.92 }}>
+                <Star size={18} />
+              </motion.button>
+              <motion.button
                 onClick={() => setShowLogros(true)}
                 className="w-10 h-10 rounded-2xl flex items-center justify-center border transition-all"
                 style={{ background: 'var(--gold-light)', borderColor: '#FDE68A', color: 'var(--gold)', boxShadow: 'var(--shadow-sm)' }}
@@ -1133,6 +1170,11 @@ export default function EscanerWeb() {
               {format(new Date(), "EEEE d 'de' MMMM", { locale: es })}
             </p>
             <div className="flex gap-2">
+              <motion.button onClick={() => router.push('/ranking')} className="w-10 h-10 rounded-2xl flex items-center justify-center border transition-all"
+                style={{ background: 'linear-gradient(135deg, #111827, #334155)', borderColor: '#CBD5E1', color: 'white', boxShadow: 'var(--shadow-sm)' }}
+                whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
+                <Star size={18} />
+              </motion.button>
               <motion.button onClick={() => setShowLogros(true)} className="w-10 h-10 rounded-2xl flex items-center justify-center border transition-all"
                 style={{ background: 'var(--gold-light)', borderColor: '#FDE68A', color: 'var(--gold)', boxShadow: 'var(--shadow-sm)' }}
                 whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>

@@ -20,7 +20,7 @@ export const metadata: Metadata = {
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
   const headerList = await headers();
   const pathname = headerList.get("x-current-path") ?? "";
-  const isWorkerPwa = pathname.startsWith("/setup") || pathname.startsWith("/escaner");
+  const isWorkerPwa = pathname.startsWith("/setup") || pathname.startsWith("/escaner") || pathname.startsWith("/ranking");
   const manifest = isWorkerPwa ? "/manifest-worker.json" : "/manifest-admin.json";
   const themeColor = isWorkerPwa ? "#2563EB" : "#0F172A";
 

@@ -6,6 +6,7 @@ import { Camera, Edit2, ChevronDown, Loader2, RotateCcw, X, CheckCircle } from '
 import { toast } from 'sonner'
 import { supabase } from '@/utils/supabase/client'
 import { motion, AnimatePresence } from 'framer-motion'
+import { activateDeviceSession } from '@/utils/device-session'
 
 const INACTIVE_AREA_PREFIX = '__INACTIVO__|'
 
@@ -99,6 +100,7 @@ export default function SetupProfileWeb() {
       store.set('RUAG_NOMBRE', nombres.trim())
       store.set('RUAG_AREA', selectedArea)
       store.set('RUAG_FOTO', fotoUrl)
+      await activateDeviceSession(dni, nombres.trim(), 'web-pwa')
 
       toast.success('¡Fotocheck creado exitosamente!')
       setTimeout(() => router.push('/escaner'), 800)
@@ -138,6 +140,7 @@ export default function SetupProfileWeb() {
       store.set('RUAG_NOMBRE', data.nombres_completos)
       store.set('RUAG_AREA', data.area)
       store.set('RUAG_FOTO', data.foto_url)
+      await activateDeviceSession(data.dni, data.nombres_completos, 'web-pwa')
 
       toast.success(`¡Bienvenido de nuevo, ${data.nombres_completos}!`)
       router.push('/escaner')
