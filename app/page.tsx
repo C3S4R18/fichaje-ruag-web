@@ -963,7 +963,7 @@ export default function AdminDashboard() {
               title={vacacionesPendientesPreview.length ? `Pendientes: ${vacacionesPendientesPreview.join(', ')}` : 'Sin solicitudes pendientes'}
               className={`w-full flex items-center justify-between gap-3 py-2.5 px-3 rounded-xl border text-[11px] font-black transition-all active:scale-95 tracking-wider ${
                 vacacionesPendientes > 0
-                  ? 'bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-500/20 border-amber-200 dark:border-amber-500/30 shadow-[0_0_0_1px_rgba(245,158,11,0.16)]'
+                  ? 'bg-orange-50 dark:bg-orange-500/10 text-orange-700 dark:text-orange-300 hover:bg-orange-100 dark:hover:bg-orange-500/20 border-orange-200 dark:border-orange-500/30 shadow-[0_0_0_1px_rgba(249,115,22,0.18)]'
                   : 'bg-sky-50 dark:bg-sky-500/10 text-sky-700 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-500/20 border-sky-200 dark:border-sky-500/20'
               }`}
             >
@@ -974,8 +974,8 @@ export default function AdminDashboard() {
               {vacacionesPendientes > 0 ? (
                 <span className="flex items-center gap-2">
                   <span className="relative flex h-2.5 w-2.5">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-500 opacity-75" />
-                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-amber-500" />
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-orange-500 opacity-75" />
+                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-orange-500" />
                   </span>
                   <span className="rounded-full bg-white/80 dark:bg-slate-950/60 px-2 py-0.5 text-[10px] font-black tabular-nums">
                     {vacacionesPendientes}
@@ -992,7 +992,7 @@ export default function AdminDashboard() {
             </Link>
             <Link
               href={`/ranking?date=${format(fechaActual, 'yyyy-MM-dd')}&from=admin`}
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-yellow-50 dark:bg-yellow-500/10 text-yellow-700 dark:text-yellow-300 hover:bg-yellow-100 dark:hover:bg-yellow-500/20 border border-yellow-200 dark:border-yellow-500/20 text-[11px] font-black transition-all active:scale-95 tracking-wider">
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-fuchsia-50 dark:bg-fuchsia-500/10 text-fuchsia-700 dark:text-fuchsia-300 hover:bg-fuchsia-100 dark:hover:bg-fuchsia-500/20 border border-fuchsia-200 dark:border-fuchsia-500/25 shadow-[0_8px_22px_rgba(217,70,239,0.08)] text-[11px] font-black transition-all active:scale-95 tracking-wider">
               <Trophy size={13} /> RANKING
             </Link>
             <button onClick={cargarMetricas} hidden
@@ -1000,7 +1000,7 @@ export default function AdminDashboard() {
               {metricasLoading ? <Loader2 size={13} className="animate-spin" /> : <BarChart3 size={13} />} MÉTRICAS
             </button>
             <button onClick={() => { setFeriadoFecha(format(addDays(fechaActual, 1), 'yyyy-MM-dd')); setShowFeriado(true) }}
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300 hover:bg-amber-100 dark:hover:bg-amber-500/20 border border-amber-200 dark:border-amber-500/30 text-[11px] font-black transition-all active:scale-95 tracking-wider">
+              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-teal-50 dark:bg-teal-500/10 text-teal-700 dark:text-teal-300 hover:bg-teal-100 dark:hover:bg-teal-500/20 border border-teal-200 dark:border-teal-500/25 shadow-[0_8px_22px_rgba(20,184,166,0.08)] text-[11px] font-black transition-all active:scale-95 tracking-wider">
               <CalendarDays size={12} /> MODO FERIADO
             </button>
             <AnimatePresence>

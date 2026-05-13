@@ -7,7 +7,7 @@ import {
   MapPin, AlertTriangle, CheckCircle, Loader2, LogOut, History,
   Edit2, Edit3, X, Trophy, Lock, Map, Calendar, ChevronLeft,
   ChevronRight, CheckCircle2, HardHat, Store, Moon, Star,
-  PlaneTakeoff, Phone, RefreshCw, Wallet,
+  PlaneTakeoff, Phone, RefreshCw, Wallet, Menu, Badge, Cloud, CloudOff,
 } from 'lucide-react'
 import { format, parseISO, differenceInDays } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -20,6 +20,21 @@ import { activateDeviceSession, clearWorkerSession, hasDeviceSessionToken, isCur
 
 interface Perfil      { dni: string; nombres: string; area: string; foto_url: string }
 interface Asistencia  { id: string; fecha?: string; hora_ingreso: string; estado_ingreso: string; hora_salida: string | null; notas: string | null }
+interface PendingAttendance {
+  id: string
+  payload: {
+    dni: string
+    nombres_completos: string
+    area: string
+    foto_url: string
+    estado_ingreso: string
+    fecha: string
+    hora_ingreso: string
+    notas: string | null
+  }
+  asistencia: Asistencia
+  created_at: string
+}
 interface LogroItem   { id: number; emoji: string; titulo: string; desc: string }
 interface VacacionesSaldo {
   dni: string
@@ -92,6 +107,8 @@ const HORAS_NOCTURNAS = [
 
 const LIMA_TZ = 'America/Lima'
 const SOPORTE_WHATSAPP_NUMBER = '51947327420'
+const PENDING_ATTENDANCE_KEY = 'RUAG_PENDING_ATTENDANCE'
+const PROFILE_PHOTO_DATA_KEY = 'RUAG_PROFILE_PHOTO_DATA'
 
 // ─── Utils ────────────────────────────────────────────────────────────────────
 
@@ -99,14 +116,53 @@ const SOPORTE_WHATSAPP_NUMBER = '51947327420'
 const store = (() => {
   try {
     return {
-      get:    (k: string) => localStorage.getItem(k),
-      set:    (k: string, v: string) => localStorage.setItem(k, v),
-      remove: (k: string) => localStorage.removeItem(k),
+      get:    (k: string) => { try { return localStorage.getItem(k) } catch { return null } },
+      set:    (k: string, v: string) => { try { localStorage.setItem(k, v) } catch {} },
+      remove: (k: string) => { try { localStorage.removeItem(k) } catch {} },
     }
   } catch {
     return { get: () => null, set: () => {}, remove: () => {} }
   }
 })()
+
+const readPendingAttendance = (): PendingAttendance | null => {
+  try {
+    const raw = store.get(PENDING_ATTENDANCE_KEY)
+    return raw ? JSON.parse(raw) as PendingAttendance : null
+  } catch {
+    return null
+  }
+}
+
+const writePendingAttendance = (item: PendingAttendance) => {
+  store.set(PENDING_ATTENDANCE_KEY, JSON.stringify(item))
+}
+
+const clearPendingAttendance = () => {
+  store.remove(PENDING_ATTENDANCE_KEY)
+}
+
+const isNetworkError = (err: any) => {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return true
+  const text = `${err?.message ?? ''} ${err?.name ?? ''}`.toLowerCase()
+  return text.includes('failed to fetch') || text.includes('network') || text.includes('load failed') || text.includes('fetch')
+}
+
+const cacheProfilePhoto = async (url?: string | null) => {
+  if (!url || url.startsWith('data:')) return
+  try {
+    const response = await fetch(url, { cache: 'force-cache' })
+    if (!response.ok) return
+    const blob = await response.blob()
+    const reader = new FileReader()
+    reader.onloadend = () => {
+      if (typeof reader.result === 'string') store.set(PROFILE_PHOTO_DATA_KEY, reader.result)
+    }
+    reader.readAsDataURL(blob)
+  } catch {
+    // Offline cache is best-effort; initials remain as fallback.
+  }
+}
 
 const calcularDistancia = (lat1: number, lon1: number, lat2: number, lon2: number) => {
   const R = 6371e3
@@ -336,11 +392,14 @@ export default function EscanerWeb() {
   const [scanState, setScanState]         = useState<'ESCANEO' | 'CARGANDO' | 'EXITO' | 'ERROR'>('ESCANEO')
   const [mensaje, setMensaje]             = useState('')
   const [isMarkingExit, setIsMarkingExit] = useState(false)
+  const [isOnline, setIsOnline]           = useState(true)
+  const [hasPendingOfflineEntry, setHasPendingOfflineEntry] = useState(false)
 
   // Modals
   const [showLogros, setShowLogros]         = useState(false)
   const [showCalendar, setShowCalendar]     = useState(false)
   const [showVacations, setShowVacations]   = useState(false)
+  const [showSideMenu, setShowSideMenu]     = useState(false)
   const [showNota, setShowNota]             = useState(false)
   const [showObra, setShowObra]             = useState(false)
   const [showExterno, setShowExterno]       = useState(false)
@@ -377,6 +436,21 @@ export default function EscanerWeb() {
   // Photo
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const touchStartRef = useRef<{ x: number; y: number } | null>(null)
+
+  const openFeature = (feature: 'logros' | 'calendar' | 'vacations' | 'ranking' | 'support' | 'rrhh') => {
+    setShowSideMenu(false)
+    if (feature === 'logros') setShowLogros(true)
+    if (feature === 'calendar') setShowCalendar(true)
+    if (feature === 'vacations') setShowVacations(true)
+    if (feature === 'ranking') router.push('/ranking')
+    if (feature === 'support' && perfil) abrirSoporteWhatsApp(perfil)
+    if (feature === 'rrhh') {
+      const phone = '51987834538'
+      const text = encodeURIComponent(`Hola RRHH, soy ${perfil?.nombres ?? ''} DNI ${perfil?.dni ?? ''}. Necesito ayuda.`)
+      window.open(`https://wa.me/${phone}?text=${text}`, '_blank')
+    }
+  }
 
   const cargarVacaciones = async (dniArg?: string | null, withLoader = true) => {
     const targetDni = dniArg ?? perfil?.dni
@@ -474,19 +548,36 @@ export default function EscanerWeb() {
       const dni    = store.get('RUAG_DNI')
       const nombre = store.get('RUAG_NOMBRE')
       if (!dni || !nombre) { router.push('/setup'); return }
-      if (!hasDeviceSessionToken()) {
-        await activateDeviceSession(dni, nombre, 'web-pwa')
-      }
-      const activeSession = await isCurrentDeviceSession(dni)
-      if (!activeSession) {
-        clearWorkerSession()
-        toast.error('Tu sesion se abrio en otro dispositivo.')
-        router.push('/setup')
-        return
+
+      const onlineNow = typeof navigator === 'undefined' ? true : navigator.onLine
+      setIsOnline(onlineNow)
+      if (onlineNow) {
+        try {
+          if (!hasDeviceSessionToken()) {
+            await activateDeviceSession(dni, nombre, 'web-pwa')
+          }
+          const activeSession = await isCurrentDeviceSession(dni)
+          if (!activeSession) {
+            clearWorkerSession()
+            toast.error('Tu sesion se abrio en otro dispositivo.')
+            router.push('/setup')
+            return
+          }
+        } catch {
+          setIsOnline(false)
+        }
       }
 
       let p: Perfil | null = null
-      const { data } = await supabase.from('fotocheck_perfiles').select('*').eq('dni', dni).maybeSingle()
+      let data: any = null
+      try {
+        const res = await supabase.from('fotocheck_perfiles').select('*').eq('dni', dni).maybeSingle()
+        data = res.data
+        if (res.error) throw res.error
+        setIsOnline(true)
+      } catch {
+        setIsOnline(false)
+      }
 
       if (data) {
         if (isInactiveArea(data.area)) {
@@ -502,6 +593,7 @@ export default function EscanerWeb() {
         const visibleArea = getVisibleArea(data.area)
         store.set('RUAG_AREA', visibleArea)
         store.set('RUAG_FOTO', data.foto_url || '')
+        void cacheProfilePhoto(data.foto_url)
         p = { dni: data.dni, nombres: data.nombres_completos, area: visibleArea, foto_url: data.foto_url || '' }
       } else {
         const area = store.get('RUAG_AREA')
@@ -511,6 +603,11 @@ export default function EscanerWeb() {
 
       if (p) {
         setPerfil(p)
+        const pending = readPendingAttendance()
+        if (pending?.payload.dni === p.dni) {
+          setAsistenciaHoy(pending.asistencia)
+          setHasPendingOfflineEntry(true)
+        }
         try {
           const hoy = format(new Date(), 'yyyy-MM-dd')
           const { data: ast } = await supabase.from('registro_asistencias')
@@ -521,6 +618,7 @@ export default function EscanerWeb() {
           const { data: logs } = await supabase.from('logros_usuarios').select('logro_id').eq('dni', p.dni)
           if (logs) setUnlockedLogros(logs.map((l: { logro_id: number }) => l.logro_id))
         } catch { /* ok */ }
+        void syncPendingAttendance(true)
         await cargarVacaciones(p.dni, false)
       }
       setIsLoading(false)
@@ -532,11 +630,20 @@ export default function EscanerWeb() {
     if (!perfil?.dni) return
     let cancelled = false
     const check = async () => {
-      const activeSession = await isCurrentDeviceSession(perfil.dni)
-      if (!cancelled && !activeSession) {
-        clearWorkerSession()
-        toast.error('Sesion cerrada: se inicio en otro dispositivo.')
-        router.push('/setup')
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        if (!cancelled) setIsOnline(false)
+        return
+      }
+      try {
+        const activeSession = await isCurrentDeviceSession(perfil.dni)
+        if (!cancelled) setIsOnline(true)
+        if (!cancelled && !activeSession) {
+          clearWorkerSession()
+          toast.error('Sesion cerrada: se inicio en otro dispositivo.')
+          router.push('/setup')
+        }
+      } catch {
+        if (!cancelled) setIsOnline(false)
       }
     }
     const id = window.setInterval(check, 15000)
@@ -545,6 +652,22 @@ export default function EscanerWeb() {
       window.clearInterval(id)
     }
   }, [perfil?.dni, router])
+
+  useEffect(() => {
+    const updateNetworkState = () => {
+      const nextOnline = typeof navigator === 'undefined' ? true : navigator.onLine
+      setIsOnline(nextOnline)
+      if (nextOnline) void syncPendingAttendance(true)
+    }
+
+    updateNetworkState()
+    window.addEventListener('online', updateNetworkState)
+    window.addEventListener('offline', updateNetworkState)
+    return () => {
+      window.removeEventListener('online', updateNetworkState)
+      window.removeEventListener('offline', updateNetworkState)
+    }
+  }, [perfil?.dni])
 
   // FIX: Calendario recarga por mes al cambiar targetDate
   useEffect(() => {
@@ -625,6 +748,93 @@ export default function EscanerWeb() {
     setTimeout(() => setScanState('ESCANEO'), 4000)
   }
 
+  const saveOfflineAttendance = (payload: PendingAttendance['payload']) => {
+    const optimistic: Asistencia = {
+      id: `offline-${Date.now()}`,
+      fecha: payload.fecha,
+      hora_ingreso: payload.hora_ingreso,
+      estado_ingreso: payload.estado_ingreso,
+      hora_salida: null,
+      notas: payload.notas,
+    }
+
+    writePendingAttendance({
+      id: optimistic.id,
+      payload,
+      asistencia: optimistic,
+      created_at: new Date().toISOString(),
+    })
+    setAsistenciaHoy(optimistic)
+    setHasPendingOfflineEntry(true)
+    setIsOnline(false)
+    setScanState('ESCANEO')
+    toast.success('Entrada guardada sin conexion. Se sincronizara automaticamente.')
+  }
+
+  const syncPendingAttendance = async (silent = true) => {
+    const pending = readPendingAttendance()
+    if (!pending) {
+      setHasPendingOfflineEntry(false)
+      return
+    }
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setHasPendingOfflineEntry(true)
+      return
+    }
+
+    try {
+      const { data, error } = await supabase
+        .from('registro_asistencias')
+        .insert(pending.payload)
+        .select('id, fecha, hora_ingreso, estado_ingreso, hora_salida, notas')
+        .single()
+
+      if (error) {
+        if (error.message?.toLowerCase().includes('duplicate') || error.message?.toLowerCase().includes('unique')) {
+          const { data: existing } = await supabase
+            .from('registro_asistencias')
+            .select('id, fecha, hora_ingreso, estado_ingreso, hora_salida, notas')
+            .eq('dni', pending.payload.dni)
+            .eq('fecha', pending.payload.fecha)
+            .order('hora_ingreso', { ascending: false })
+            .limit(1)
+            .maybeSingle()
+          if (existing) setAsistenciaHoy(existing as Asistencia)
+          clearPendingAttendance()
+          setHasPendingOfflineEntry(false)
+          return
+        }
+        throw error
+      }
+
+      if (data) setAsistenciaHoy(data as Asistencia)
+      clearPendingAttendance()
+      setHasPendingOfflineEntry(false)
+      setIsOnline(true)
+      if (!silent) toast.success('Asistencia offline sincronizada.')
+    } catch (err: any) {
+      setHasPendingOfflineEntry(true)
+      if (!silent && !isNetworkError(err)) toast.error(err?.message || 'No se pudo sincronizar la asistencia.')
+    }
+  }
+
+  const handleOfflineEntry = () => {
+    if (!perfil) return
+    const h = new Date().getHours()
+    const m = new Date().getMinutes()
+    const est = (h < 9 || (h === 9 && m <= 5)) ? 'PUNTUAL' : 'TARDANZA'
+    saveOfflineAttendance({
+      dni: perfil.dni,
+      nombres_completos: perfil.nombres,
+      area: perfil.area,
+      foto_url: perfil.foto_url,
+      estado_ingreso: est,
+      fecha: format(new Date(), 'yyyy-MM-dd'),
+      hora_ingreso: new Date().toISOString(),
+      notas: 'Entrada offline PWA',
+    })
+  }
+
   const unlockAndAnimate = (ids: number[]) => {
     if (!ids.length) return
     setUnlockedLogros(prev => Array.from(new Set([...prev, ...ids])))
@@ -664,12 +874,19 @@ export default function EscanerWeb() {
       const m   = new Date().getMinutes()
       const est = (h < 9 || (h === 9 && m <= 5)) ? 'PUNTUAL' : 'TARDANZA'
       const hoy = format(new Date(), 'yyyy-MM-dd')
-
-      const { data, error } = await supabase.from('registro_asistencias').insert({
-        dni: perfil.dni, nombres_completos: perfil.nombres, area: perfil.area,
-        foto_url: perfil.foto_url, estado_ingreso: est, fecha: hoy,
+      const nowIso = new Date().toISOString()
+      const payload = {
+        dni: perfil.dni,
+        nombres_completos: perfil.nombres,
+        area: perfil.area,
+        foto_url: perfil.foto_url,
+        estado_ingreso: est,
+        fecha: hoy,
+        hora_ingreso: nowIso,
         notas: 'Escaner Oficina',
-      }).select().single()
+      }
+
+      const { data, error } = await supabase.from('registro_asistencias').insert(payload).select().single()
       if (error) throw error
 
       setAsistenciaHoy(data as Asistencia)
@@ -682,7 +899,22 @@ export default function EscanerWeb() {
     } catch (err: any) {
       if (err.code === 1) mostrarError('Activa el GPS para registrar asistencia.')
       else if (err.message?.includes('duplicate') || err.message?.includes('unique')) mostrarExito('¡INGRESO YA REGISTRADO!')
-      else mostrarError(`Error: ${err.message}`)
+      else if (isNetworkError(err) && perfil) {
+        const h   = new Date().getHours()
+        const m   = new Date().getMinutes()
+        const est = (h < 9 || (h === 9 && m <= 5)) ? 'PUNTUAL' : 'TARDANZA'
+        const nowIso = new Date().toISOString()
+        saveOfflineAttendance({
+          dni: perfil.dni,
+          nombres_completos: perfil.nombres,
+          area: perfil.area,
+          foto_url: perfil.foto_url,
+          estado_ingreso: est,
+          fecha: format(new Date(), 'yyyy-MM-dd'),
+          hora_ingreso: nowIso,
+          notas: 'Escaner Oficina',
+        })
+      } else mostrarError(`Error: ${err.message}`)
     }
   }
 
@@ -712,11 +944,18 @@ export default function EscanerWeb() {
       const est = ok ? 'PUNTUAL' : 'TARDANZA'
       const hoy = format(new Date(), 'yyyy-MM-dd')
       const nota = `${prefijo}: ${notaTexto.trim()} [GPS: ${lat.toFixed(6)}, ${lon.toFixed(6)}]`
+      const payload = {
+        dni: perfil.dni,
+        nombres_completos: perfil.nombres,
+        area: perfil.area,
+        foto_url: perfil.foto_url,
+        estado_ingreso: est,
+        fecha: hoy,
+        hora_ingreso: new Date().toISOString(),
+        notas: nota,
+      }
 
-      const { data, error } = await supabase.from('registro_asistencias').insert({
-        dni: perfil.dni, nombres_completos: perfil.nombres, area: perfil.area,
-        foto_url: perfil.foto_url, estado_ingreso: est, fecha: hoy, notas: nota,
-      }).select().single()
+      const { data, error } = await supabase.from('registro_asistencias').insert(payload).select().single()
       if (error) throw error
 
       setAsistenciaHoy(data as Asistencia)
@@ -727,6 +966,23 @@ export default function EscanerWeb() {
       if (err.code === 1) toast.error('Activa el GPS para marcar entrada externa.')
       else if (err.message?.includes('duplicate') || err.message?.includes('unique')) {
         toast.info('Ingreso ya registrado'); setShowObra(false); setShowExterno(false)
+      } else if (isNetworkError(err) && perfil) {
+        const h   = new Date().getHours()
+        const m   = new Date().getMinutes()
+        const ok  = tipo === 'obra'
+          ? (h < 7 || (h === 7 && m <= 35))
+          : (h < 9 || (h === 9 && m <= 5))
+        saveOfflineAttendance({
+          dni: perfil.dni,
+          nombres_completos: perfil.nombres,
+          area: perfil.area,
+          foto_url: perfil.foto_url,
+          estado_ingreso: ok ? 'PUNTUAL' : 'TARDANZA',
+          fecha: format(new Date(), 'yyyy-MM-dd'),
+          hora_ingreso: new Date().toISOString(),
+          notas: `${prefijo}: ${notaTexto.trim()} [GPS pendiente por sincronizacion]`,
+        })
+        setShowObra(false); setShowExterno(false); setNotaTexto('')
       } else toast.error(`Error: ${err.message}`)
     } finally { setGuardando(false) }
   }
@@ -747,11 +1003,18 @@ export default function EscanerWeb() {
       const hoy = format(new Date(), 'yyyy-MM-dd')
       // Turno nocturno: SIEMPRE puntual sin importar la hora real
       const nota = `Turno Nocturno (${horaLabel}): ${notaTexto.trim()} [GPS: ${lat.toFixed(6)}, ${lon.toFixed(6)}]`
+      const payload = {
+        dni: perfil.dni,
+        nombres_completos: perfil.nombres,
+        area: perfil.area,
+        foto_url: perfil.foto_url,
+        estado_ingreso: 'PUNTUAL',
+        fecha: hoy,
+        hora_ingreso: new Date().toISOString(),
+        notas: nota,
+      }
 
-      const { data, error } = await supabase.from('registro_asistencias').insert({
-        dni: perfil.dni, nombres_completos: perfil.nombres, area: perfil.area,
-        foto_url: perfil.foto_url, estado_ingreso: 'PUNTUAL', fecha: hoy, notas: nota,
-      }).select().single()
+      const { data, error } = await supabase.from('registro_asistencias').insert(payload).select().single()
       if (error) throw error
 
       setAsistenciaHoy(data as Asistencia)
@@ -763,6 +1026,19 @@ export default function EscanerWeb() {
       if (err.code === 1) toast.error('Activa el GPS para registrar el ingreso.')
       else if (err.message?.includes('duplicate') || err.message?.includes('unique')) {
         toast.info('Ingreso ya registrado'); setShowNocturno(false)
+      } else if (isNetworkError(err) && perfil) {
+        const horaLabel = HORAS_NOCTURNAS.find(x => x.hora === horaSeleccionada)?.label ?? ''
+        saveOfflineAttendance({
+          dni: perfil.dni,
+          nombres_completos: perfil.nombres,
+          area: perfil.area,
+          foto_url: perfil.foto_url,
+          estado_ingreso: 'PUNTUAL',
+          fecha: format(new Date(), 'yyyy-MM-dd'),
+          hora_ingreso: new Date().toISOString(),
+          notas: `Turno Nocturno (${horaLabel}): ${notaTexto.trim()} [GPS pendiente por sincronizacion]`,
+        })
+        setShowNocturno(false); setNotaTexto(''); setHoraSeleccionada(null)
       } else toast.error(`Error: ${err.message}`)
     } finally { setGuardando(false) }
   }
@@ -771,6 +1047,10 @@ export default function EscanerWeb() {
 
   const handleSalida = async () => {
     if (!asistenciaHoy || isMarkingExit || !perfil) return
+    if (asistenciaHoy.id.startsWith('offline-')) {
+      toast.warning('Tu entrada offline aun no se sincroniza. Marca salida cuando vuelva internet.')
+      return
+    }
     setIsMarkingExit(true)
 
     try {
@@ -937,9 +1217,15 @@ export default function EscanerWeb() {
     )
   }
 
+  const showOfflineFotocheck = Boolean(!asistenciaHoy && !isOnline && perfil)
+  const showScannerView = Boolean(!asistenciaHoy && !showOfflineFotocheck)
+  const cachedProfilePhoto = store.get(PROFILE_PHOTO_DATA_KEY) || ''
+  const profilePhotoSrc = (!isOnline && cachedProfilePhoto) ? cachedProfilePhoto : (perfil.foto_url || cachedProfilePhoto)
   const isPuntual   = asistenciaHoy?.estado_ingreso === 'PUNTUAL'
-  const statusColor = isPuntual ? 'var(--green)' : 'var(--red)'
-  const statusBg    = isPuntual ? 'var(--green-light)' : 'var(--red-light)'
+  const isPendingLocal = Boolean(asistenciaHoy && (asistenciaHoy.id.startsWith('offline-') || hasPendingOfflineEntry))
+  const cardIsOfflineOnly = showOfflineFotocheck && !asistenciaHoy
+  const statusColor = cardIsOfflineOnly ? 'var(--amber)' : isPuntual ? 'var(--green)' : 'var(--red)'
+  const statusBg    = cardIsOfflineOnly ? 'var(--amber-light)' : isPuntual ? 'var(--green-light)' : 'var(--red-light)'
   const approvedVacationDays = vacacionesSolicitudes
     .filter((item) =>
       normalizeStatus(item.estado) === 'aprobada' &&
@@ -967,6 +1253,20 @@ export default function EscanerWeb() {
   return (
     <div
       className="min-h-screen flex flex-col items-center relative overflow-hidden"
+      onTouchStart={(e) => {
+        const t = e.touches[0]
+        touchStartRef.current = { x: t.clientX, y: t.clientY }
+      }}
+      onTouchEnd={(e) => {
+        const start = touchStartRef.current
+        const t = e.changedTouches[0]
+        touchStartRef.current = null
+        if (!start || showSideMenu || showLogros || showCalendar || showVacations || showNota || showObra || showExterno || showNocturno) return
+        const dx = t.clientX - start.x
+        const dy = Math.abs(t.clientY - start.y)
+        const middleBand = start.y > window.innerHeight * 0.22 && start.y < window.innerHeight * 0.78
+        if (middleBand && dx < -85 && dy < 70) setShowSideMenu(true)
+      }}
       style={{
         background: 'var(--bg)',
         fontFamily: "'DM Sans', sans-serif",
@@ -982,10 +1282,91 @@ export default function EscanerWeb() {
           style={{ background: 'radial-gradient(circle, rgba(124,58,237,0.12) 0%, transparent 70%)' }} />
       </div>
 
+      <AnimatePresence>
+        {showSideMenu && (
+          <motion.div
+            className="fixed inset-0 z-[80] flex justify-end"
+            style={{ background: 'rgba(15,23,42,0.38)', backdropFilter: 'blur(8px)' }}
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={() => setShowSideMenu(false)}
+          >
+            <motion.aside
+              className="h-full w-[82vw] max-w-[330px] rounded-l-[34px] p-5 flex flex-col"
+              style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.97), rgba(239,248,244,0.97), rgba(239,246,255,0.97))', borderLeft: '1px solid rgba(255,255,255,0.9)', boxShadow: '-24px 0 60px rgba(15,23,42,0.18)' }}
+              initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
+              transition={{ type: 'spring', stiffness: 380, damping: 34 }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-[11px] font-black uppercase tracking-[0.18em]" style={{ color: 'var(--text-3)' }}>Panel rapido</p>
+                  <h3 className="text-xl font-black" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>Opciones</h3>
+                </div>
+                <button onClick={() => setShowSideMenu(false)} className="w-10 h-10 rounded-2xl border flex items-center justify-center" style={{ background: 'white', borderColor: 'var(--border)', color: 'var(--text-2)' }}>
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div className="mt-5 rounded-3xl p-4 border flex items-center gap-3" style={{ background: 'rgba(255,255,255,0.72)', borderColor: 'rgba(203,213,225,0.75)' }}>
+                <div className="w-14 h-14 rounded-full overflow-hidden" style={{ background: 'var(--blue-light)' }}>
+                  {profilePhotoSrc ? (
+                    <img src={profilePhotoSrc} alt="" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center text-sm font-black" style={{ color: 'var(--blue)' }}>
+                      {perfil ? getInitials(perfil.nombres) : ''}
+                    </div>
+                  )}
+                </div>
+                <div className="min-w-0">
+                  <p className="text-sm font-black leading-tight truncate" style={{ color: 'var(--text-1)' }}>{perfil?.nombres}</p>
+                  <p className="text-xs font-bold mt-1" style={{ color: 'var(--text-3)' }}>{perfil?.dni}</p>
+                  <p className="text-[10px] font-black uppercase tracking-[0.12em] mt-1 truncate" style={{ color: 'var(--blue)' }}>{perfil?.area}</p>
+                </div>
+              </div>
+
+              <div
+                className="mt-4 w-fit rounded-full px-4 py-2 border flex items-center gap-2 text-xs font-black"
+                style={{
+                  background: isOnline && !hasPendingOfflineEntry ? 'rgba(220,252,231,0.9)' : 'rgba(255,247,237,0.94)',
+                  color: isOnline && !hasPendingOfflineEntry ? 'var(--green)' : 'var(--amber)',
+                  borderColor: isOnline && !hasPendingOfflineEntry ? 'rgba(16,185,129,0.22)' : 'rgba(245,158,11,0.28)',
+                }}
+              >
+                {isOnline && !hasPendingOfflineEntry ? <Cloud size={16} /> : <CloudOff size={16} />}
+                <span>{isOnline && !hasPendingOfflineEntry ? 'Online' : hasPendingOfflineEntry ? 'Pendiente offline' : 'Offline'}</span>
+              </div>
+
+              <div className="mt-6 space-y-3">
+                {[
+                  { key: 'logros', label: 'Logros', desc: 'Insignias y progreso', icon: <Trophy size={22} />, colors: ['#F59E0B', '#FBBF24'] },
+                  { key: 'calendar', label: 'Calendario', desc: 'Historial mensual', icon: <Calendar size={22} />, colors: ['#2563EB', '#06B6D4'] },
+                  { key: 'vacations', label: 'Vacaciones', desc: 'Saldo y solicitudes', icon: <PlaneTakeoff size={22} />, colors: ['#0EA5E9', '#6366F1'] },
+                  { key: 'ranking', label: 'Ranking', desc: 'Top 10 de oficina', icon: <Star size={22} />, colors: ['#059669', '#22C55E'] },
+                  { key: 'support', label: 'Soporte', desc: 'Ayuda por WhatsApp', icon: <Phone size={22} />, colors: ['#128C7E', '#25D366'] },
+                  { key: 'rrhh', label: 'RRHH', desc: 'Recursos humanos', icon: <Badge size={22} />, colors: ['#2563EB', '#06B6D4'] },
+                ].map((item) => (
+                  <motion.button key={item.key} onClick={() => openFeature(item.key as any)}
+                    className="w-full rounded-[22px] border p-3 flex items-center gap-3 text-left"
+                    style={{ background: 'rgba(255,255,255,0.78)', borderColor: `${item.colors[0]}2A` }}
+                    whileTap={{ scale: 0.98 }}>
+                    <span className="w-12 h-12 rounded-2xl text-white flex items-center justify-center shrink-0" style={{ background: `linear-gradient(135deg, ${item.colors[0]}, ${item.colors[1]})` }}>{item.icon}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-black" style={{ color: 'var(--text-1)' }}>{item.label}</span>
+                      <span className="block text-xs font-semibold mt-0.5" style={{ color: 'var(--text-3)' }}>{item.desc}</span>
+                    </span>
+                    <ChevronRight size={18} style={{ color: 'var(--text-3)' }} />
+                  </motion.button>
+                ))}
+              </div>
+            </motion.aside>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* ──────────────────────────────────────────────────────────────────── */}
       {/* VISTA 1: ESCÁNER QR                                                  */}
       {/* ──────────────────────────────────────────────────────────────────── */}
-      {!asistenciaHoy && (
+      {showScannerView && (
         <div className="w-full max-w-sm mx-auto flex flex-col min-h-screen px-5 pt-6 pb-4 relative z-10">
 
           {/* Header */}
@@ -1000,43 +1381,13 @@ export default function EscanerWeb() {
                 <p className="text-xs font-semibold" style={{ color: 'var(--text-3)' }}>Registra tu asistencia</p>
               </div>
             </div>
-            <div className="flex gap-2">
-              <motion.button
-                onClick={() => router.push('/ranking')}
-                className="w-10 h-10 rounded-2xl flex items-center justify-center border transition-all"
-                style={{ background: 'linear-gradient(135deg, #111827, #334155)', borderColor: '#CBD5E1', color: 'white', boxShadow: 'var(--shadow-sm)' }}
-                whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.92 }}>
-                <Star size={18} />
-              </motion.button>
-              <motion.button
-                onClick={() => setShowLogros(true)}
-                className="w-10 h-10 rounded-2xl flex items-center justify-center border transition-all"
-                style={{ background: 'var(--gold-light)', borderColor: '#FDE68A', color: 'var(--gold)', boxShadow: 'var(--shadow-sm)' }}
-                whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.92 }}>
-                <Trophy size={18} />
-              </motion.button>
-              <motion.button
-                onClick={() => setShowCalendar(true)}
-                className="w-10 h-10 rounded-2xl flex items-center justify-center border transition-all"
-                style={{ background: 'var(--surface)', borderColor: 'var(--border)', color: 'var(--text-2)', boxShadow: 'var(--shadow-sm)' }}
-                whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.92 }}>
-                <History size={18} />
-              </motion.button>
-              <motion.button
-                onClick={() => setShowVacations(true)}
-                className="w-10 h-10 rounded-2xl flex items-center justify-center border transition-all"
-                style={{ background: 'var(--blue-light)', borderColor: '#BFDBFE', color: 'var(--blue)', boxShadow: 'var(--shadow-sm)' }}
-                whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.92 }}>
-                <PlaneTakeoff size={18} />
-              </motion.button>
-              <motion.button
-                onClick={() => abrirSoporteWhatsApp(perfil)}
-                className="w-10 h-10 rounded-2xl flex items-center justify-center transition-all"
-                style={{ background: 'linear-gradient(135deg, #22C55E, #10B981)', color: 'white', boxShadow: '0 8px 20px rgba(16,185,129,0.28)' }}
-                whileHover={{ scale: 1.08 }} whileTap={{ scale: 0.92 }}>
-                <Phone size={18} />
-              </motion.button>
-            </div>
+            <motion.button
+              onClick={() => setShowSideMenu(true)}
+              className="w-14 h-14 rounded-[22px] flex items-center justify-center border text-white"
+              style={{ background: 'linear-gradient(135deg, #0F766E, #22C55E, #0EA5E9)', borderColor: 'rgba(255,255,255,0.55)', boxShadow: '0 16px 34px rgba(16,185,129,0.22)' }}
+              whileTap={{ scale: 0.94 }}>
+              <Menu size={28} />
+            </motion.button>
           </div>
 
           {/* Camera box */}
@@ -1046,7 +1397,7 @@ export default function EscanerWeb() {
             initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, ease: [0.34, 1.2, 0.64, 1] }}
           >
-            {scanState === 'ESCANEO' && (
+            {scanState === 'ESCANEO' && isOnline && (
               <>
                 <div className="absolute inset-0 z-10">
                   <Scanner
@@ -1080,6 +1431,34 @@ export default function EscanerWeb() {
                   </div>
                 </div>
               </>
+            )}
+
+            {scanState === 'ESCANEO' && !isOnline && (
+              <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-7 text-center"
+                style={{ background: 'linear-gradient(160deg, rgba(239,246,255,0.98), rgba(236,253,245,0.98))' }}>
+                <motion.div
+                  className="w-20 h-20 rounded-[28px] flex items-center justify-center mb-5"
+                  style={{ background: 'rgba(255,255,255,0.88)', color: 'var(--amber)', boxShadow: 'var(--shadow-md)' }}
+                  animate={{ y: [0, -8, 0] }}
+                  transition={{ duration: 2.6, repeat: Infinity, ease: 'easeInOut' }}
+                >
+                  <CloudOff size={34} />
+                </motion.div>
+                <h2 className="text-xl font-black mb-2" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>
+                  Sin conexion
+                </h2>
+                <p className="text-sm font-semibold leading-relaxed mb-5" style={{ color: 'var(--text-3)' }}>
+                  No se mostrara el escaner. Puedes guardar tu entrada en este equipo y se subira sola cuando vuelva internet.
+                </p>
+                <motion.button
+                  onClick={handleOfflineEntry}
+                  className="w-full rounded-2xl py-4 text-white font-black uppercase tracking-wider"
+                  style={{ background: 'linear-gradient(135deg, #0F766E, #22C55E)', boxShadow: '0 18px 34px rgba(16,185,129,0.24)' }}
+                  whileTap={{ scale: 0.97 }}
+                >
+                  Guardar entrada offline
+                </motion.button>
+              </div>
             )}
 
             {/* States overlay */}
@@ -1161,7 +1540,7 @@ export default function EscanerWeb() {
       {/* ──────────────────────────────────────────────────────────────────── */}
       {/* VISTA 2: FOTOCHECK DIGITAL                                           */}
       {/* ──────────────────────────────────────────────────────────────────── */}
-      {asistenciaHoy && (
+      {(asistenciaHoy || showOfflineFotocheck) && (
         <div className="w-full max-w-sm mx-auto flex flex-col px-5 pt-6 pb-8 relative z-10 gap-5">
 
           {/* Header */}
@@ -1169,33 +1548,13 @@ export default function EscanerWeb() {
             <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--text-3)' }}>
               {format(new Date(), "EEEE d 'de' MMMM", { locale: es })}
             </p>
-            <div className="flex gap-2">
-              <motion.button onClick={() => router.push('/ranking')} className="w-10 h-10 rounded-2xl flex items-center justify-center border transition-all"
-                style={{ background: 'linear-gradient(135deg, #111827, #334155)', borderColor: '#CBD5E1', color: 'white', boxShadow: 'var(--shadow-sm)' }}
-                whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
-                <Star size={18} />
-              </motion.button>
-              <motion.button onClick={() => setShowLogros(true)} className="w-10 h-10 rounded-2xl flex items-center justify-center border transition-all"
-                style={{ background: 'var(--gold-light)', borderColor: '#FDE68A', color: 'var(--gold)', boxShadow: 'var(--shadow-sm)' }}
-                whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
-                <Trophy size={18} />
-              </motion.button>
-              <motion.button onClick={() => setShowCalendar(true)} className="w-10 h-10 rounded-2xl flex items-center justify-center border transition-all"
-                style={{ background: 'var(--surface)', borderColor: 'var(--border)', color: 'var(--text-2)', boxShadow: 'var(--shadow-sm)' }}
-                whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
-                <History size={18} />
-              </motion.button>
-              <motion.button onClick={() => setShowVacations(true)} className="w-10 h-10 rounded-2xl flex items-center justify-center border transition-all"
-                style={{ background: 'var(--blue-light)', borderColor: '#BFDBFE', color: 'var(--blue)', boxShadow: 'var(--shadow-sm)' }}
-                whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
-                <PlaneTakeoff size={18} />
-              </motion.button>
-              <motion.button onClick={() => abrirSoporteWhatsApp(perfil)} className="w-10 h-10 rounded-2xl flex items-center justify-center transition-all"
-                style={{ background: 'linear-gradient(135deg, #22C55E, #10B981)', color: 'white', boxShadow: '0 8px 20px rgba(16,185,129,0.28)' }}
-                whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
-                <Phone size={18} />
-              </motion.button>
-            </div>
+            <motion.button
+              onClick={() => setShowSideMenu(true)}
+              className="w-14 h-14 rounded-[22px] flex items-center justify-center border text-white"
+              style={{ background: 'linear-gradient(135deg, #0F766E, #22C55E, #0EA5E9)', borderColor: 'rgba(255,255,255,0.55)', boxShadow: '0 16px 34px rgba(16,185,129,0.22)' }}
+              whileTap={{ scale: 0.94 }}>
+              <Menu size={28} />
+            </motion.button>
           </div>
 
           {/* Fotocheck Card */}
@@ -1206,24 +1565,41 @@ export default function EscanerWeb() {
             initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, ease: [0.34, 1.2, 0.64, 1] }}
           >
-            {/* Glow border */}
-            <div className="absolute -inset-0.5 rounded-[28px] opacity-70"
-              style={{ background: isPuntual
-                ? 'linear-gradient(135deg, #047857, #34D399, #6EE7B7)'
-                : 'linear-gradient(135deg, #991B1B, #EF4444, #FCA5A5)',
-                filter: 'blur(2px)',
+            <div
+              className="absolute -inset-1 rounded-[30px]"
+              style={{ background: cardIsOfflineOnly
+                ? 'linear-gradient(135deg, #B45309, #F59E0B 52%, #FBBF24)'
+                : isPuntual
+                ? 'linear-gradient(135deg, #047857, #34D399 48%, #0EA5E9)'
+                : 'linear-gradient(135deg, #991B1B, #EF4444 52%, #F97316)',
+                boxShadow: cardIsOfflineOnly
+                  ? '0 24px 55px rgba(245,158,11,0.20)'
+                  : isPuntual
+                  ? '0 24px 55px rgba(16,185,129,0.20)'
+                  : '0 24px 55px rgba(239,68,68,0.18)'
               }} />
-            {/* Glow pulse */}
-            <div className="absolute -inset-2 rounded-[32px] opacity-30"
+            <motion.div
+              className="absolute -inset-4 rounded-[34px] opacity-40"
               style={{
-                background: isPuntual
-                  ? 'radial-gradient(ellipse, rgba(5,150,105,0.4) 0%, transparent 70%)'
-                  : 'radial-gradient(ellipse, rgba(220,38,38,0.4) 0%, transparent 70%)',
-                animation: 'glow-pulse 3s ease-in-out infinite',
-              }} />
+                background: cardIsOfflineOnly
+                  ? 'radial-gradient(circle at 30% 10%, rgba(251,191,36,0.34), transparent 42%), radial-gradient(circle at 80% 85%, rgba(245,158,11,0.20), transparent 38%)'
+                  : isPuntual
+                  ? 'radial-gradient(circle at 30% 10%, rgba(52,211,153,0.38), transparent 42%), radial-gradient(circle at 80% 85%, rgba(14,165,233,0.22), transparent 38%)'
+                  : 'radial-gradient(circle at 30% 10%, rgba(248,113,113,0.34), transparent 42%), radial-gradient(circle at 80% 85%, rgba(249,115,22,0.20), transparent 38%)',
+                filter: 'blur(12px)',
+              }}
+              animate={{ opacity: [0.24, 0.42, 0.24], scale: [0.98, 1.02, 0.98] }}
+              transition={{ duration: 3.4, repeat: Infinity, ease: 'easeInOut' }}
+            />
 
             <div className="relative rounded-[26px] p-7 overflow-hidden"
-              style={{ background: 'var(--surface)', boxShadow: 'var(--shadow-lg)' }}>
+              style={{ background: 'linear-gradient(160deg, rgba(255,255,255,0.98), rgba(248,250,252,0.96))', boxShadow: 'var(--shadow-lg)' }}>
+              <motion.div
+                className="absolute inset-y-0 -left-24 w-20 pointer-events-none"
+                style={{ background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.75), transparent)', transform: 'skewX(-18deg)' }}
+                animate={{ x: [-120, 470] }}
+                transition={{ duration: 3.8, repeat: Infinity, ease: 'linear', repeatDelay: 1.4 }}
+              />
 
               {/* Watermark */}
               <div className="absolute -bottom-8 -right-8 opacity-5">
@@ -1236,8 +1612,8 @@ export default function EscanerWeb() {
               <div className="flex justify-center mb-5">
                 <div className="relative">
                   <div className="w-28 h-28 rounded-full overflow-hidden border-4" style={{ borderColor: statusColor, boxShadow: `0 0 0 4px ${statusBg}` }}>
-                    {perfil.foto_url ? (
-                      <img src={perfil.foto_url} alt="Foto" className="w-full h-full object-cover" />
+                    {profilePhotoSrc ? (
+                      <img src={profilePhotoSrc} alt="Foto" className="w-full h-full object-cover" />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center font-black text-3xl"
                         style={{ background: 'var(--surface-2)', color: 'var(--blue)' }}>
@@ -1251,7 +1627,7 @@ export default function EscanerWeb() {
                       </div>
                     )}
                   </div>
-                  {!uploadingPhoto && (
+                  {!uploadingPhoto && asistenciaHoy && (
                     <motion.button
                       onClick={() => fileInputRef.current?.click()}
                       className="absolute -bottom-1 -right-1 w-9 h-9 rounded-full flex items-center justify-center text-white border-4"
@@ -1279,20 +1655,30 @@ export default function EscanerWeb() {
                 </span>
               </div>
 
+              {(isPendingLocal || cardIsOfflineOnly) && (
+                <div className="flex justify-center mt-3">
+                  <span className="px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-[0.14em] flex items-center gap-1.5"
+                    style={{ background: 'rgba(255,247,237,0.96)', color: 'var(--amber)', border: '1px solid rgba(245,158,11,0.28)' }}>
+                    <CloudOff size={13} />
+                    {isPendingLocal ? 'Pendiente offline' : 'Modo offline'}
+                  </span>
+                </div>
+              )}
+
               <div className="w-full h-px my-5" style={{ background: 'var(--border)' }} />
 
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-[0.15em] mb-1" style={{ color: 'var(--text-3)' }}>Ingreso Hoy</p>
                   <p className="text-2xl font-black" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>
-                    {formatTimeLima(asistenciaHoy.hora_ingreso)}
+                    {asistenciaHoy ? formatTimeLima(asistenciaHoy.hora_ingreso) : 'Sin entrada'}
                   </p>
                 </div>
                 <div className="text-right">
                   <p className="text-[10px] font-black uppercase tracking-[0.15em] mb-1" style={{ color: 'var(--text-3)' }}>Estado</p>
                   <span className="px-3 py-1 rounded-lg text-sm font-black"
                     style={{ background: statusBg, color: statusColor, border: `1.5px solid ${statusColor}33` }}>
-                    {asistenciaHoy.estado_ingreso}
+                    {asistenciaHoy?.estado_ingreso ?? 'OFFLINE'}
                   </span>
                 </div>
               </div>
@@ -1300,7 +1686,29 @@ export default function EscanerWeb() {
           </motion.div>
 
           {/* Actions */}
-          {asistenciaHoy.hora_salida ? (
+          {cardIsOfflineOnly ? (
+            <div className="flex flex-col gap-3">
+              <motion.div
+                className="rounded-3xl p-5 text-center"
+                style={{ background: 'rgba(255,247,237,0.92)', border: '1.5px solid rgba(245,158,11,0.28)', boxShadow: 'var(--shadow-sm)' }}
+                initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
+              >
+                <CloudOff size={30} className="mx-auto mb-2" style={{ color: 'var(--amber)' }} />
+                <p className="text-sm font-bold" style={{ color: 'var(--text-2)' }}>
+                  Tu fotocheck esta disponible sin internet. La entrada se guardara en este equipo y se subira cuando vuelva la conexion.
+                </p>
+              </motion.div>
+              <motion.button
+                onClick={handleOfflineEntry}
+                className="w-full h-[64px] rounded-2xl flex items-center justify-center gap-3 font-black text-base text-white"
+                style={{ background: 'linear-gradient(135deg, #0F766E, #22C55E)', fontFamily: 'Syne, sans-serif', boxShadow: '0 12px 28px rgba(16,185,129,0.28)' }}
+                whileTap={{ scale: 0.97 }}
+              >
+                <CloudOff size={22} />
+                REGISTRAR ENTRADA OFFLINE
+              </motion.button>
+            </div>
+          ) : asistenciaHoy?.hora_salida ? (
             <motion.div
               className="rounded-3xl p-6 flex flex-col items-center text-center"
               style={{ background: 'var(--green-light)', border: '1.5px solid #6EE7B7', boxShadow: 'var(--shadow-sm)' }}
@@ -1572,18 +1980,20 @@ export default function EscanerWeb() {
       {/* ── Calendario (Bottom Sheet) ─────────────────────────────────────── */}
       <AnimatePresence>
         {showCalendar && (
-          <motion.div className="fixed inset-0 z-50 flex items-end justify-center"
+          <motion.div className="fixed inset-0 z-50 flex items-stretch justify-center"
             style={{ background: 'rgba(30,27,75,0.45)', backdropFilter: 'blur(8px)' }}
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             onClick={() => setShowCalendar(false)}>
             <motion.div
-              className="w-full max-w-lg rounded-t-[32px] p-6 pb-10 flex flex-col"
+              className="w-full max-w-lg p-5 pt-[calc(env(safe-area-inset-top)+16px)] pb-[calc(env(safe-area-inset-bottom)+24px)] flex flex-col"
               style={{ background: 'var(--surface)', boxShadow: '0 -20px 60px rgba(30,27,75,0.15)', maxHeight: '90vh', border: '1.5px solid var(--border)', borderBottom: 'none' }}
               initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
               transition={{ type: 'spring', stiffness: 380, damping: 36 }}
               onClick={e => e.stopPropagation()}
             >
-              <div className="w-12 h-1.5 rounded-full mx-auto mb-6" style={{ background: 'var(--border-2)' }} />
+              <button onClick={() => setShowCalendar(false)} className="w-12 h-12 rounded-2xl flex items-center justify-center mb-4" style={{ background: '#0F172A', color: 'white' }}>
+                <ChevronLeft size={22} />
+              </button>
 
               {/* Header */}
               <div className="flex items-center justify-between mb-6">
@@ -1650,18 +2060,20 @@ export default function EscanerWeb() {
       {/* ── Detalle del día ───────────────────────────────────────────────── */}
       <AnimatePresence>
         {showVacations && (
-          <motion.div className="fixed inset-0 z-50 flex items-end justify-center"
+          <motion.div className="fixed inset-0 z-50 flex items-stretch justify-center"
             style={{ background: 'rgba(30,27,75,0.45)', backdropFilter: 'blur(8px)' }}
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             onClick={() => !submittingVacation && setShowVacations(false)}>
             <motion.div
-              className="w-full max-w-lg rounded-t-[32px] p-6 pb-10 flex flex-col"
-              style={{ background: 'var(--surface)', boxShadow: '0 -20px 60px rgba(30,27,75,0.15)', maxHeight: '92vh', border: '1.5px solid var(--border)', borderBottom: 'none' }}
-              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+              className="w-full max-w-lg p-5 pt-[calc(env(safe-area-inset-top)+16px)] pb-[calc(env(safe-area-inset-bottom)+24px)] flex flex-col"
+              style={{ background: 'linear-gradient(180deg, #F8FBFF, #EEF8F4, #EAF2FF)', minHeight: '100vh' }}
+              initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
               transition={{ type: 'spring', stiffness: 380, damping: 36 }}
               onClick={e => e.stopPropagation()}
             >
-              <div className="w-12 h-1.5 rounded-full mx-auto mb-6" style={{ background: 'var(--border-2)' }} />
+              <button onClick={() => !submittingVacation && setShowVacations(false)} className="w-12 h-12 rounded-2xl flex items-center justify-center mb-4" style={{ background: '#0F172A', color: 'white' }}>
+                <ChevronLeft size={22} />
+              </button>
               <div className="flex items-center justify-between gap-3 mb-5">
                 <div className="flex items-center gap-3">
                   <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: 'var(--blue-light)', border: '1.5px solid var(--border-2)' }}>
@@ -1990,18 +2402,20 @@ export default function EscanerWeb() {
       {/* ── Logros (Bottom Sheet) ─────────────────────────────────────────── */}
       <AnimatePresence>
         {showLogros && (
-          <motion.div className="fixed inset-0 z-50 flex items-end justify-center"
+          <motion.div className="fixed inset-0 z-50 flex items-stretch justify-center"
             style={{ background: 'rgba(30,27,75,0.45)', backdropFilter: 'blur(8px)' }}
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             onClick={() => setShowLogros(false)}>
             <motion.div
-              className="w-full max-w-lg rounded-t-[32px] p-6 flex flex-col"
-              style={{ background: 'var(--surface)', boxShadow: '0 -20px 60px rgba(30,27,75,0.15)', maxHeight: '90vh', border: '1.5px solid var(--border)', borderBottom: 'none' }}
-              initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
+              className="w-full max-w-lg p-5 pt-[calc(env(safe-area-inset-top)+16px)] pb-[calc(env(safe-area-inset-bottom)+24px)] flex flex-col"
+              style={{ background: 'linear-gradient(180deg, #F8FBFF, #FFF7E6, #EEF8F4)', minHeight: '100vh' }}
+              initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
               transition={{ type: 'spring', stiffness: 380, damping: 36 }}
               onClick={e => e.stopPropagation()}
             >
-              <div className="w-12 h-1.5 rounded-full mx-auto mb-6" style={{ background: 'var(--border-2)' }} />
+              <button onClick={() => setShowLogros(false)} className="w-12 h-12 rounded-2xl flex items-center justify-center mb-4" style={{ background: '#0F172A', color: 'white' }}>
+                <ChevronLeft size={22} />
+              </button>
 
               <div className="flex items-center gap-4 mb-5">
                 <div className="w-14 h-14 rounded-2xl flex items-center justify-center"
