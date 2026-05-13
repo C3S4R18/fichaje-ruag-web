@@ -393,7 +393,9 @@ export default function AdminDashboard() {
   const [showExportar, setShowExportar]   = useState(false)
   const [showManual, setShowManual]       = useState(false)
   const [showFeriado, setShowFeriado]     = useState(false)
-  const [sidebarOpen, setSidebarOpen]     = useState(true)
+  const [sidebarOpen, setSidebarOpen]     = useState(false)
+  const actionAlign = 'justify-center px-0'
+  const actionLabel = 'sr-only'
   const [feriadoFecha, setFeriadoFecha]   = useState(format(addDays(new Date(), 1), 'yyyy-MM-dd'))
   const [feriadoMotivo, setFeriadoMotivo] = useState('Feriado')
   const [feriadoSaving, setFeriadoSaving] = useState(false)
@@ -425,6 +427,26 @@ export default function AdminDashboard() {
     const dark = localStorage.getItem('ruag_theme') === 'dark'
     setIsDark(dark)
     document.documentElement.classList.toggle('dark', dark)
+  }, [])
+
+  useEffect(() => {
+    const openExcel = () => setShowExportar(true)
+    const openFeriado = () => {
+      setFeriadoFecha(format(addDays(new Date(), 1), 'yyyy-MM-dd'))
+      setShowFeriado(true)
+    }
+
+    window.addEventListener('ruag-open-excel', openExcel)
+    window.addEventListener('ruag-open-feriado', openFeriado)
+
+    const open = new URLSearchParams(window.location.search).get('open')
+    if (open === 'excel') openExcel()
+    if (open === 'feriado') openFeriado()
+
+    return () => {
+      window.removeEventListener('ruag-open-excel', openExcel)
+      window.removeEventListener('ruag-open-feriado', openFeriado)
+    }
   }, [])
 
   useEffect(() => {
@@ -1023,8 +1045,6 @@ export default function AdminDashboard() {
 
   const meta = getTimeMeta(tod)
   const MetaIcon = meta.icon
-  const actionAlign = sidebarOpen ? 'justify-start px-3' : 'justify-center px-0'
-  const actionLabel = sidebarOpen ? 'inline' : 'hidden'
 
   return (
     <div className={`min-h-screen flex flex-col ${modoEdicion ? 'bg-blue-50/30 dark:bg-slate-900' : 'bg-slate-50 dark:bg-slate-950'} transition-colors duration-300`}>
@@ -1056,9 +1076,10 @@ export default function AdminDashboard() {
 
       <main className="flex-1 max-w-[1600px] mx-auto w-full px-4 sm:px-6 py-6 sm:py-8 flex flex-col xl:flex-row gap-6">
 
-        {/* Sidebar */}
-        <aside className={`w-full ${sidebarOpen ? 'xl:w-72' : 'xl:w-20'} shrink-0 flex flex-col gap-4 transition-all duration-300`}>
+        {/* Date and filters */}
+        <aside className="w-full xl:w-72 shrink-0 flex flex-col gap-4">
 
+          {false && (
           <div className="bg-white dark:bg-slate-900 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between gap-2">
             {sidebarOpen && (
               <div className="min-w-0">
@@ -1074,9 +1095,10 @@ export default function AdminDashboard() {
               {sidebarOpen ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
             </button>
           </div>
+          )}
 
           {/* Date */}
-          <div className={`${sidebarOpen ? 'block' : 'hidden xl:hidden'} bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm`}>
+          <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] mb-3 flex items-center gap-1.5"><CalendarDays size={11} /> Fecha</p>
             <div className="flex items-center bg-slate-50 dark:bg-slate-950 p-1 rounded-xl border border-slate-200 dark:border-slate-800">
               <button onClick={() => setFechaActual(p => subDays(p, 1))} className="p-2 hover:bg-white dark:hover:bg-slate-800 rounded-lg transition-all text-slate-400 hover:text-slate-700 dark:hover:text-white">
@@ -1098,7 +1120,7 @@ export default function AdminDashboard() {
           </div>
 
           {/* Filters */}
-          <div className={`${sidebarOpen ? 'block' : 'hidden xl:hidden'} bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm`}>
+          <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] mb-3 flex items-center gap-1.5"><SlidersHorizontal size={11} /> Filtros</p>
             <div className="space-y-2">
               <div className="relative">
@@ -1121,7 +1143,7 @@ export default function AdminDashboard() {
             </div>
           </div>
 
-          {/* Actions */}
+          {false && (
           <div className="bg-white dark:bg-slate-900 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col gap-2">
             <button onClick={() => setShowExportar(true)} title="Exportar Excel"
               className={`relative w-full flex items-center ${actionAlign} gap-2 h-11 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 border border-emerald-200 dark:border-emerald-500/20 text-[11px] font-black transition-all active:scale-95 tracking-wider`}>
@@ -1204,6 +1226,7 @@ export default function AdminDashboard() {
               )}
             </AnimatePresence>
           </div>
+          )}
 
         </aside>
 

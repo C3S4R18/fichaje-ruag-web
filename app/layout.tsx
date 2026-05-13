@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { Toaster } from "sonner";
 import { headers } from "next/headers";
+import AdminSidebarShell from "@/components/AdminSidebarShell";
 
 export const metadata: Metadata = {
   title: "RUAG Jornada",
@@ -32,7 +33,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <link rel="apple-touch-icon" href="/ruag-icon-192.png" />
       </head>
       <body>
-        {children}
+        <AdminSidebarShell>{children}</AdminSidebarShell>
         {/* FIX: Sonner reemplaza todos los alert() nativos en la app */}
         <Toaster
           position="top-center"
