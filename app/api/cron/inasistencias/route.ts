@@ -6,6 +6,7 @@ const LIMA_UTC_OFFSET_HOURS = 5
 const WORKING_DAYS = new Set([1, 2, 3, 4, 5])
 const INACTIVE_AREA_PREFIX = '__INACTIVO__|'
 const HOLIDAY_TYPE = 'FERIADO_ASISTENCIA'
+const HIDDEN_ABSENCE_TYPE = 'INASISTENCIA_OCULTA'
 
 type WorkerProfile = {
   dni: string
@@ -91,7 +92,7 @@ export async function POST(req: NextRequest) {
     const endUtc = toUtcIsoFromLimaDate(addDays(processingDate, 1), 0)
     const placeholderIngresoUtc = toUtcIsoFromLimaDate(processingDate, 23, 59)
 
-    const [perfilesRes, registrosRes, vacacionesRes] = await Promise.all([
+    const [perfilesRes, registrosRes, vacacionesRes, hiddenRes] = await Promise.all([
       supabaseAdmin
         .from('fotocheck_perfiles')
         .select('dni, nombres_completos, area, foto_url'),
@@ -106,11 +107,18 @@ export async function POST(req: NextRequest) {
         .eq('estado', 'aprobada')
         .lte('fecha_inicio', processingDate)
         .gte('fecha_fin', processingDate),
+      supabaseAdmin
+        .from('sys_doc_cache')
+        .select('numero_documento, data_raw')
+        .eq('tipo_documento', HIDDEN_ABSENCE_TYPE)
+        .gte('numero_documento', `${processingDate}::`)
+        .lte('numero_documento', `${processingDate}::~~~~`),
     ])
 
     if (perfilesRes.error) throw perfilesRes.error
     if (registrosRes.error) throw registrosRes.error
     if (vacacionesRes.error) throw vacacionesRes.error
+    if (hiddenRes.error) throw hiddenRes.error
 
     const perfiles = (perfilesRes.data ?? []) as WorkerProfile[]
     if (!perfiles.length) {
@@ -123,13 +131,19 @@ export async function POST(req: NextRequest) {
 
     const dnisConRegistro = new Set((registrosRes.data ?? []).map((item: any) => String(item.dni)))
     const dnisConVacaciones = new Set((vacacionesRes.data ?? []).map((item: any) => String(item.dni)))
+    const ocultos = new Set(
+      (hiddenRes.data ?? [])
+        .filter((item: any) => item.data_raw?.activo !== false)
+        .map((item: any) => String(item.numero_documento))
+    )
 
     const ausentes = perfiles.filter(
       (perfil) =>
         !perfil.dni.startsWith('EXCEL-') &&
         !String(perfil.area ?? '').startsWith(INACTIVE_AREA_PREFIX) &&
         !dnisConRegistro.has(perfil.dni) &&
-        !dnisConVacaciones.has(perfil.dni)
+        !dnisConVacaciones.has(perfil.dni) &&
+        !ocultos.has(`${processingDate}::${perfil.dni}`)
     )
 
     if (!ausentes.length) {

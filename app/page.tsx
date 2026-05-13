@@ -7,13 +7,13 @@ import { motion, AnimatePresence } from 'framer-motion'
 import { format, isToday, subDays, addDays } from 'date-fns'
 import { es } from 'date-fns/locale'
 import Link from 'next/link'
-import { loadHolidayKeys } from '@/utils/attendance'
+import { loadHiddenAbsenceKeys, loadHolidayKeys } from '@/utils/attendance'
 import {
   CalendarDays, ChevronLeft, ChevronRight, CheckCircle2, AlertCircle,
   LogOut, UserPlus, Loader2, Search, FileSpreadsheet, SlidersHorizontal,
   Users, ShieldCheck, AlignLeft, MapPin, Map as MapIcon, Download,
   HardHat, Trash2, MessageSquareText, X, Sunrise, Sun, Sunset, MoonStar,
-  Store, Moon, RefreshCw, Activity, BarChart3, TrendingUp, Trophy
+  Store, Moon, RefreshCw, Activity, BarChart3, TrendingUp, Trophy, Stethoscope
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 import MapGL, {
@@ -25,7 +25,7 @@ import 'mapbox-gl/dist/mapbox-gl.css'
 
 type TimeOfDay = 'dawn' | 'day' | 'dusk' | 'night'
 type TipoMarcacion = 'ninguna' | 'ingreso_obra' | 'salida_obra' | 'externo' | 'nota' | 'nocturno'
-type EstadoAsistencia = 'PUNTUAL' | 'TARDANZA' | 'INASISTENCIA'
+type EstadoAsistencia = 'PUNTUAL' | 'TARDANZA' | 'INASISTENCIA' | 'DESCANSO MEDICO'
 
 type AsistenciaRecord = {
   id: string
@@ -76,10 +76,11 @@ type MetricasData = {
   rangeLabel: string
 }
 
+const HIDDEN_ABSENCE_TYPE = 'INASISTENCIA_OCULTA'
 const LIMA_TZ = 'America/Lima'
 const WORKING_DAYS = new Set([1, 2, 3, 4, 5])
 const INACTIVE_AREA_PREFIX = '__INACTIVO__|'
-const STATUS_PRIORITY: Record<string, number> = { PUNTUAL: 0, TARDANZA: 1, INASISTENCIA: 2 }
+const STATUS_PRIORITY: Record<string, number> = { PUNTUAL: 0, TARDANZA: 1, 'DESCANSO MEDICO': 2, INASISTENCIA: 3 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -135,6 +136,20 @@ function buildSyntheticInasistencia(fechaKey: string, perfil: any): AsistenciaRe
     notas: 'Marcado automaticamente por el sistema - Sin registro en el dia',
     _syntheticInasistencia: true,
   }
+}
+
+async function hideAbsence(record: AsistenciaRecord) {
+  const response = await fetch('/api/inasistencias-ocultas', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      fecha: record.fecha,
+      dni: record.dni,
+      nombre: record.nombres_completos,
+    }),
+  })
+  const payload = await response.json().catch(() => ({}))
+  if (!response.ok) throw new Error(payload.error || 'No se pudo ocultar la inasistencia')
 }
 
 function dateKeysBetween(startKey: string, endKey: string) {
@@ -378,9 +393,16 @@ export default function AdminDashboard() {
   const [showExportar, setShowExportar]   = useState(false)
   const [showManual, setShowManual]       = useState(false)
   const [showFeriado, setShowFeriado]     = useState(false)
+  const [sidebarOpen, setSidebarOpen]     = useState(true)
   const [feriadoFecha, setFeriadoFecha]   = useState(format(addDays(new Date(), 1), 'yyyy-MM-dd'))
   const [feriadoMotivo, setFeriadoMotivo] = useState('Feriado')
   const [feriadoSaving, setFeriadoSaving] = useState(false)
+  const [showDescansoMedico, setShowDescansoMedico] = useState(false)
+  const [descansoDni, setDescansoDni] = useState('')
+  const [descansoDesde, setDescansoDesde] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const [descansoHasta, setDescansoHasta] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const [descansoMotivo, setDescansoMotivo] = useState('Descanso medico')
+  const [descansoSaving, setDescansoSaving] = useState(false)
   const [showMetricas, setShowMetricas]   = useState(false)
   const [busqueda, setBusqueda]           = useState('')
   const [filtroArea, setFiltroArea]       = useState('TODAS')
@@ -393,7 +415,10 @@ export default function AdminDashboard() {
   const [metricasData, setMetricasData] = useState<MetricasData | null>(null)
   const [vacacionesPendientes, setVacacionesPendientes] = useState(0)
   const [vacacionesPendientesPreview, setVacacionesPendientesPreview] = useState<string[]>([])
+  const [descansosPendientes, setDescansosPendientes] = useState(0)
+  const [descansosPendientesPreview, setDescansosPendientesPreview] = useState<string[]>([])
   const pendingVacacionesRef = useRef(0)
+  const pendingDescansosRef = useRef(0)
 
   useEffect(() => {
     setMounted(true)
@@ -452,6 +477,31 @@ export default function AdminDashboard() {
     }
   }
 
+  const fetchPendingDescansos = async (showToast = false) => {
+    const { data, error, count } = await supabase
+      .from('descansos_medicos_solicitudes')
+      .select('id, trabajador_nombre, created_at', { count: 'exact' })
+      .eq('estado', 'solicitada')
+      .order('created_at', { ascending: false })
+      .limit(3)
+
+    if (error) return
+
+    const nextCount = count ?? data?.length ?? 0
+    const prevCount = pendingDescansosRef.current
+
+    setDescansosPendientes(nextCount)
+    setDescansosPendientesPreview((data ?? []).map((item: any) => String(item.trabajador_nombre)))
+    pendingDescansosRef.current = nextCount
+
+    if (showToast && nextCount > prevCount) {
+      const latestName = data?.[0]?.trabajador_nombre
+      toast.info('Nueva solicitud de descanso medico', {
+        description: latestName ? String(latestName) : `${nextCount} pendientes`,
+      })
+    }
+  }
+
   // ── Fetch con soporte multi-turno ─────────────────────────────────────────
 
   const fetchData = async (fecha: Date) => {
@@ -465,7 +515,10 @@ export default function AdminDashboard() {
     const noctIni     = `${nextStr}T00:00:00.000Z`
     const noctIniPrev = `${fechaStr}T00:00:00.000Z`
 
-    const holidayKeys = await loadHolidayKeys(fechaStr, fechaStr).catch(() => new Set<string>())
+    const [holidayKeys, hiddenAbsenceKeys] = await Promise.all([
+      loadHolidayKeys(fechaStr, fechaStr).catch(() => new Set<string>()),
+      loadHiddenAbsenceKeys(fechaStr, fechaStr).catch(() => new Set<string>()),
+    ])
     const shouldBuildAbsences = fechaStr < todayLima && WORKING_DAYS.has(getWeekday(fechaStr)) && !holidayKeys.has(fechaStr)
 
     const [q1, q2, q3, perfilesRes, vacacionesRes] = await Promise.all([
@@ -497,6 +550,7 @@ export default function AdminDashboard() {
           .filter((perfil: any) => !String(perfil.dni).startsWith('EXCEL-'))
           .filter((perfil: any) => !isInactiveArea(perfil.area))
           .filter((perfil: any) => !dnisConRegistro.has(String(perfil.dni)) && !dnisConVacaciones.has(String(perfil.dni)))
+          .filter((perfil: any) => !hiddenAbsenceKeys.has(`${fechaStr}::${perfil.dni}`))
           .map((perfil: any) => buildSyntheticInasistencia(fechaStr, perfil))
       : []
 
@@ -507,7 +561,10 @@ export default function AdminDashboard() {
 
   const loadRangeDataset = async (fromKey: string, toKey: string): Promise<AsistenciaRecord[]> => {
     const todayLima = getLimaDateKey()
-    const holidayKeys = await loadHolidayKeys(fromKey, toKey).catch(() => new Set<string>())
+    const [holidayKeys, hiddenAbsenceKeys] = await Promise.all([
+      loadHolidayKeys(fromKey, toKey).catch(() => new Set<string>()),
+      loadHiddenAbsenceKeys(fromKey, toKey).catch(() => new Set<string>()),
+    ])
     const [recordsRes, perfilesRes, vacacionesRes] = await Promise.all([
       supabase.from('registro_asistencias').select('*').gte('fecha', fromKey).lte('fecha', toKey),
       supabase.from('fotocheck_perfiles').select('dni, nombres_completos, area, foto_url').order('nombres_completos'),
@@ -543,7 +600,7 @@ export default function AdminDashboard() {
       if (!(dateKey < todayLima) || !WORKING_DAYS.has(getWeekday(dateKey))) continue
       perfiles.forEach((perfil: any) => {
         const key = `${dateKey}::${perfil.dni}`
-        if (!existingKeys.has(key) && !vacationKeys.has(key)) {
+        if (!existingKeys.has(key) && !vacationKeys.has(key) && !hiddenAbsenceKeys.has(key)) {
           synthetic.push(buildSyntheticInasistencia(dateKey, perfil))
         }
       })
@@ -577,6 +634,9 @@ export default function AdminDashboard() {
             : upsertAsistencia(cleaned, visible)
         })
       })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sys_doc_cache', filter: `tipo_documento=eq.${HIDDEN_ABSENCE_TYPE}` }, () => {
+        fetchData(fechaActual)
+      })
       .subscribe()
     return () => { supabase.removeChannel(canal) }
   }, [fechaActual])
@@ -591,6 +651,18 @@ export default function AdminDashboard() {
       .subscribe()
 
     return () => { supabase.removeChannel(canalVacaciones) }
+  }, [])
+
+  useEffect(() => {
+    fetchPendingDescansos()
+    const canalDescansos = supabase.channel('admin-descansos-alerta')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'descansos_medicos_solicitudes' }, (payload) => {
+        const isNewRequest = payload.eventType === 'INSERT' && payload.new?.estado === 'solicitada'
+        void fetchPendingDescansos(isNewRequest)
+      })
+      .subscribe()
+
+    return () => { supabase.removeChannel(canalDescansos) }
   }, [])
 
   // ── Memos ─────────────────────────────────────────────────────────────────
@@ -639,6 +711,7 @@ export default function AdminDashboard() {
   }, [asistencias])
   const totalOffline      = useMemo(() => asistencias.filter(a => (a.notas ?? '').includes('[OFFLINE]')).length, [asistencias])
   const totalInasistencias = useMemo(() => asistencias.filter(a => a.estado_ingreso === 'INASISTENCIA').length, [asistencias])
+  const totalDescansosMedicos = useMemo(() => asistencias.filter(a => a.estado_ingreso === 'DESCANSO MEDICO').length, [asistencias])
 
   // ── Excel ─────────────────────────────────────────────────────────────────
 
@@ -648,11 +721,14 @@ export default function AdminDashboard() {
     const pS = { font: { color: { rgb: '059669' }, bold: true }, alignment: { horizontal: 'center' } }
     const tS = { font: { color: { rgb: 'DC2626' }, bold: true }, alignment: { horizontal: 'center' } }
     const iS = { font: { color: { rgb: 'EA580C' }, bold: true }, alignment: { horizontal: 'center' } }
+    const mS = { font: { color: { rgb: '7C3AED' }, bold: true }, alignment: { horizontal: 'center' } }
     const cS = { alignment: { horizontal: 'center' } }
     const ord = (s: string) => { const p = s?.trim().split(' '); return !p?.length ? '-' : p.length >= 3 ? `${p.slice(-2).join(' ')}, ${p.slice(0,-2).join(' ')}` : p.length === 2 ? `${p[1]}, ${p[0]}` : s }
     const tt = (ts: string, estado?: string) => estado === 'INASISTENCIA'
       ? '11:59 p. m.'
-      : new Date(ts).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit' })
+      : estado === 'DESCANSO MEDICO'
+        ? 'DESCANSO'
+        : new Date(ts).toLocaleTimeString('es-PE', { timeZone: 'America/Lima', hour: '2-digit', minute: '2-digit' })
     const rows: any[][] = [["FECHA","DNI","APELLIDOS Y NOMBRES","ÁREA","INGRESO","ESTADO","SALIDA","DURACIÓN","NOTA","MAPA"]]
     data.forEach(r => {
       const d = extraerDetalleNota(r.notas)
@@ -668,7 +744,7 @@ export default function AdminDashboard() {
         if (!ws[cell]) continue
         if (R === 0) ws[cell].s = hS
         else {
-          if (C === 5) ws[cell].s = ws[cell].v === 'PUNTUAL' ? pS : ws[cell].v === 'INASISTENCIA' ? iS : tS
+          if (C === 5) ws[cell].s = ws[cell].v === 'PUNTUAL' ? pS : ws[cell].v === 'INASISTENCIA' ? iS : ws[cell].v === 'DESCANSO MEDICO' ? mS : tS
           else if ([0,1,3,4,6,7].includes(C)) ws[cell].s = cS
           if (C === 9 && ws[cell].v !== '—') { ws[cell].l = { Target: ws[cell].v }; ws[cell].v = '📍 Ver'; ws[cell].s = { font: { color: { rgb: '2563EB' }, underline: true }, alignment: { horizontal: 'center' } } }
         }
@@ -743,7 +819,15 @@ export default function AdminDashboard() {
 
   const borrarRegistro = async (id: string, nombre: string) => {
     if (!confirm(`¿Eliminar registro de ${nombre}?`)) return
-    try { await supabase.from('registro_asistencias').delete().eq('id', id); toast.success('Eliminado'); setAsistencias(prev => prev.filter(a => a.id !== id)) } catch { toast.error('Error') }
+    try {
+      const current = asistencias.find((item) => item.id === id)
+      if (current?.estado_ingreso === 'INASISTENCIA') await hideAbsence(current)
+      if (!current?._syntheticInasistencia) await supabase.from('registro_asistencias').delete().eq('id', id)
+      toast.success('Eliminado')
+      setAsistencias(prev => prev.filter(a => a.id !== id))
+    } catch (error: any) {
+      toast.error(error?.message || 'Error')
+    }
   }
 
   const darDeBajaTrabajador = async (dni: string, nombre: string, areaActual?: string | null) => {
@@ -799,6 +883,73 @@ export default function AdminDashboard() {
       toast.error(error?.message || 'No se pudo guardar el feriado')
     } finally {
       setFeriadoSaving(false)
+    }
+  }
+
+  const medicalIsoForDate = (dateKey: string) => {
+    const [year, month, day] = dateKey.split('-').map(Number)
+    return new Date(Date.UTC(year, month - 1, day, 28, 59, 0, 0)).toISOString()
+  }
+
+  const guardarDescansoMedico = async () => {
+    const dni = descansoDni.trim()
+    if (!/^\d{8}$/.test(dni)) { toast.error('Ingresa un DNI valido de 8 digitos'); return }
+    if (!descansoDesde || !descansoHasta || descansoDesde > descansoHasta) { toast.error('Rango de fechas invalido'); return }
+
+    setDescansoSaving(true)
+    try {
+      const { data: perfil, error: perfilError } = await supabase
+        .from('fotocheck_perfiles')
+        .select('dni, nombres_completos, area, foto_url')
+        .eq('dni', dni)
+        .maybeSingle()
+
+      if (perfilError) throw perfilError
+      if (!perfil) throw new Error('No encontre un trabajador con ese DNI')
+
+      const candidateDates = dateKeysBetween(descansoDesde, descansoHasta)
+        .filter((dateKey) => WORKING_DAYS.has(getWeekday(dateKey)))
+
+      if (!candidateDates.length) throw new Error('El rango no contiene dias laborables')
+
+      const { data: existentes, error: existentesError } = await supabase
+        .from('registro_asistencias')
+        .select('fecha')
+        .eq('dni', dni)
+        .gte('fecha', descansoDesde)
+        .lte('fecha', descansoHasta)
+
+      if (existentesError) throw existentesError
+
+      const fechasConRegistro = new Set((existentes ?? []).map((row: any) => String(row.fecha)))
+      const rows = candidateDates
+        .filter((dateKey) => !fechasConRegistro.has(dateKey))
+        .map((dateKey) => ({
+          dni,
+          fecha: dateKey,
+          hora_ingreso: medicalIsoForDate(dateKey),
+          hora_salida: null,
+          estado_ingreso: 'DESCANSO MEDICO',
+          nombres_completos: perfil.nombres_completos,
+          area: getVisibleArea(perfil.area),
+          foto_url: perfil.foto_url ?? '',
+          notas: `Descanso medico: ${descansoMotivo.trim() || 'Sin detalle'}`,
+        }))
+
+      if (!rows.length) throw new Error('Ese trabajador ya tiene registros en ese rango')
+
+      const { error } = await supabase.from('registro_asistencias').insert(rows)
+      if (error) throw error
+
+      toast.success(`Descanso medico registrado (${rows.length} dia/s)`)
+      setShowDescansoMedico(false)
+      setDescansoDni('')
+      setDescansoMotivo('Descanso medico')
+      await fetchData(fechaActual)
+    } catch (error: any) {
+      toast.error(error?.message || 'No se pudo registrar el descanso medico')
+    } finally {
+      setDescansoSaving(false)
     }
   }
 
@@ -872,6 +1023,8 @@ export default function AdminDashboard() {
 
   const meta = getTimeMeta(tod)
   const MetaIcon = meta.icon
+  const actionAlign = sidebarOpen ? 'justify-start px-3' : 'justify-center px-0'
+  const actionLabel = sidebarOpen ? 'inline' : 'hidden'
 
   return (
     <div className={`min-h-screen flex flex-col ${modoEdicion ? 'bg-blue-50/30 dark:bg-slate-900' : 'bg-slate-50 dark:bg-slate-950'} transition-colors duration-300`}>
@@ -904,10 +1057,26 @@ export default function AdminDashboard() {
       <main className="flex-1 max-w-[1600px] mx-auto w-full px-4 sm:px-6 py-6 sm:py-8 flex flex-col xl:flex-row gap-6">
 
         {/* Sidebar */}
-        <aside className="w-full xl:w-72 shrink-0 flex flex-col gap-4">
+        <aside className={`w-full ${sidebarOpen ? 'xl:w-72' : 'xl:w-20'} shrink-0 flex flex-col gap-4 transition-all duration-300`}>
+
+          <div className="bg-white dark:bg-slate-900 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex items-center justify-between gap-2">
+            {sidebarOpen && (
+              <div className="min-w-0">
+                <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.18em]">Panel</p>
+                <p className="text-sm font-black text-slate-800 dark:text-white truncate">Acciones rápidas</p>
+              </div>
+            )}
+            <button
+              onClick={() => setSidebarOpen((prev) => !prev)}
+              className={`h-11 w-11 rounded-xl bg-slate-950 text-white dark:bg-white dark:text-slate-950 flex items-center justify-center shadow-sm transition-all active:scale-95 ${!sidebarOpen ? 'mx-auto' : ''}`}
+              title={sidebarOpen ? 'Cerrar panel' : 'Abrir panel'}
+            >
+              {sidebarOpen ? <ChevronLeft size={18} /> : <ChevronRight size={18} />}
+            </button>
+          </div>
 
           {/* Date */}
-          <div className="bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+          <div className={`${sidebarOpen ? 'block' : 'hidden xl:hidden'} bg-white dark:bg-slate-900 p-5 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm`}>
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] mb-3 flex items-center gap-1.5"><CalendarDays size={11} /> Fecha</p>
             <div className="flex items-center bg-slate-50 dark:bg-slate-950 p-1 rounded-xl border border-slate-200 dark:border-slate-800">
               <button onClick={() => setFechaActual(p => subDays(p, 1))} className="p-2 hover:bg-white dark:hover:bg-slate-800 rounded-lg transition-all text-slate-400 hover:text-slate-700 dark:hover:text-white">
@@ -929,7 +1098,7 @@ export default function AdminDashboard() {
           </div>
 
           {/* Filters */}
-          <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+          <div className={`${sidebarOpen ? 'block' : 'hidden xl:hidden'} bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm`}>
             <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] mb-3 flex items-center gap-1.5"><SlidersHorizontal size={11} /> Filtros</p>
             <div className="space-y-2">
               <div className="relative">
@@ -939,7 +1108,7 @@ export default function AdminDashboard() {
               </div>
               {[
                 { value: filtroArea,   onChange: setFiltroArea,   opts: areas.map(a => ({ v: a, l: a === 'TODAS' ? 'Todas las Áreas' : a })) },
-                { value: filtroEstado, onChange: setFiltroEstado, opts: [{ v:'TODOS', l:'Todos' }, { v:'PUNTUAL', l:'Puntuales' }, { v:'TARDANZA', l:'Tardanzas' }, { v:'INASISTENCIA', l:'Inasistencias' }] },
+                { value: filtroEstado, onChange: setFiltroEstado, opts: [{ v:'TODOS', l:'Todos' }, { v:'PUNTUAL', l:'Puntuales' }, { v:'TARDANZA', l:'Tardanzas' }, { v:'DESCANSO MEDICO', l:'Descansos medicos' }, { v:'INASISTENCIA', l:'Inasistencias' }] },
               ].map((f, i) => (
                 <div key={i} className="relative">
                   <select value={f.value} onChange={e => f.onChange(e.target.value)}
@@ -954,61 +1123,83 @@ export default function AdminDashboard() {
 
           {/* Actions */}
           <div className="bg-white dark:bg-slate-900 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col gap-2">
-            <button onClick={() => setShowExportar(true)}
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 border border-emerald-200 dark:border-emerald-500/20 text-[11px] font-black transition-all active:scale-95 tracking-wider">
-              <FileSpreadsheet size={13} /> EXCEL
+            <button onClick={() => setShowExportar(true)} title="Exportar Excel"
+              className={`relative w-full flex items-center ${actionAlign} gap-2 h-11 rounded-xl bg-emerald-50 dark:bg-emerald-500/10 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-500/20 border border-emerald-200 dark:border-emerald-500/20 text-[11px] font-black transition-all active:scale-95 tracking-wider`}>
+              <FileSpreadsheet size={16} className="shrink-0" /> <span className={actionLabel}>EXCEL</span>
             </button>
             <Link
               href="/vacaciones"
               title={vacacionesPendientesPreview.length ? `Pendientes: ${vacacionesPendientesPreview.join(', ')}` : 'Sin solicitudes pendientes'}
-              className={`w-full flex items-center justify-between gap-3 py-2.5 px-3 rounded-xl border text-[11px] font-black transition-all active:scale-95 tracking-wider ${
+              className={`relative w-full flex items-center ${sidebarOpen ? 'justify-between px-3' : 'justify-center px-0'} gap-3 h-11 rounded-xl border text-[11px] font-black transition-all active:scale-95 tracking-wider ${
                 vacacionesPendientes > 0
                   ? 'bg-orange-50 dark:bg-orange-500/10 text-orange-700 dark:text-orange-300 hover:bg-orange-100 dark:hover:bg-orange-500/20 border-orange-200 dark:border-orange-500/30 shadow-[0_0_0_1px_rgba(249,115,22,0.18)]'
                   : 'bg-sky-50 dark:bg-sky-500/10 text-sky-700 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-500/20 border-sky-200 dark:border-sky-500/20'
               }`}
             >
               <span className="flex items-center gap-2">
-                <CalendarDays size={13} />
-                {vacacionesPendientes > 0 ? 'VACACIONES ALERTA' : 'VACACIONES'}
+                <CalendarDays size={16} className="shrink-0" />
+                <span className={actionLabel}>{vacacionesPendientes > 0 ? 'VACACIONES ALERTA' : 'VACACIONES'}</span>
               </span>
               {vacacionesPendientes > 0 ? (
-                <span className="flex items-center gap-2">
+                <span className={`${sidebarOpen ? 'flex' : 'absolute -right-1 -top-1 flex'} items-center gap-2`}>
                   <span className="relative flex h-2.5 w-2.5">
                     <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-orange-500 opacity-75" />
                     <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-orange-500" />
                   </span>
-                  <span className="rounded-full bg-white/80 dark:bg-slate-950/60 px-2 py-0.5 text-[10px] font-black tabular-nums">
+                  <span className={`rounded-full bg-white/80 dark:bg-slate-950/60 ${sidebarOpen ? 'px-2 py-0.5' : 'min-w-5 h-5 flex items-center justify-center'} text-[10px] font-black tabular-nums`}>
                     {vacacionesPendientes}
                   </span>
                 </span>
               ) : (
-                <span className="text-[10px] font-bold opacity-70">OK</span>
+                sidebarOpen && <span className="text-[10px] font-bold opacity-70">OK</span>
               )}
             </Link>
             <Link
               href={`/metricas?from=${format(subDays(fechaActual, 29), 'yyyy-MM-dd')}&to=${format(fechaActual, 'yyyy-MM-dd')}`}
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 border border-indigo-200 dark:border-indigo-500/20 text-[11px] font-black transition-all active:scale-95 tracking-wider">
-              <BarChart3 size={13} /> ANALÍTICA
+              title="Analítica"
+              className={`relative w-full flex items-center ${actionAlign} gap-2 h-11 rounded-xl bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 border border-indigo-200 dark:border-indigo-500/20 text-[11px] font-black transition-all active:scale-95 tracking-wider`}>
+              <BarChart3 size={16} className="shrink-0" /> <span className={actionLabel}>ANALÍTICA</span>
             </Link>
             <Link
               href={`/ranking?date=${format(fechaActual, 'yyyy-MM-dd')}&from=admin`}
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-fuchsia-50 dark:bg-fuchsia-500/10 text-fuchsia-700 dark:text-fuchsia-300 hover:bg-fuchsia-100 dark:hover:bg-fuchsia-500/20 border border-fuchsia-200 dark:border-fuchsia-500/25 shadow-[0_8px_22px_rgba(217,70,239,0.08)] text-[11px] font-black transition-all active:scale-95 tracking-wider">
-              <Trophy size={13} /> RANKING
+              title="Ranking"
+              className={`relative w-full flex items-center ${actionAlign} gap-2 h-11 rounded-xl bg-fuchsia-50 dark:bg-fuchsia-500/10 text-fuchsia-700 dark:text-fuchsia-300 hover:bg-fuchsia-100 dark:hover:bg-fuchsia-500/20 border border-fuchsia-200 dark:border-fuchsia-500/25 shadow-[0_8px_22px_rgba(217,70,239,0.08)] text-[11px] font-black transition-all active:scale-95 tracking-wider`}>
+              <Trophy size={16} className="shrink-0" /> <span className={actionLabel}>RANKING</span>
             </Link>
             <button onClick={cargarMetricas} hidden
               className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-indigo-50 dark:bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 hover:bg-indigo-100 dark:hover:bg-indigo-500/20 border border-indigo-200 dark:border-indigo-500/20 text-[11px] font-black transition-all active:scale-95 tracking-wider">
               {metricasLoading ? <Loader2 size={13} className="animate-spin" /> : <BarChart3 size={13} />} MÉTRICAS
             </button>
-            <button onClick={() => { setFeriadoFecha(format(addDays(fechaActual, 1), 'yyyy-MM-dd')); setShowFeriado(true) }}
-              className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-teal-50 dark:bg-teal-500/10 text-teal-700 dark:text-teal-300 hover:bg-teal-100 dark:hover:bg-teal-500/20 border border-teal-200 dark:border-teal-500/25 shadow-[0_8px_22px_rgba(20,184,166,0.08)] text-[11px] font-black transition-all active:scale-95 tracking-wider">
-              <CalendarDays size={12} /> MODO FERIADO
+            <button onClick={() => { setFeriadoFecha(format(addDays(fechaActual, 1), 'yyyy-MM-dd')); setShowFeriado(true) }} title="Modo feriado"
+              className={`relative w-full flex items-center ${actionAlign} gap-2 h-11 rounded-xl bg-teal-50 dark:bg-teal-500/10 text-teal-700 dark:text-teal-300 hover:bg-teal-100 dark:hover:bg-teal-500/20 border border-teal-200 dark:border-teal-500/25 shadow-[0_8px_22px_rgba(20,184,166,0.08)] text-[11px] font-black transition-all active:scale-95 tracking-wider`}>
+              <CalendarDays size={16} className="shrink-0" /> <span className={actionLabel}>MODO FERIADO</span>
             </button>
+            <Link href="/descansos-medicos" title={descansosPendientesPreview.length ? `Pendientes: ${descansosPendientesPreview.join(', ')}` : 'Sin solicitudes pendientes'}
+              className={`relative w-full flex items-center ${sidebarOpen ? 'justify-between px-3' : 'justify-center px-0'} gap-3 h-11 rounded-xl border text-[11px] font-black transition-all active:scale-95 tracking-wider ${
+                descansosPendientes > 0
+                  ? 'bg-rose-50 dark:bg-rose-500/10 text-rose-700 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-500/20 border-rose-300 dark:border-rose-500/35 shadow-[0_0_0_1px_rgba(244,63,94,0.2)]'
+                  : 'bg-rose-50 dark:bg-rose-500/10 text-rose-700 dark:text-rose-300 hover:bg-rose-100 dark:hover:bg-rose-500/20 border-rose-200 dark:border-rose-500/25 shadow-[0_8px_22px_rgba(244,63,94,0.08)]'
+              }`}>
+              <span className="flex items-center gap-2">
+                <Stethoscope size={16} className="shrink-0" />
+                <span className={actionLabel}>{descansosPendientes > 0 ? 'DESCANSO ALERTA' : 'DESCANSO MEDICO'}</span>
+              </span>
+              {descansosPendientes > 0 ? (
+                <span className={`${sidebarOpen ? 'flex' : 'absolute -right-1 -top-1 flex'} items-center gap-2`}>
+                  <span className="relative flex h-2.5 w-2.5">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-rose-500 opacity-75" />
+                    <span className="relative inline-flex h-2.5 w-2.5 rounded-full bg-rose-500" />
+                  </span>
+                  <span className={`rounded-full bg-white/80 dark:bg-slate-950/60 ${sidebarOpen ? 'px-2 py-0.5' : 'min-w-5 h-5 flex items-center justify-center'} text-[10px] font-black tabular-nums`}>{descansosPendientes}</span>
+                </span>
+              ) : (sidebarOpen && <span className="text-[10px] font-bold opacity-70">OK</span>)}
+            </Link>
             <AnimatePresence>
               {modoEdicion && (
                 <motion.button initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: 0, height: 0 }}
-                  onClick={() => setShowManual(true)}
-                  className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-black transition-all shadow-md shadow-blue-600/20 active:scale-95 tracking-wider">
-                  <UserPlus size={13} /> MANUAL
+                  onClick={() => setShowManual(true)} title="Registro manual"
+                  className={`w-full flex items-center ${actionAlign} gap-2 h-11 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-black transition-all shadow-md shadow-blue-600/20 active:scale-95 tracking-wider`}>
+                  <UserPlus size={16} className="shrink-0" /> <span className={actionLabel}>MANUAL</span>
                 </motion.button>
               )}
             </AnimatePresence>
@@ -1026,6 +1217,7 @@ export default function AdminDashboard() {
             <StatCard title="Tardanzas"    value={tardanzas}          icon={<AlertCircle size={16} />}  color="bg-red-500" />
             <StatCard title="Con Salida"   value={conSalida}          icon={<LogOut size={16} />}       color="bg-slate-500" />
             <StatCard title="Reingresos"   value={reingresos}         icon={<RefreshCw size={16} />}    color="bg-indigo-500" sub="multi-turno" />
+            {totalDescansosMedicos > 0 && <StatCard title="Descanso Medico" value={totalDescansosMedicos} icon={<Stethoscope size={16} />} color="bg-fuchsia-500" sub="justificados" />}
             {totalOffline > 0 && <StatCard title="Offline" value={totalOffline} icon={<span className="text-xs">📵</span>} color="bg-violet-500" sub="sincronizados" />}
             {totalInasistencias > 0 && <StatCard title="Inasistencias" value={totalInasistencias} icon={<span className="text-xs">✗</span>} color="bg-orange-500" sub="sin marcar" />}
           </div>
@@ -1366,6 +1558,63 @@ export default function AdminDashboard() {
         )}
       </AnimatePresence>
 
+      <AnimatePresence>
+        {showDescansoMedico && (
+          <motion.div className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+            style={{ background: 'rgba(15,23,42,0.58)', backdropFilter: 'blur(10px)' }}
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={() => setShowDescansoMedico(false)}>
+            <motion.div className="w-full max-w-md rounded-2xl border border-rose-100 bg-white p-5 shadow-2xl dark:border-rose-500/20 dark:bg-slate-900"
+              initial={{ scale: 0.94, y: 12 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.94, y: 12 }}
+              onClick={e => e.stopPropagation()}>
+              <div className="mb-5 flex items-start justify-between gap-3">
+                <div className="flex gap-3">
+                  <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-rose-50 text-rose-600 dark:bg-rose-500/10 dark:text-rose-300">
+                    <Stethoscope size={20} />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.18em] text-rose-600">Justificacion laboral</p>
+                    <h3 className="mt-1 text-lg font-black text-slate-900 dark:text-white">Descanso medico</h3>
+                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Registra el rango para que no se marque como inasistencia.</p>
+                  </div>
+                </div>
+                <button onClick={() => setShowDescansoMedico(false)} className="rounded-xl border border-slate-200 p-2 text-slate-400 dark:border-slate-700"><X size={16} /></button>
+              </div>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block sm:col-span-2">
+                  <span className="mb-1 block text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">DNI</span>
+                  <input inputMode="numeric" value={descansoDni} onChange={e => setDescansoDni(e.target.value.replace(/\D/g, '').slice(0, 8))}
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black outline-none focus:border-rose-400 dark:border-slate-700 dark:bg-slate-950"
+                    placeholder="12345678" />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">Desde</span>
+                  <input type="date" value={descansoDesde} onChange={e => setDescansoDesde(e.target.value)}
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black outline-none focus:border-rose-400 dark:border-slate-700 dark:bg-slate-950" />
+                </label>
+                <label className="block">
+                  <span className="mb-1 block text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">Hasta</span>
+                  <input type="date" value={descansoHasta} onChange={e => setDescansoHasta(e.target.value)}
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-black outline-none focus:border-rose-400 dark:border-slate-700 dark:bg-slate-950" />
+                </label>
+                <label className="block sm:col-span-2">
+                  <span className="mb-1 block text-[11px] font-black uppercase tracking-[0.16em] text-slate-400">Motivo / nota</span>
+                  <textarea value={descansoMotivo} onChange={e => setDescansoMotivo(e.target.value)}
+                    className="min-h-[88px] w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-bold outline-none focus:border-rose-400 dark:border-slate-700 dark:bg-slate-950"
+                    placeholder="Diagnostico, descanso, observacion..." />
+                </label>
+              </div>
+              <div className="mt-5 grid grid-cols-2 gap-3">
+                <button onClick={() => setShowDescansoMedico(false)} className="rounded-xl border border-slate-200 px-4 py-3 text-xs font-black dark:border-slate-700">CANCELAR</button>
+                <button onClick={guardarDescansoMedico} disabled={descansoSaving} className="rounded-xl bg-rose-600 px-4 py-3 text-xs font-black text-white disabled:opacity-50">
+                  {descansoSaving ? 'GUARDANDO...' : 'REGISTRAR'}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Nota */}
       <AnimatePresence>
         {notaModal && (
@@ -1608,6 +1857,7 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
   const [nombreTemp, setNombreTemp] = useState(data.nombres_completos)
   const esSintetica = !!data._syntheticInasistencia
   const esInasistencia = data.estado_ingreso === 'INASISTENCIA'
+  const esDescansoMedico = data.estado_ingreso === 'DESCANSO MEDICO'
   const isPuntual  = data.estado_ingreso === 'PUNTUAL'
   const entroAyer  = !!data._entroAyer
   const saleHoy    = !!data._saleHoy
@@ -1615,13 +1865,14 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
   const nota   = extraerDetalleNota(data.notas)
   const tone   = getMarkerTone(nota.tipoMarcacion)
   const NIcon  = tone.icon
-  const horas  = calcHoras(data.hora_ingreso, data.hora_salida)
+  const horas  = esDescansoMedico ? '—' : calcHoras(data.hora_ingreso, data.hora_salida)
   const esNocturno = data.notas?.startsWith('Turno Nocturno') ?? false
   const esOffline  = (data.notas ?? '').includes('[OFFLINE]')
-  const hasBadge = entroAyer || saleHoy || esOffline || esInasistencia
-  const puedeEditarRegistro = modoEdicion && (!esSintetica || esInasistencia)
+  const hasBadge = entroAyer || saleHoy || esOffline || esInasistencia || esDescansoMedico
+  const puedeEditarRegistro = modoEdicion && (!esSintetica || esInasistencia || esDescansoMedico)
 
-  const borderClass = esInasistencia ? 'border-orange-300 dark:border-orange-500/30 bg-orange-50/70 dark:bg-orange-500/10'
+  const borderClass = esDescansoMedico ? 'border-fuchsia-300 dark:border-fuchsia-500/30 bg-fuchsia-50/70 dark:bg-fuchsia-500/10'
+    : esInasistencia ? 'border-orange-300 dark:border-orange-500/30 bg-orange-50/70 dark:bg-orange-500/10'
     : entroAyer || saleHoy ? 'border-amber-300 dark:border-amber-500/30 ring-1 ring-amber-100 dark:ring-amber-500/10'
     : esOffline ? 'border-violet-300 dark:border-violet-500/30 ring-1 ring-violet-100 dark:ring-violet-500/10'
     : tieneSalida && isToday(new Date(data.hora_ingreso)) ? 'border-emerald-200 dark:border-emerald-500/20'
@@ -1658,6 +1909,12 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
         </div>
       )}
 
+      {esDescansoMedico && (
+        <div className="absolute -top-2.5 left-3 z-10 flex items-center gap-1 bg-fuchsia-600 text-white text-[8px] font-black px-2 py-0.5 rounded-full shadow-sm">
+          <Stethoscope size={8} /> DESCANSO MEDICO · Justificado
+        </div>
+      )}
+
       {/* Avatar */}
       <div className="flex items-center gap-3 flex-1 min-w-0 pr-3">
         <div className="relative shrink-0">
@@ -1665,7 +1922,7 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
             {data.foto_url ? <img src={data.foto_url} alt="" className="w-full h-full object-cover" /> :
               <div className="w-full h-full flex items-center justify-center font-black text-slate-400 text-sm">{getInitials(data.nombres_completos)}</div>}
           </div>
-          <div className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white dark:border-slate-900 ${esInasistencia ? 'bg-orange-400' : isPuntual ? 'bg-emerald-500' : 'bg-red-500'}`} />
+          <div className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white dark:border-slate-900 ${esDescansoMedico ? 'bg-fuchsia-500' : esInasistencia ? 'bg-orange-400' : isPuntual ? 'bg-emerald-500' : 'bg-red-500'}`} />
           {esNocturno && <div className="absolute -top-0.5 -left-0.5 w-3.5 h-3.5 rounded-full bg-amber-400 border-2 border-white dark:border-slate-900 flex items-center justify-center"><Moon size={7} className="text-white" /></div>}
           {esOffline && !esNocturno && <div className="absolute -top-0.5 -left-0.5 w-3.5 h-3.5 rounded-full bg-violet-500 border-2 border-white dark:border-slate-900 flex items-center justify-center text-white text-[7px] font-black leading-none">📵</div>}
         </div>
@@ -1713,7 +1970,11 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
             <span className="text-[9px] font-mono text-slate-400">{data.dni}</span>
             <span className="hidden sm:inline text-[9px] font-bold text-slate-300 dark:text-slate-700">·</span>
             <span className="text-[9px] font-bold text-slate-400 uppercase hidden sm:inline">{data.area}</span>
-            {esInasistencia ? (
+            {esDescansoMedico ? (
+              <span className="px-1.5 py-0.5 rounded text-[8px] font-black bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-500/10 dark:text-fuchsia-300">
+                DESCANSO MEDICO
+              </span>
+            ) : esInasistencia ? (
               <span className="px-1.5 py-0.5 rounded text-[8px] font-black bg-orange-100 text-orange-700 dark:bg-orange-500/10 dark:text-orange-300">
                 INASISTENCIA
               </span>
@@ -1737,15 +1998,15 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
         <div className="flex flex-col items-end">
           <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Entrada</span>
           {puedeEditarRegistro ? (
-            <input type="time" defaultValue={esInasistencia ? '' : format(new Date(data.hora_ingreso), 'HH:mm')}
+            <input type="time" defaultValue={(esInasistencia || esDescansoMedico) ? '' : format(new Date(data.hora_ingreso), 'HH:mm')}
               className="bg-transparent border-b border-blue-500 text-xs font-black text-blue-600 outline-none w-14 text-right"
               onBlur={e => {
-                const current = esInasistencia ? '' : format(new Date(data.hora_ingreso), 'HH:mm')
+                const current = (esInasistencia || esDescansoMedico) ? '' : format(new Date(data.hora_ingreso), 'HH:mm')
                 if (e.target.value && e.target.value !== current) onActualizar(data.id, 'hora_ingreso', e.target.value, data.hora_ingreso)
               }} />
           ) : (
-            <span className={`font-black text-base tabular-nums ${esInasistencia ? 'text-orange-500 dark:text-orange-300' : isPuntual ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-              {esInasistencia ? '—' : format(new Date(data.hora_ingreso), 'HH:mm')}
+            <span className={`font-black text-base tabular-nums ${esDescansoMedico ? 'text-fuchsia-600 dark:text-fuchsia-300' : esInasistencia ? 'text-orange-500 dark:text-orange-300' : isPuntual ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+              {(esInasistencia || esDescansoMedico) ? '—' : format(new Date(data.hora_ingreso), 'HH:mm')}
             </span>
           )}
         </div>

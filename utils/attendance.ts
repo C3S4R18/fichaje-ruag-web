@@ -112,9 +112,19 @@ export async function loadHolidayKeys(fromKey: string, toKey: string): Promise<S
   return new Set((payload.feriados ?? []).map((item: any) => String(item.fecha)))
 }
 
+export async function loadHiddenAbsenceKeys(fromKey: string, toKey: string): Promise<Set<string>> {
+  const response = await fetch(`/api/inasistencias-ocultas?from=${encodeURIComponent(fromKey)}&to=${encodeURIComponent(toKey)}`)
+  if (!response.ok) throw new Error('No se pudieron cargar las inasistencias ocultas')
+  const payload = await response.json()
+  return new Set((payload.keys ?? []).map((item: any) => String(item)))
+}
+
 export async function loadAttendanceRangeDataset(fromKey: string, toKey: string): Promise<AsistenciaRecord[]> {
   const todayLima = getLimaDateKey()
-  const holidayKeys = await loadHolidayKeys(fromKey, toKey)
+  const [holidayKeys, hiddenAbsenceKeys] = await Promise.all([
+    loadHolidayKeys(fromKey, toKey),
+    loadHiddenAbsenceKeys(fromKey, toKey).catch(() => new Set<string>()),
+  ])
   const [recordsRes, perfilesRes, vacacionesRes] = await Promise.all([
     supabase.from('registro_asistencias').select('*').gte('fecha', fromKey).lte('fecha', toKey),
     supabase.from('fotocheck_perfiles').select('dni, nombres_completos, area, foto_url').order('nombres_completos'),
@@ -150,7 +160,7 @@ export async function loadAttendanceRangeDataset(fromKey: string, toKey: string)
     if (!(dateKey < todayLima) || !WORKING_DAYS.has(getWeekday(dateKey))) continue
     perfiles.forEach((perfil: any) => {
       const key = `${dateKey}::${perfil.dni}`
-      if (!existingKeys.has(key) && !vacationKeys.has(key)) {
+      if (!existingKeys.has(key) && !vacationKeys.has(key) && !hiddenAbsenceKeys.has(key)) {
         synthetic.push(buildSyntheticInasistencia(dateKey, perfil))
       }
     })
