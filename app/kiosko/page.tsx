@@ -41,7 +41,7 @@ export default function KioskoQR() {
       className="min-h-screen flex flex-col select-none overflow-hidden"
       style={{
         background: 'linear-gradient(135deg, #EEF2FF 0%, #E0E7FF 50%, #EDE9FE 100%)',
-        fontFamily: "'DM Sans', sans-serif",
+        fontFamily: "'Plus Jakarta Sans', sans-serif",
       }}
     >
       {/* Decorative blobs */}
@@ -71,7 +71,7 @@ export default function KioskoQR() {
             </svg>
           </div>
           <div>
-            <h1 className="text-2xl font-black tracking-tight" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>RUAG</h1>
+            <h1 className="text-2xl font-black tracking-tight" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>RUAG</h1>
             <p className="text-xs font-bold tracking-widest uppercase" style={{ color: 'var(--text-3)' }}>Jornada · Ingreso Seguro</p>
           </div>
         </motion.div>
@@ -86,16 +86,16 @@ export default function KioskoQR() {
             <motion.span
               key={`h-${hours}`}
               className="text-6xl lg:text-7xl font-black tabular-nums leading-none"
-              style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}
+              style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}
               initial={{ opacity: 0.5, y: -4 }} animate={{ opacity: 1, y: 0 }}
             >
               {hours}
             </motion.span>
-            <span className="text-6xl lg:text-7xl font-black" style={{ color: 'var(--blue)', fontFamily: 'Syne, sans-serif' }}>:</span>
+            <span className="text-6xl lg:text-7xl font-black" style={{ color: 'var(--blue)', fontFamily: 'Sora, sans-serif' }}>:</span>
             <motion.span
               key={`m-${minutes}`}
               className="text-6xl lg:text-7xl font-black tabular-nums leading-none"
-              style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}
+              style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}
               initial={{ opacity: 0.5, y: -4 }} animate={{ opacity: 1, y: 0 }}
             >
               {minutes}
@@ -121,7 +121,7 @@ export default function KioskoQR() {
           transition={{ duration: 0.7, ease: [0.34, 1.2, 0.64, 1], delay: 0.2 }}
         >
           <h2 className="text-4xl lg:text-5xl font-black text-center mb-3 tracking-tight"
-            style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>
+            style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>
             CÓDIGO DE INGRESO
           </h2>
 

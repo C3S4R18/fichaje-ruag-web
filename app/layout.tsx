@@ -40,7 +40,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
           richColors
           toastOptions={{
             style: {
-              fontFamily: "'DM Sans', sans-serif",
+              fontFamily: "'Plus Jakarta Sans', sans-serif",
               borderRadius: "14px",
               fontWeight: 600,
             },

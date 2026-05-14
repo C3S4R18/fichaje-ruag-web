@@ -193,7 +193,7 @@ export default function SetupProfileWeb() {
                 <RotateCcw size={28} style={{ color: 'var(--blue)' }} />
               </div>
 
-              <h2 className="text-xl font-bold text-center mb-1" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>
+              <h2 className="text-xl font-bold text-center mb-1" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>
                 Recuperar Fotocheck
               </h2>
               <p className="text-sm text-center mb-7" style={{ color: 'var(--text-3)' }}>
@@ -239,7 +239,7 @@ export default function SetupProfileWeb() {
         </div>
 
         <h1 className="text-3xl font-black text-center tracking-tight mb-2"
-          style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>
+          style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>
           Crea tu Fotocheck
         </h1>
         <p className="text-sm text-center mb-10" style={{ color: 'var(--text-3)' }}>
@@ -391,7 +391,7 @@ export default function SetupProfileWeb() {
           onClick={handleSave}
           disabled={isUploading}
           className="w-full mt-8 py-4 rounded-2xl font-bold text-white text-base flex items-center justify-center gap-2 disabled:opacity-50"
-          style={{ background: 'var(--blue)', boxShadow: 'var(--shadow-lg), var(--shadow-glow)', fontFamily: 'Syne, sans-serif' }}
+          style={{ background: 'var(--blue)', boxShadow: 'var(--shadow-lg), var(--shadow-glow)', fontFamily: 'Sora, sans-serif' }}
           whileHover={{ scale: 1.02, boxShadow: '0 20px 50px rgba(79,70,229,0.35)' }}
           whileTap={{ scale: 0.98 }}
         >

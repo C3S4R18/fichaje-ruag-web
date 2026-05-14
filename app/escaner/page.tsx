@@ -414,7 +414,7 @@ function WorkerInfoScreen({
             <img src={gif} alt="" className="w-14 h-14 object-contain" />
           </motion.div>
           <div className="min-w-0">
-            <h3 className="font-black text-xl" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>{title}</h3>
+            <h3 className="font-black text-xl" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>{title}</h3>
             <p className="text-sm font-semibold leading-snug" style={{ color: 'var(--text-3)' }}>{subtitle}</p>
           </div>
         </div>
@@ -445,7 +445,7 @@ function WorkerInfoScreen({
                 {String(index + 1).padStart(2, '0')}
               </span>
               <span>
-                <span className="block text-base font-black" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>{itemTitle}</span>
+                <span className="block text-base font-black" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>{itemTitle}</span>
                 <span className="block text-sm font-semibold mt-1 leading-relaxed" style={{ color: 'var(--text-3)' }}>{description}</span>
               </span>
             </motion.article>
@@ -483,7 +483,7 @@ function NoteInput({ value, onChange, placeholder, accentColor, disabled }: {
       className="w-full rounded-2xl p-4 resize-none outline-none text-sm font-medium transition-all"
       style={{
         background: 'var(--surface-2)', border: `1.5px solid ${value ? accentColor + '55' : 'var(--border)'}`,
-        color: 'var(--text-1)', fontFamily: "'DM Sans', sans-serif",
+        color: 'var(--text-1)', fontFamily: "'Plus Jakarta Sans', sans-serif",
       }}
     />
   )
@@ -1467,7 +1467,7 @@ export default function EscanerWeb() {
         >
           <Loader2 className="text-white animate-spin" size={30} />
         </motion.div>
-        <p className="font-semibold text-lg" style={{ color: 'var(--text-2)', fontFamily: 'Syne, sans-serif' }}>Sincronizando RUAG...</p>
+        <p className="font-semibold text-lg" style={{ color: 'var(--text-2)', fontFamily: 'Sora, sans-serif' }}>Sincronizando RUAG...</p>
       </div>
     )
   }
@@ -1524,7 +1524,7 @@ export default function EscanerWeb() {
       }}
       style={{
         background: 'var(--bg)',
-        fontFamily: "'DM Sans', sans-serif",
+        fontFamily: "'Plus Jakarta Sans', sans-serif",
         paddingTop: 'env(safe-area-inset-top)',
         paddingBottom: 'env(safe-area-inset-bottom)',
       }}
@@ -1555,7 +1555,7 @@ export default function EscanerWeb() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-[11px] font-black uppercase tracking-[0.18em]" style={{ color: 'var(--text-3)' }}>Panel rapido</p>
-                  <h3 className="text-xl font-black" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>Opciones</h3>
+                  <h3 className="text-xl font-black" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Opciones</h3>
                 </div>
                 <button onClick={() => setShowSideMenu(false)} className="w-10 h-10 rounded-2xl border flex items-center justify-center" style={{ background: 'white', borderColor: 'var(--border)', color: 'var(--text-2)' }}>
                   <X size={18} />
@@ -1648,7 +1648,7 @@ export default function EscanerWeb() {
                 <img src="/ruag-logo.png" alt="RUAG" className="h-full w-full object-cover" />
               </div>
               <div>
-                <h1 className="font-black text-base leading-none" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>RUAG</h1>
+                <h1 className="font-black text-base leading-none" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>RUAG</h1>
                 <p className="text-xs font-semibold" style={{ color: 'var(--text-3)' }}>Registra tu asistencia</p>
               </div>
             </div>
@@ -1715,7 +1715,7 @@ export default function EscanerWeb() {
                 >
                   <CloudOff size={34} />
                 </motion.div>
-                <h2 className="text-xl font-black mb-2" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>
+                <h2 className="text-xl font-black mb-2" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>
                   Sin conexion
                 </h2>
                 <p className="text-sm font-semibold leading-relaxed mb-5" style={{ color: 'var(--text-3)' }}>
@@ -1755,7 +1755,7 @@ export default function EscanerWeb() {
                         style={{ background: 'var(--green-light)', boxShadow: '0 0 40px rgba(5,150,105,0.25)' }}>
                         <CheckCircle size={44} style={{ color: 'var(--green)' }} />
                       </div>
-                      <h3 className="font-black text-lg mb-1" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>¡INGRESO EXITOSO!</h3>
+                      <h3 className="font-black text-lg mb-1" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>¡INGRESO EXITOSO!</h3>
                       <p className="text-sm font-medium whitespace-pre-line" style={{ color: 'var(--text-3)' }}>{mensaje}</p>
                     </motion.div>
                   )}
@@ -1765,7 +1765,7 @@ export default function EscanerWeb() {
                         style={{ background: 'var(--red-light)', boxShadow: '0 0 40px rgba(220,38,38,0.2)' }}>
                         <AlertTriangle size={40} style={{ color: 'var(--red)' }} />
                       </div>
-                      <h3 className="font-black text-base mb-1" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>ACCESO DENEGADO</h3>
+                      <h3 className="font-black text-base mb-1" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>ACCESO DENEGADO</h3>
                       <p className="text-sm font-medium whitespace-pre-line" style={{ color: 'var(--red)' }}>{mensaje}</p>
                     </motion.div>
                   )}
@@ -1882,7 +1882,18 @@ export default function EscanerWeb() {
               {/* Photo */}
               <div className="flex justify-center mb-5">
                 <div className="relative">
-                  <div className="w-28 h-28 rounded-full overflow-hidden border-4" style={{ borderColor: statusColor, boxShadow: `0 0 0 4px ${statusBg}` }}>
+                  {/* Anillo cónico animado alrededor de la foto */}
+                  <motion.div
+                    className="absolute -inset-[6px] rounded-full"
+                    style={{
+                      background: `conic-gradient(from 0deg, ${statusColor}, ${statusColor}55, ${statusColor}, ${statusColor}22, ${statusColor})`,
+                      filter: 'blur(0.5px)',
+                    }}
+                    animate={{ rotate: 360 }}
+                    transition={{ duration: 9, repeat: Infinity, ease: 'linear' }}
+                  />
+                  <div className="relative w-28 h-28 rounded-full overflow-hidden border-[3px]"
+                    style={{ borderColor: 'var(--surface)', boxShadow: `0 0 0 4px ${statusBg}, 0 12px 28px rgba(15,23,42,0.18)` }}>
                     {profilePhotoSrc ? (
                       <img src={profilePhotoSrc} alt="Foto" className="w-full h-full object-cover" />
                     ) : (
@@ -1898,6 +1909,18 @@ export default function EscanerWeb() {
                       </div>
                     )}
                   </div>
+
+                  {/* Punto de estado con pulso */}
+                  <div className="absolute top-1 right-1 w-4 h-4 rounded-full flex items-center justify-center"
+                    style={{ background: 'var(--surface)', boxShadow: '0 2px 6px rgba(0,0,0,0.12)' }}>
+                    <motion.span
+                      className="block w-2.5 h-2.5 rounded-full"
+                      style={{ background: statusColor, boxShadow: `0 0 0 0 ${statusColor}` }}
+                      animate={{ boxShadow: [`0 0 0 0 ${statusColor}aa`, `0 0 0 8px ${statusColor}00`] }}
+                      transition={{ duration: 1.8, repeat: Infinity, ease: 'easeOut' }}
+                    />
+                  </div>
+
                   {!uploadingPhoto && asistenciaHoy && (
                     <motion.button
                       onClick={() => fileInputRef.current?.click()}
@@ -1911,18 +1934,23 @@ export default function EscanerWeb() {
                 </div>
               </div>
 
-              <h2 className="text-xl font-black text-center leading-tight uppercase tracking-tight"
-                style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>
+              <h2 className="text-[22px] font-extrabold text-center leading-tight uppercase tracking-tight"
+                style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif', letterSpacing: '-0.01em' }}>
                 {perfil.nombres}
               </h2>
-              <p className="text-sm text-center mt-1 font-mono tracking-widest" style={{ color: 'var(--text-3)' }}>
+              <p className="text-[13px] text-center mt-1 font-semibold tabular-nums tracking-[0.32em]"
+                style={{ color: 'var(--text-3)', fontFamily: 'Sora, sans-serif' }}>
                 {perfil.dni}
               </p>
 
-              <div className="flex justify-center mt-3">
-                <span className="px-4 py-1.5 rounded-full text-xs font-black tracking-widest uppercase"
-                  style={{ background: 'var(--blue-light)', color: 'var(--blue)', border: '1.5px solid var(--border-2)' }}>
+              <div className="flex justify-center items-center gap-2 mt-3">
+                <span className="px-4 py-1.5 rounded-full text-[11px] font-extrabold tracking-[0.18em] uppercase"
+                  style={{ background: 'var(--blue-light)', color: 'var(--blue)', border: '1.5px solid var(--border-2)', fontFamily: 'Sora, sans-serif' }}>
                   {perfil.area}
+                </span>
+                <span className="px-2.5 py-1 rounded-full text-[9px] font-black tracking-[0.18em] uppercase flex items-center gap-1"
+                  style={{ background: 'rgba(5,150,105,0.10)', color: 'var(--green)', border: '1px solid rgba(5,150,105,0.25)', fontFamily: 'Sora, sans-serif' }}>
+                  <CheckCircle2 size={10} strokeWidth={3} /> VERIFICADO
                 </span>
               </div>
 
@@ -1941,16 +1969,21 @@ export default function EscanerWeb() {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-[10px] font-black uppercase tracking-[0.15em] mb-1" style={{ color: 'var(--text-3)' }}>Ingreso Hoy</p>
-                  <p className="text-2xl font-black" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>
+                  <p className="text-[26px] font-extrabold tabular-nums leading-none" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif', letterSpacing: '-0.02em' }}>
                     {asistenciaHoy ? formatTimeLima(asistenciaHoy.hora_ingreso) : 'Sin entrada'}
                   </p>
                 </div>
                 <div className="text-right">
                   <p className="text-[10px] font-black uppercase tracking-[0.15em] mb-1" style={{ color: 'var(--text-3)' }}>Estado</p>
-                  <span className="px-3 py-1 rounded-lg text-sm font-black"
-                    style={{ background: statusBg, color: statusColor, border: `1.5px solid ${statusColor}33` }}>
+                  <motion.span
+                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-sm font-extrabold"
+                    style={{ background: statusBg, color: statusColor, border: `1.5px solid ${statusColor}33`, fontFamily: 'Sora, sans-serif' }}
+                    animate={{ boxShadow: [`0 0 0 0 ${statusColor}00`, `0 0 0 6px ${statusColor}1f`, `0 0 0 0 ${statusColor}00`] }}
+                    transition={{ duration: 2.4, repeat: Infinity, ease: 'easeOut' }}
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: statusColor }} />
                     {asistenciaHoy?.estado_ingreso ?? 'OFFLINE'}
-                  </span>
+                  </motion.span>
                 </div>
               </div>
             </div>
@@ -1972,7 +2005,7 @@ export default function EscanerWeb() {
               <motion.button
                 onClick={handleOfflineEntry}
                 className="w-full h-[64px] rounded-2xl flex items-center justify-center gap-3 font-black text-base text-white"
-                style={{ background: 'linear-gradient(135deg, #0F766E, #22C55E)', fontFamily: 'Syne, sans-serif', boxShadow: '0 12px 28px rgba(16,185,129,0.28)' }}
+                style={{ background: 'linear-gradient(135deg, #0F766E, #22C55E)', fontFamily: 'Sora, sans-serif', boxShadow: '0 12px 28px rgba(16,185,129,0.28)' }}
                 whileTap={{ scale: 0.97 }}
               >
                 <CloudOff size={22} />
@@ -1987,7 +2020,7 @@ export default function EscanerWeb() {
             >
               <CheckCircle2 size={40} style={{ color: 'var(--green)' }} className="mb-3" />
               <p className="font-semibold" style={{ color: '#047857' }}>Ya marcaste tu salida hoy.</p>
-              <p className="font-black text-lg mt-1" style={{ color: '#065F46', fontFamily: 'Syne, sans-serif' }}>¡Buen descanso!</p>
+              <p className="font-black text-lg mt-1" style={{ color: '#065F46', fontFamily: 'Sora, sans-serif' }}>¡Buen descanso!</p>
             </motion.div>
           ) : (
             <div className="flex flex-col gap-3">
@@ -2009,7 +2042,7 @@ export default function EscanerWeb() {
                 style={{
                   background: 'linear-gradient(135deg, #DC2626, #B91C1C)',
                   color: 'white',
-                  fontFamily: 'Syne, sans-serif',
+                  fontFamily: 'Sora, sans-serif',
                   boxShadow: '0 8px 24px rgba(220,38,38,0.35), 0 2px 6px rgba(220,38,38,0.2)',
                 }}
                 whileHover={{ scale: 1.02, boxShadow: '0 12px 32px rgba(220,38,38,0.45)' }}
@@ -2052,7 +2085,7 @@ export default function EscanerWeb() {
                   <HardHat size={24} style={{ color: 'var(--blue)' }} />
                 </div>
                 <div>
-                  <h3 className="font-black text-base" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>Ingreso a Obra</h3>
+                  <h3 className="font-black text-base" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Ingreso a Obra</h3>
                   <p className="text-xs" style={{ color: 'var(--text-3)' }}>Indica el nombre del proyecto</p>
                 </div>
                 <button onClick={() => { if (!guardando) { setShowObra(false); setNotaTexto('') } }} className="ml-auto w-8 h-8 rounded-full flex items-center justify-center" style={{ background: 'var(--surface-2)', color: 'var(--text-3)' }}>
@@ -2096,7 +2129,7 @@ export default function EscanerWeb() {
                   <Store size={24} style={{ color: 'var(--purple)' }} />
                 </div>
                 <div>
-                  <h3 className="font-black text-base" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>Diligencia Externa</h3>
+                  <h3 className="font-black text-base" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Diligencia Externa</h3>
                   <p className="text-xs" style={{ color: 'var(--text-3)' }}>Indica el motivo o lugar</p>
                 </div>
                 <button onClick={() => { if (!guardando) { setShowExterno(false); setNotaTexto('') } }} className="ml-auto w-8 h-8 rounded-full flex items-center justify-center" style={{ background: 'var(--surface-2)', color: 'var(--text-3)' }}>
@@ -2141,7 +2174,7 @@ export default function EscanerWeb() {
                   <Moon size={22} style={{ color: 'var(--amber)' }} />
                 </div>
                 <div>
-                  <h3 className="font-black text-base" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>Turno Nocturno</h3>
+                  <h3 className="font-black text-base" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Turno Nocturno</h3>
                   <p className="text-xs" style={{ color: 'var(--text-3)' }}>Registro 7 PM – 11 PM · Siempre puntual</p>
                 </div>
                 <button onClick={() => { if (!guardando) { setShowNocturno(false); setNotaTexto(''); setHoraSeleccionada(null) } }}
@@ -2218,7 +2251,7 @@ export default function EscanerWeb() {
                   {isRemoteExit ? <MapPin size={22} style={{ color: 'var(--red)' }} /> : <Edit3 size={22} style={{ color: 'var(--text-2)' }} />}
                 </div>
                 <div>
-                  <h3 className="font-black text-base" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>
+                  <h3 className="font-black text-base" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>
                     {isRemoteExit ? 'Salida Remota' : 'Añadir Nota'}
                   </h3>
                   {isRemoteExit && <p className="text-xs font-bold" style={{ color: 'var(--red)' }}>Estás fuera de la oficina</p>}
@@ -2273,7 +2306,7 @@ export default function EscanerWeb() {
                     <Calendar size={22} style={{ color: 'var(--blue)' }} />
                   </div>
                   <div>
-                    <h3 className="font-black text-lg" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>Mi Historial</h3>
+                    <h3 className="font-black text-lg" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Mi Historial</h3>
                     <p className="text-sm font-semibold capitalize" style={{ color: 'var(--text-3)' }}>
                       {format(targetDate, 'MMMM yyyy', { locale: es })}
                     </p>
@@ -2351,7 +2384,7 @@ export default function EscanerWeb() {
                     <PlaneTakeoff size={22} style={{ color: 'var(--blue)' }} />
                   </div>
                   <div>
-                    <h3 className="font-black text-lg" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>Mis Vacaciones</h3>
+                    <h3 className="font-black text-lg" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Mis Vacaciones</h3>
                     <p className="text-sm font-semibold" style={{ color: 'var(--text-3)' }}>Consulta tu saldo y solicita dias desde aqui.</p>
                   </div>
                 </div>
@@ -2385,7 +2418,7 @@ export default function EscanerWeb() {
                     )}
                     {vacacionesSaldo ? (
                       <div className="rounded-3xl p-5" style={{ background: 'var(--surface-2)', border: '1.5px solid var(--border)' }}>
-                        <p className="text-lg font-black" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>
+                        <p className="text-lg font-black" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>
                           {vacacionesSaldo.trabajador_nombre}
                         </p>
                         <p className="text-sm font-semibold mt-1" style={{ color: 'var(--text-3)' }}>
@@ -2403,7 +2436,7 @@ export default function EscanerWeb() {
                                 <span className="text-[11px] font-black uppercase tracking-[0.12em]" style={{ color: item.color }}>{item.label}</span>
                                 <span style={{ color: item.color }}>{item.icon}</span>
                               </div>
-                              <p className="mt-3 text-2xl font-black" style={{ color: item.color, fontFamily: 'Syne, sans-serif' }}>{item.value}</p>
+                              <p className="mt-3 text-2xl font-black" style={{ color: item.color, fontFamily: 'Sora, sans-serif' }}>{item.value}</p>
                             </div>
                           ))}
                         </div>
@@ -2417,7 +2450,7 @@ export default function EscanerWeb() {
                       </div>
                     ) : (
                       <div className="rounded-3xl p-5 text-center" style={{ background: 'var(--surface-2)', border: '1.5px dashed var(--border)' }}>
-                        <p className="font-black text-base" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>Sin saldo importado</p>
+                        <p className="font-black text-base" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Sin saldo importado</p>
                         <p className="text-sm mt-2" style={{ color: 'var(--text-3)' }}>
                           Todavia no encontramos vacaciones cargadas para tu DNI en la hoja 2026.
                         </p>
@@ -2427,7 +2460,7 @@ export default function EscanerWeb() {
                       <div className="rounded-3xl p-5" style={{ background: 'var(--surface)', border: '1.5px solid var(--border)', boxShadow: 'var(--shadow-sm)' }}>
                         <div className="flex items-start justify-between gap-3 mb-4">
                           <div>
-                            <h4 className="font-black text-base" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>Solicitar vacaciones</h4>
+                            <h4 className="font-black text-base" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Solicitar vacaciones</h4>
                             <p className="text-xs font-semibold mt-1" style={{ color: 'var(--text-3)' }}>
                               Puedes pedirlas aunque tu saldo quede en positivo o negativo.
                             </p>
@@ -2475,7 +2508,7 @@ export default function EscanerWeb() {
                       </div>
                     )}
                     <div className="rounded-3xl p-5" style={{ background: 'var(--surface)', border: '1.5px solid var(--border)', boxShadow: 'var(--shadow-sm)' }}>
-                      <h4 className="font-black text-base" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>Historial de solicitudes</h4>
+                      <h4 className="font-black text-base" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Historial de solicitudes</h4>
                       <p className="text-xs font-semibold mt-1 mb-4" style={{ color: 'var(--text-3)' }}>
                         Cuando una solicitud queda aprobada, tu saldo visible se recalcula automaticamente.
                       </p>
@@ -2557,7 +2590,7 @@ export default function EscanerWeb() {
                 <div className="w-16 h-16 rounded-full flex items-center justify-center mb-4" style={{ background: 'var(--blue-light)' }}>
                   <PlaneTakeoff size={32} style={{ color: 'var(--blue)' }} />
                 </div>
-                <h3 className="text-2xl font-black capitalize" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>
+                <h3 className="text-2xl font-black capitalize" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>
                   {format(parseISO(selectedVacationDay.fecha), "EEEE dd", { locale: es })}
                 </h3>
                 <p className="text-sm font-medium capitalize mt-0.5" style={{ color: 'var(--text-3)' }}>
@@ -2618,7 +2651,7 @@ export default function EscanerWeb() {
                   <img src="/icons-web/descanso-medico.gif" alt="" className="w-12 h-12 object-contain" />
                 </div>
                 <div className="min-w-0">
-                  <h3 className="font-black text-xl" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>Descanso medico</h3>
+                  <h3 className="font-black text-xl" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Descanso medico</h3>
                   <p className="text-sm font-semibold" style={{ color: 'var(--text-3)' }}>Sustenta con foto y comentario para RRHH.</p>
                 </div>
               </div>
@@ -2712,7 +2745,7 @@ export default function EscanerWeb() {
                   <div className="flex items-center justify-between gap-3 mb-4">
                     <div>
                       <p className="text-[10px] font-black uppercase tracking-[0.18em]" style={{ color: '#7C3AED' }}>Historial</p>
-                      <h4 className="font-black text-lg" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>Tus solicitudes</h4>
+                      <h4 className="font-black text-lg" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Tus solicitudes</h4>
                     </div>
                     <button onClick={() => perfil && cargarDescansosMedicos(perfil.dni, true)} className="w-10 h-10 rounded-2xl border flex items-center justify-center" style={{ background: 'white', borderColor: 'var(--border)', color: 'var(--text-2)' }}>
                       {loadingMedical ? <Loader2 className="animate-spin" size={17} /> : <RefreshCw size={17} />}
@@ -2833,7 +2866,7 @@ export default function EscanerWeb() {
                     : <AlertTriangle size={36} style={{ color: 'var(--red)' }} />}
                 </div>
 
-                <h3 className="text-2xl font-black capitalize" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>
+                <h3 className="text-2xl font-black capitalize" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>
                   {selectedDay.fecha ? format(parseISO(selectedDay.fecha), "EEEE dd", { locale: es }) : '—'}
                 </h3>
                 <p className="text-sm font-medium capitalize mt-0.5" style={{ color: 'var(--text-3)' }}>
@@ -2857,7 +2890,7 @@ export default function EscanerWeb() {
                     <div key={label} className="flex-1 rounded-2xl p-4 text-center"
                       style={{ background: 'var(--surface-2)', border: '1.5px solid var(--border)' }}>
                       <p className="text-[10px] font-black uppercase tracking-widest mb-1" style={{ color: 'var(--text-3)' }}>{label}</p>
-                      <p className="font-black text-lg" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>{time}</p>
+                      <p className="font-black text-lg" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>{time}</p>
                     </div>
                   ))}
                 </div>
@@ -2905,7 +2938,7 @@ export default function EscanerWeb() {
                   <Trophy size={28} style={{ color: 'var(--gold)' }} />
                 </div>
                 <div>
-                  <h3 className="font-black text-xl" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>Mis Trofeos</h3>
+                  <h3 className="font-black text-xl" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Mis Trofeos</h3>
                   <p className="text-sm font-semibold" style={{ color: 'var(--text-3)' }}>
                     {unlockedLogros.length} de {TODOS_LOS_LOGROS.length} desbloqueados
                   </p>
@@ -2945,7 +2978,7 @@ export default function EscanerWeb() {
                         {unlocked ? logro.emoji : <Lock size={18} style={{ color: 'var(--text-3)' }} />}
                       </div>
                       <div className="ml-4 flex-1">
-                        <h4 className="font-black text-base" style={{ color: unlocked ? 'var(--gold)' : 'var(--text-3)', fontFamily: 'Syne, sans-serif' }}>
+                        <h4 className="font-black text-base" style={{ color: unlocked ? 'var(--gold)' : 'var(--text-3)', fontFamily: 'Sora, sans-serif' }}>
                           {logro.titulo}
                         </h4>
                         <p className="text-xs font-medium mt-0.5 leading-snug" style={{ color: unlocked ? 'var(--text-2)' : 'var(--text-3)' }}>
@@ -2992,7 +3025,7 @@ export default function EscanerWeb() {
                 </span>
               </div>
 
-              <h2 className="text-4xl font-black text-white mb-3" style={{ fontFamily: 'Syne, sans-serif' }}>
+              <h2 className="text-4xl font-black text-white mb-3" style={{ fontFamily: 'Sora, sans-serif' }}>
                 {achievement.titulo}
               </h2>
               <p className="text-base mb-10 max-w-xs" style={{ color: 'rgba(255,255,255,0.65)' }}>
@@ -3006,7 +3039,7 @@ export default function EscanerWeb() {
                   background: 'linear-gradient(135deg, #F59E0B, #D97706)',
                   color: '#1E1B4B',
                   boxShadow: '0 12px 40px rgba(217,119,6,0.45)',
-                  fontFamily: 'Syne, sans-serif',
+                  fontFamily: 'Sora, sans-serif',
                 }}
                 whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.96 }}
               >
