@@ -27,13 +27,20 @@ function isOfficeScannerRecord(record: any) {
 export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url)
   const date = searchParams.get('date') || getLimaDateKey()
+  const type = searchParams.get('type') === 'tardanza' ? 'tardanza' : 'puntual'
 
-  const { data, error } = await supabaseAdmin
+  let query = supabaseAdmin
     .from('registro_asistencias')
     .select('id, dni, nombres_completos, area, foto_url, hora_ingreso, estado_ingreso, notas')
     .eq('fecha', date)
-    .order('hora_ingreso', { ascending: true })
+    .order('hora_ingreso', { ascending: type === 'puntual' })
     .limit(200)
+
+  if (type === 'tardanza') {
+    query = query.eq('estado_ingreso', 'TARDANZA')
+  }
+
+  const { data, error } = await query
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
@@ -45,6 +52,7 @@ export async function GET(req: NextRequest) {
       seen.add(record.dni)
       return true
     })
+    .filter((record: any) => type !== 'puntual' || record.estado_ingreso === 'PUNTUAL')
     .slice(0, 10)
     .map((record: any, index: number) => ({
       puesto: index + 1,
@@ -56,5 +64,5 @@ export async function GET(req: NextRequest) {
       estado_ingreso: record.estado_ingreso,
     }))
 
-  return NextResponse.json({ date, ranking })
+  return NextResponse.json({ date, type, ranking })
 }

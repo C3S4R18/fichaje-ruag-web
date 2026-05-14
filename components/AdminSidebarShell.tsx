@@ -141,6 +141,14 @@ export default function AdminSidebarShell({ children }: { children: ReactNode })
       href: `/ranking?date=${todayKey()}&from=admin`,
     },
     {
+      key: 'ranking-tardanza',
+      title: 'Ranking tardanza',
+      description: 'Llegadas tarde',
+      gif: '/icons-web/ranking-tardanza.gif',
+      tone: 'rose',
+      href: `/ranking?date=${todayKey()}&from=admin&type=tardanza`,
+    },
+    {
       key: 'feriado',
       title: 'Modo feriado',
       description: 'Dia no laborable',

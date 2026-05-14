@@ -8,6 +8,7 @@ import {
   Edit2, Edit3, X, Trophy, Lock, Map, Calendar, ChevronLeft,
   ChevronRight, CheckCircle2, HardHat, Store, Moon, Star,
   PlaneTakeoff, Phone, RefreshCw, Wallet, Menu, Badge, Cloud, CloudOff,
+  BookOpen, Camera, FileText, Image as ImageIcon, Send, Stethoscope, Upload,
 } from 'lucide-react'
 import { format, parseISO, differenceInDays } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -69,6 +70,30 @@ interface VacationCalendarDay {
   fecha: string
   solicitudes: VacacionSolicitud[]
 }
+interface MedicalLeaveRequest {
+  id: string
+  dni: string
+  fecha_inicio: string
+  fecha_fin: string
+  comentario: string | null
+  evidencia_url: string | null
+  evidencia_urls?: string[] | null
+  estado: string
+  created_at: string | null
+  reviewed_at?: string | null
+}
+
+type WorkerFeature =
+  | 'logros'
+  | 'calendar'
+  | 'vacations'
+  | 'medical'
+  | 'ranking'
+  | 'rankingLate'
+  | 'guide'
+  | 'updates'
+  | 'support'
+  | 'rrhh'
 
 const INACTIVE_AREA_PREFIX = '__INACTIVO__|'
 
@@ -343,6 +368,94 @@ function SheetOverlay({ onClose, children }: { onClose: () => void; children: Re
   )
 }
 
+function WorkerInfoScreen({
+  title,
+  subtitle,
+  gif,
+  color,
+  items,
+  onClose,
+}: {
+  title: string
+  subtitle: string
+  gif: string
+  color: string
+  items: [string, string][]
+  onClose: () => void
+}) {
+  return (
+    <motion.div
+      className="fixed inset-0 z-50 flex items-stretch justify-center"
+      style={{ background: 'rgba(15,23,42,0.42)', backdropFilter: 'blur(10px)' }}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      exit={{ opacity: 0 }}
+      onClick={onClose}
+    >
+      <motion.div
+        className="w-full max-w-lg p-5 pt-[calc(env(safe-area-inset-top)+16px)] pb-[calc(env(safe-area-inset-bottom)+24px)] flex flex-col"
+        style={{ background: 'linear-gradient(180deg, #F8FBFF, #FFFFFF, #EEF8F4)', minHeight: '100vh' }}
+        initial={{ x: '100%' }}
+        animate={{ x: 0 }}
+        exit={{ x: '100%' }}
+        transition={{ type: 'spring', stiffness: 380, damping: 36 }}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div className="flex items-center gap-3 mb-5">
+          <button onClick={onClose} className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: '#0F172A', color: 'white' }}>
+            <ChevronLeft size={22} />
+          </button>
+          <motion.div
+            className="w-16 h-16 rounded-3xl flex items-center justify-center overflow-hidden border"
+            style={{ background: 'white', borderColor: `${color}33`, boxShadow: `0 18px 40px ${color}22` }}
+            animate={{ y: [0, -5, 0] }}
+            transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
+          >
+            <img src={gif} alt="" className="w-14 h-14 object-contain" />
+          </motion.div>
+          <div className="min-w-0">
+            <h3 className="font-black text-xl" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>{title}</h3>
+            <p className="text-sm font-semibold leading-snug" style={{ color: 'var(--text-3)' }}>{subtitle}</p>
+          </div>
+        </div>
+
+        <div className="relative overflow-hidden rounded-[30px] border p-5 mb-5" style={{ background: 'rgba(255,255,255,0.86)', borderColor: `${color}24` }}>
+          <motion.div
+            className="absolute -right-14 -top-14 h-32 w-32 rounded-full opacity-25 blur-2xl"
+            style={{ background: color }}
+            animate={{ scale: [1, 1.25, 1], opacity: [0.18, 0.32, 0.18] }}
+            transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+          />
+          <p className="relative z-10 text-sm font-bold leading-relaxed" style={{ color: 'var(--text-2)' }}>
+            Lee esta seccion cuando tengas dudas. Cada tarjeta resume una funcion importante del PWA.
+          </p>
+        </div>
+
+        <div className="overflow-y-auto scrollbar-hide flex-1 space-y-3 pr-1">
+          {items.map(([itemTitle, description], index) => (
+            <motion.article
+              key={itemTitle}
+              className="rounded-[24px] border p-4 flex gap-3"
+              style={{ background: 'rgba(255,255,255,0.88)', borderColor: 'var(--border)', boxShadow: '0 14px 30px rgba(15,23,42,0.06)' }}
+              initial={{ opacity: 0, y: 16 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ delay: index * 0.05 }}
+            >
+              <span className="w-10 h-10 rounded-2xl flex items-center justify-center text-white text-sm font-black shrink-0" style={{ background: `linear-gradient(135deg, ${color}, #22C55E)` }}>
+                {String(index + 1).padStart(2, '0')}
+              </span>
+              <span>
+                <span className="block text-base font-black" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>{itemTitle}</span>
+                <span className="block text-sm font-semibold mt-1 leading-relaxed" style={{ color: 'var(--text-3)' }}>{description}</span>
+              </span>
+            </motion.article>
+          ))}
+        </div>
+      </motion.div>
+    </motion.div>
+  )
+}
+
 function ModalCard({ children, onClick }: { children: React.ReactNode; onClick?: (e: React.MouseEvent) => void }) {
   return (
     <motion.div
@@ -399,6 +512,9 @@ export default function EscanerWeb() {
   const [showLogros, setShowLogros]         = useState(false)
   const [showCalendar, setShowCalendar]     = useState(false)
   const [showVacations, setShowVacations]   = useState(false)
+  const [showMedicalLeave, setShowMedicalLeave] = useState(false)
+  const [showGuide, setShowGuide]           = useState(false)
+  const [showUpdates, setShowUpdates]       = useState(false)
   const [showSideMenu, setShowSideMenu]     = useState(false)
   const [showNota, setShowNota]             = useState(false)
   const [showObra, setShowObra]             = useState(false)
@@ -433,17 +549,32 @@ export default function EscanerWeb() {
   const [submittingVacation, setSubmittingVacation] = useState(false)
   const knownVacationStatusesRef = useRef<Record<string, string>>({})
 
+  // Medical leave
+  const [medicalStart, setMedicalStart] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const [medicalEnd, setMedicalEnd] = useState(format(new Date(), 'yyyy-MM-dd'))
+  const [medicalComment, setMedicalComment] = useState('')
+  const [medicalFiles, setMedicalFiles] = useState<File[]>([])
+  const [medicalRequests, setMedicalRequests] = useState<MedicalLeaveRequest[]>([])
+  const [loadingMedical, setLoadingMedical] = useState(false)
+  const [submittingMedical, setSubmittingMedical] = useState(false)
+
   // Photo
   const [uploadingPhoto, setUploadingPhoto] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const medicalCameraRef = useRef<HTMLInputElement>(null)
+  const medicalGalleryRef = useRef<HTMLInputElement>(null)
   const touchStartRef = useRef<{ x: number; y: number } | null>(null)
 
-  const openFeature = (feature: 'logros' | 'calendar' | 'vacations' | 'ranking' | 'support' | 'rrhh') => {
+  const openFeature = (feature: WorkerFeature) => {
     setShowSideMenu(false)
     if (feature === 'logros') setShowLogros(true)
     if (feature === 'calendar') setShowCalendar(true)
     if (feature === 'vacations') setShowVacations(true)
+    if (feature === 'medical') setShowMedicalLeave(true)
     if (feature === 'ranking') router.push('/ranking')
+    if (feature === 'rankingLate') router.push('/ranking?type=tardanza')
+    if (feature === 'guide') setShowGuide(true)
+    if (feature === 'updates') setShowUpdates(true)
     if (feature === 'support' && perfil) abrirSoporteWhatsApp(perfil)
     if (feature === 'rrhh') {
       const phone = '51987834538'
@@ -537,6 +668,99 @@ export default function EscanerWeb() {
       toast.error(err?.message || 'No se pudo registrar la solicitud.')
     } finally {
       setSubmittingVacation(false)
+    }
+  }
+
+  const cargarDescansosMedicos = async (dniArg?: string | null, withLoader = true) => {
+    const targetDni = dniArg ?? perfil?.dni
+    if (!targetDni) return
+
+    if (withLoader) setLoadingMedical(true)
+    try {
+      const { data, error } = await supabase
+        .from('descansos_medicos_solicitudes')
+        .select('id,dni,fecha_inicio,fecha_fin,comentario,evidencia_url,evidencia_urls,estado,created_at,reviewed_at')
+        .eq('dni', targetDni)
+        .order('created_at', { ascending: false })
+
+      if (error) throw error
+      setMedicalRequests((data ?? []) as MedicalLeaveRequest[])
+    } catch (err: any) {
+      toast.error(err?.message || 'No se pudo cargar tu historial medico.')
+    } finally {
+      if (withLoader) setLoadingMedical(false)
+    }
+  }
+
+  const handleMedicalFiles = (files: FileList | null) => {
+    if (!files?.length) return
+    const selected = Array.from(files).filter((file) => file.type.startsWith('image/'))
+    if (!selected.length) {
+      toast.error('Selecciona imagenes del certificado medico.')
+      return
+    }
+    setMedicalFiles((current) => [...current, ...selected].slice(0, 8))
+  }
+
+  const submitMedicalLeave = async () => {
+    if (!perfil) return
+    if (medicalStart > medicalEnd) {
+      toast.error('Revisa el rango de fechas.')
+      return
+    }
+    if (!medicalFiles.length) {
+      toast.error('Sube o toma al menos una foto del certificado.')
+      return
+    }
+    if (medicalComment.trim().length < 5) {
+      toast.error('Agrega un comentario breve para RRHH.')
+      return
+    }
+
+    setSubmittingMedical(true)
+    try {
+      const paths: string[] = []
+      const urls: string[] = []
+      const cleanDni = perfil.dni.trim()
+      const bucket = supabase.storage.from('descansos_medicos')
+
+      for (const [index, file] of medicalFiles.entries()) {
+        const extension = file.name.split('.').pop()?.toLowerCase() || 'jpg'
+        const path = `${cleanDni}/${Date.now()}-${index}.${extension}`
+        const { error: uploadError } = await bucket.upload(path, file, {
+          upsert: true,
+          contentType: file.type || 'image/jpeg',
+        })
+        if (uploadError) throw uploadError
+        paths.push(path)
+        urls.push(bucket.getPublicUrl(path).data.publicUrl)
+      }
+
+      const { error } = await supabase.from('descansos_medicos_solicitudes').insert({
+        dni: cleanDni,
+        trabajador_nombre: perfil.nombres,
+        area: perfil.area,
+        fecha_inicio: medicalStart,
+        fecha_fin: medicalEnd,
+        comentario: medicalComment.trim(),
+        evidencia_url: urls[0],
+        evidencia_path: paths[0],
+        evidencia_urls: urls,
+        evidencia_paths: paths,
+        estado: 'solicitada',
+      })
+      if (error) throw error
+
+      toast.success('Descanso medico enviado a RRHH.')
+      setMedicalFiles([])
+      setMedicalComment('')
+      setMedicalStart(format(new Date(), 'yyyy-MM-dd'))
+      setMedicalEnd(format(new Date(), 'yyyy-MM-dd'))
+      await cargarDescansosMedicos(cleanDni, false)
+    } catch (err: any) {
+      toast.error(err?.message || 'No se pudo enviar el descanso medico.')
+    } finally {
+      setSubmittingMedical(false)
     }
   }
 
@@ -698,6 +922,11 @@ export default function EscanerWeb() {
   }, [showVacations, perfil])
 
   useEffect(() => {
+    if (!showMedicalLeave || !perfil) return
+    void cargarDescansosMedicos(perfil.dni, true)
+  }, [showMedicalLeave, perfil])
+
+  useEffect(() => {
     if (!perfil) return
 
     const channel = supabase
@@ -731,6 +960,32 @@ export default function EscanerWeb() {
           }
 
           void cargarVacaciones(perfil.dni, false)
+        }
+      )
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [perfil])
+
+  useEffect(() => {
+    if (!perfil) return
+
+    const channel = supabase
+      .channel(`descansos-worker-${perfil.dni}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'descansos_medicos_solicitudes', filter: `dni=eq.${perfil.dni}` },
+        (payload: any) => {
+          const next = payload?.new
+          const status = normalizeStatus(String(next?.estado ?? ''))
+          if (payload.eventType === 'UPDATE' && status === 'aprobada') {
+            toast.success('Descanso medico aprobado', { description: 'RRHH aprobo tu solicitud.' })
+          } else if (payload.eventType === 'UPDATE' && status === 'rechazada') {
+            toast.error('Descanso medico rechazado', { description: 'Revisa tu historial o comunicate con RRHH.' })
+          }
+          void cargarDescansosMedicos(perfil.dni, false)
         }
       )
       .subscribe()
@@ -1261,7 +1516,7 @@ export default function EscanerWeb() {
         const start = touchStartRef.current
         const t = e.changedTouches[0]
         touchStartRef.current = null
-        if (!start || showSideMenu || showLogros || showCalendar || showVacations || showNota || showObra || showExterno || showNocturno) return
+        if (!start || showSideMenu || showLogros || showCalendar || showVacations || showMedicalLeave || showGuide || showUpdates || showNota || showObra || showExterno || showNocturno) return
         const dx = t.clientX - start.x
         const dy = Math.abs(t.clientY - start.y)
         const middleBand = start.y > window.innerHeight * 0.22 && start.y < window.innerHeight * 0.78
@@ -1336,25 +1591,41 @@ export default function EscanerWeb() {
                 <span>{isOnline && !hasPendingOfflineEntry ? 'Online' : hasPendingOfflineEntry ? 'Pendiente offline' : 'Offline'}</span>
               </div>
 
-              <div className="mt-6 space-y-3">
+              <div className="mt-6 flex-1 space-y-3 overflow-y-auto pr-1 pb-[calc(env(safe-area-inset-bottom)+18px)]">
                 {[
-                  { key: 'logros', label: 'Logros', desc: 'Insignias y progreso', icon: <Trophy size={22} />, colors: ['#F59E0B', '#FBBF24'] },
-                  { key: 'calendar', label: 'Calendario', desc: 'Historial mensual', icon: <Calendar size={22} />, colors: ['#2563EB', '#06B6D4'] },
-                  { key: 'vacations', label: 'Vacaciones', desc: 'Saldo y solicitudes', icon: <PlaneTakeoff size={22} />, colors: ['#0EA5E9', '#6366F1'] },
-                  { key: 'ranking', label: 'Ranking', desc: 'Top 10 de oficina', icon: <Star size={22} />, colors: ['#059669', '#22C55E'] },
-                  { key: 'support', label: 'Soporte', desc: 'Ayuda por WhatsApp', icon: <Phone size={22} />, colors: ['#128C7E', '#25D366'] },
-                  { key: 'rrhh', label: 'RRHH', desc: 'Recursos humanos', icon: <Badge size={22} />, colors: ['#2563EB', '#06B6D4'] },
+                  { key: 'logros', label: 'Logros', desc: 'Insignias y progreso', gif: '/icons-web/logros.gif', icon: <Trophy size={20} />, colors: ['#F59E0B', '#FBBF24'] },
+                  { key: 'calendar', label: 'Calendario', desc: 'Historial mensual', gif: '/icons-web/calendario.gif', icon: <Calendar size={20} />, colors: ['#2563EB', '#06B6D4'] },
+                  { key: 'vacations', label: 'Vacaciones', desc: 'Saldo y solicitudes', gif: '/icons-web/vacaciones.gif', icon: <PlaneTakeoff size={20} />, colors: ['#0EA5E9', '#6366F1'] },
+                  { key: 'medical', label: 'Descanso medico', desc: 'Certificado para RRHH', gif: '/icons-web/descanso-medico.gif', icon: <Stethoscope size={20} />, colors: ['#7C3AED', '#EC4899'] },
+                  { key: 'ranking', label: 'Ranking puntual', desc: 'Top 10 de oficina', gif: '/icons-web/ranking.gif', icon: <Star size={20} />, colors: ['#F59E0B', '#F97316'] },
+                  { key: 'rankingLate', label: 'Ranking tardanza', desc: 'Llegadas tarde', gif: '/icons-web/ranking-tardanza.gif', icon: <AlertTriangle size={20} />, colors: ['#DC2626', '#F43F5E'] },
+                  { key: 'guide', label: 'Guia de uso', desc: 'Aprende cada boton', gif: '/icons-web/guia-de-uso.gif', icon: <BookOpen size={20} />, colors: ['#2563EB', '#22C55E'] },
+                  { key: 'updates', label: 'Actualizaciones', desc: 'Libro de novedades', gif: '/icons-web/actualizaciones.gif', icon: <FileText size={20} />, colors: ['#0F766E', '#0EA5E9'] },
+                  { key: 'support', label: 'Soporte', desc: 'Ayuda por WhatsApp', gif: '/icons-web/soporte.gif', icon: <Phone size={20} />, colors: ['#128C7E', '#25D366'] },
+                  { key: 'rrhh', label: 'RRHH', desc: 'Recursos humanos', gif: '/icons-web/rrhh.gif', icon: <Badge size={20} />, colors: ['#2563EB', '#06B6D4'] },
                 ].map((item) => (
-                  <motion.button key={item.key} onClick={() => openFeature(item.key as any)}
-                    className="w-full rounded-[22px] border p-3 flex items-center gap-3 text-left"
-                    style={{ background: 'rgba(255,255,255,0.78)', borderColor: `${item.colors[0]}2A` }}
+                  <motion.button key={item.key} onClick={() => openFeature(item.key as WorkerFeature)}
+                    className="group relative w-full overflow-hidden rounded-[24px] border p-3 flex items-center gap-3 text-left"
+                    style={{ background: 'rgba(255,255,255,0.82)', borderColor: `${item.colors[0]}30`, boxShadow: '0 12px 28px rgba(15,23,42,0.06)' }}
+                    whileHover={{ x: -3 }}
                     whileTap={{ scale: 0.98 }}>
-                    <span className="w-12 h-12 rounded-2xl text-white flex items-center justify-center shrink-0" style={{ background: `linear-gradient(135deg, ${item.colors[0]}, ${item.colors[1]})` }}>{item.icon}</span>
+                    <motion.span
+                      className="absolute right-[-28px] top-[-28px] h-20 w-20 rounded-full opacity-20 blur-xl"
+                      style={{ background: `linear-gradient(135deg, ${item.colors[0]}, ${item.colors[1]})` }}
+                      animate={{ scale: [1, 1.25, 1], opacity: [0.14, 0.28, 0.14] }}
+                      transition={{ duration: 2.7, repeat: Infinity, ease: 'easeInOut' }}
+                    />
+                    <span className="relative w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 overflow-hidden border"
+                      style={{ background: `linear-gradient(135deg, ${item.colors[0]}18, ${item.colors[1]}24)`, borderColor: `${item.colors[0]}24` }}>
+                      <img src={item.gif} alt="" className="h-11 w-11 object-contain" />
+                    </span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm font-black" style={{ color: 'var(--text-1)' }}>{item.label}</span>
                       <span className="block text-xs font-semibold mt-0.5" style={{ color: 'var(--text-3)' }}>{item.desc}</span>
                     </span>
-                    <ChevronRight size={18} style={{ color: 'var(--text-3)' }} />
+                    <span className="w-8 h-8 rounded-xl flex items-center justify-center text-white shrink-0" style={{ background: `linear-gradient(135deg, ${item.colors[0]}, ${item.colors[1]})` }}>
+                      {item.icon}
+                    </span>
                   </motion.button>
                 ))}
               </div>
@@ -2323,6 +2594,217 @@ export default function EscanerWeb() {
               </div>
             </motion.div>
           </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showMedicalLeave && (
+          <motion.div className="fixed inset-0 z-50 flex items-stretch justify-center"
+            style={{ background: 'rgba(49,46,129,0.45)', backdropFilter: 'blur(10px)' }}
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={() => !submittingMedical && setShowMedicalLeave(false)}>
+            <motion.div
+              className="w-full max-w-lg p-5 pt-[calc(env(safe-area-inset-top)+16px)] pb-[calc(env(safe-area-inset-bottom)+24px)] flex flex-col"
+              style={{ background: 'linear-gradient(180deg, #F8FBFF, #F5F3FF, #ECFEFF)', minHeight: '100vh' }}
+              initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
+              transition={{ type: 'spring', stiffness: 380, damping: 36 }}
+              onClick={e => e.stopPropagation()}
+            >
+              <div className="flex items-center gap-3 mb-5">
+                <button onClick={() => !submittingMedical && setShowMedicalLeave(false)} className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: '#0F172A', color: 'white' }}>
+                  <ChevronLeft size={22} />
+                </button>
+                <div className="w-14 h-14 rounded-2xl flex items-center justify-center overflow-hidden border" style={{ background: 'white', borderColor: '#DDD6FE' }}>
+                  <img src="/icons-web/descanso-medico.gif" alt="" className="w-12 h-12 object-contain" />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="font-black text-xl" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>Descanso medico</h3>
+                  <p className="text-sm font-semibold" style={{ color: 'var(--text-3)' }}>Sustenta con foto y comentario para RRHH.</p>
+                </div>
+              </div>
+
+              <div className="overflow-y-auto scrollbar-hide flex-1 pr-1 space-y-5">
+                <motion.div
+                  className="rounded-[30px] p-5 border relative overflow-hidden"
+                  style={{ background: 'rgba(255,255,255,0.88)', borderColor: '#DDD6FE', boxShadow: '0 20px 50px rgba(124,58,237,0.12)' }}
+                  initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
+                >
+                  <motion.div className="absolute -right-16 -top-16 h-36 w-36 rounded-full opacity-25 blur-2xl"
+                    style={{ background: 'linear-gradient(135deg, #7C3AED, #EC4899)' }}
+                    animate={{ scale: [1, 1.25, 1] }}
+                    transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
+                  />
+
+                  <div className="grid grid-cols-2 gap-3 relative z-10">
+                    <label className="space-y-2">
+                      <span className="text-[10px] font-black uppercase tracking-[0.16em]" style={{ color: 'var(--text-3)' }}>Desde</span>
+                      <input type="date" value={medicalStart} onChange={(e) => {
+                        setMedicalStart(e.target.value)
+                        if (medicalEnd < e.target.value) setMedicalEnd(e.target.value)
+                      }} className="w-full rounded-2xl border px-3 py-3 text-sm font-black outline-none" style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text-1)' }} />
+                    </label>
+                    <label className="space-y-2">
+                      <span className="text-[10px] font-black uppercase tracking-[0.16em]" style={{ color: 'var(--text-3)' }}>Hasta</span>
+                      <input type="date" value={medicalEnd} onChange={(e) => {
+                        setMedicalEnd(e.target.value)
+                        if (medicalStart > e.target.value) setMedicalStart(e.target.value)
+                      }} className="w-full rounded-2xl border px-3 py-3 text-sm font-black outline-none" style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text-1)' }} />
+                    </label>
+                  </div>
+
+                  <label className="mt-4 block space-y-2 relative z-10">
+                    <span className="text-[10px] font-black uppercase tracking-[0.16em]" style={{ color: 'var(--text-3)' }}>Comentario</span>
+                    <textarea
+                      value={medicalComment}
+                      onChange={(e) => setMedicalComment(e.target.value.slice(0, 280))}
+                      placeholder="Ejemplo: descanso por indicacion medica, adjunto certificado."
+                      className="min-h-[112px] w-full resize-none rounded-2xl border px-4 py-3 text-sm font-semibold outline-none"
+                      style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text-1)' }}
+                    />
+                  </label>
+
+                  <input ref={medicalCameraRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={(e) => {
+                    handleMedicalFiles(e.target.files)
+                    e.currentTarget.value = ''
+                  }} />
+                  <input ref={medicalGalleryRef} type="file" accept="image/*" multiple className="hidden" onChange={(e) => {
+                    handleMedicalFiles(e.target.files)
+                    e.currentTarget.value = ''
+                  }} />
+
+                  <div className="mt-4 grid grid-cols-2 gap-3 relative z-10">
+                    <motion.button type="button" onClick={() => medicalCameraRef.current?.click()} className="rounded-2xl border px-3 py-4 flex flex-col items-center gap-2 font-black text-sm"
+                      style={{ background: '#F5F3FF', color: '#7C3AED', borderColor: '#DDD6FE' }} whileTap={{ scale: 0.97 }}>
+                      <Camera size={22} /> Tomar foto
+                    </motion.button>
+                    <motion.button type="button" onClick={() => medicalGalleryRef.current?.click()} className="rounded-2xl border px-3 py-4 flex flex-col items-center gap-2 font-black text-sm"
+                      style={{ background: '#FDF2F8', color: '#DB2777', borderColor: '#FBCFE8' }} whileTap={{ scale: 0.97 }}>
+                      <Upload size={22} /> Subir fotos
+                    </motion.button>
+                  </div>
+
+                  <AnimatePresence>
+                    {medicalFiles.length > 0 && (
+                      <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: 10 }}
+                        className="mt-4 rounded-2xl border px-4 py-3 flex items-center gap-3 relative z-10"
+                        style={{ background: '#DCFCE7', borderColor: '#86EFAC', color: '#166534' }}>
+                        <CheckCircle2 size={20} />
+                        <div className="flex-1">
+                          <p className="font-black text-sm">{medicalFiles.length} evidencia(s) lista(s)</p>
+                          <p className="text-xs font-semibold opacity-75">Maximo 8 fotos por solicitud</p>
+                        </div>
+                        <button type="button" onClick={() => setMedicalFiles([])} className="text-xs font-black">Limpiar</button>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+
+                  <motion.button
+                    onClick={submitMedicalLeave}
+                    disabled={submittingMedical}
+                    className="relative z-10 mt-4 w-full py-4 rounded-2xl font-black text-sm text-white flex items-center justify-center gap-2 disabled:opacity-60"
+                    style={{ background: 'linear-gradient(135deg, #7C3AED, #EC4899)', boxShadow: '0 16px 34px rgba(124,58,237,0.24)' }}
+                    whileTap={{ scale: 0.98 }}>
+                    {submittingMedical ? <Loader2 className="animate-spin" size={18} /> : <><Send size={17} /> ENVIAR A RRHH</>}
+                  </motion.button>
+                </motion.div>
+
+                <div className="rounded-[28px] border p-5" style={{ background: 'rgba(255,255,255,0.82)', borderColor: 'var(--border)' }}>
+                  <div className="flex items-center justify-between gap-3 mb-4">
+                    <div>
+                      <p className="text-[10px] font-black uppercase tracking-[0.18em]" style={{ color: '#7C3AED' }}>Historial</p>
+                      <h4 className="font-black text-lg" style={{ color: 'var(--text-1)', fontFamily: 'Syne, sans-serif' }}>Tus solicitudes</h4>
+                    </div>
+                    <button onClick={() => perfil && cargarDescansosMedicos(perfil.dni, true)} className="w-10 h-10 rounded-2xl border flex items-center justify-center" style={{ background: 'white', borderColor: 'var(--border)', color: 'var(--text-2)' }}>
+                      {loadingMedical ? <Loader2 className="animate-spin" size={17} /> : <RefreshCw size={17} />}
+                    </button>
+                  </div>
+
+                  {loadingMedical ? (
+                    <div className="py-8 flex justify-center"><Loader2 className="animate-spin" size={26} style={{ color: '#7C3AED' }} /></div>
+                  ) : medicalRequests.length === 0 ? (
+                    <div className="rounded-2xl border px-4 py-7 text-center text-sm font-semibold" style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text-3)' }}>
+                      Todavia no tienes descansos medicos enviados.
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {medicalRequests.map((item, index) => {
+                        const status = normalizeStatus(item.estado)
+                        const statusColor = status === 'aprobada' ? 'var(--green)' : status === 'rechazada' ? 'var(--red)' : '#B45309'
+                        const statusBg = status === 'aprobada' ? 'var(--green-light)' : status === 'rechazada' ? 'var(--red-light)' : '#FEF3C7'
+                        const urls = (item.evidencia_urls ?? []).filter(Boolean)
+                        if (!urls.length && item.evidencia_url) urls.push(item.evidencia_url)
+                        return (
+                          <motion.div key={item.id} className="rounded-2xl border p-4"
+                            style={{ background: 'white', borderColor: 'var(--border)' }}
+                            initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: index * 0.04 }}>
+                            <div className="flex items-start gap-3">
+                              <div className="w-11 h-11 rounded-2xl flex items-center justify-center shrink-0" style={{ background: statusBg, color: statusColor }}>
+                                <Stethoscope size={21} />
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <p className="font-black text-sm" style={{ color: 'var(--text-1)' }}>{item.fecha_inicio} al {item.fecha_fin}</p>
+                                <p className="text-xs font-semibold mt-1 line-clamp-2" style={{ color: 'var(--text-3)' }}>{item.comentario || 'Sin comentario'}</p>
+                              </div>
+                              <span className="rounded-full px-2.5 py-1 text-[10px] font-black uppercase" style={{ background: statusBg, color: statusColor }}>
+                                {status}
+                              </span>
+                            </div>
+                            {urls.length > 0 && (
+                              <button onClick={() => window.open(urls[0], '_blank', 'noopener,noreferrer')} className="mt-3 w-full rounded-2xl border px-3 py-2.5 flex items-center justify-center gap-2 text-xs font-black"
+                                style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text-2)' }}>
+                                <ImageIcon size={16} /> Ver evidencia enviada ({urls.length})
+                              </button>
+                            )}
+                          </motion.div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showGuide && (
+          <WorkerInfoScreen
+            title="Guia de uso"
+            subtitle="Aprende para que sirve cada boton del PWA."
+            gif="/icons-web/guia-de-uso.gif"
+            color="#0EA5E9"
+            onClose={() => setShowGuide(false)}
+            items={[
+              ['Escaner QR', 'Marca tu ingreso desde el QR de oficina.'],
+              ['Obra, Externo y Nocturno', 'Usalos cuando no estes en oficina principal. Tambien cuentan como asistencia.'],
+              ['Motivo de salida', 'Agrega una nota si necesitas explicar tu salida.'],
+              ['Vacaciones', 'Consulta saldo, solicita dias y revisa si RRHH aprobo.'],
+              ['Descanso medico', 'Envia certificado, rango de fechas y comentario para revision de RRHH.'],
+              ['Ranking puntual', 'Muestra los primeros 10 trabajadores que llegaron puntuales.'],
+              ['Ranking tardanza', 'Muestra las llegadas tarde separadas del ranking puntual.'],
+              ['Soporte y RRHH', 'Abren WhatsApp para pedir ayuda tecnica o laboral.'],
+            ]}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showUpdates && (
+          <WorkerInfoScreen
+            title="Actualizaciones"
+            subtitle="Libro de novedades recientes de la app."
+            gif="/icons-web/actualizaciones.gif"
+            color="#0F766E"
+            onClose={() => setShowUpdates(false)}
+            items={[
+              ['v4.9 - Ranking separado', 'Ranking puntual y ranking tardanza ahora son accesos independientes.'],
+              ['v4.8 - Descanso medico', 'Puedes subir una o varias evidencias y revisar el historial de aprobacion.'],
+              ['v4.7 - Sidebar animado', 'El panel rapido incluye GIFs y tarjetas modernas.'],
+              ['v4.6 - Modo offline', 'El fotocheck y la asistencia pueden mantenerse hasta recuperar conexion.'],
+              ['v4.5 - Vacaciones en tiempo real', 'Las solicitudes y estados se actualizan sin cerrar la app.'],
+            ]}
+          />
         )}
       </AnimatePresence>
 

@@ -2,6 +2,9 @@
 
 import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
+import { AnimatePresence, motion } from 'framer-motion'
+import { format } from 'date-fns'
+import { es } from 'date-fns/locale'
 import {
   ArrowLeft,
   CalendarDays,
@@ -16,10 +19,9 @@ import {
   Trophy,
   Zap,
 } from 'lucide-react'
-import { AnimatePresence, motion } from 'framer-motion'
-import { format } from 'date-fns'
-import { es } from 'date-fns/locale'
 import { toast } from 'sonner'
+
+type RankingType = 'puntual' | 'tardanza'
 
 type RankingItem = {
   puesto: number
@@ -31,37 +33,50 @@ type RankingItem = {
   estado_ingreso: string
 }
 
-const podiumMeta: Record<number, { label: string; gradient: string; glow: string; height: string; icon: 'crown' | 'medal' }> = {
-  1: {
-    label: 'Primer lugar',
-    gradient: 'from-amber-200 via-yellow-400 to-orange-500',
-    glow: 'shadow-amber-500/30',
-    height: 'md:min-h-[360px]',
-    icon: 'crown',
+const typeConfig: Record<RankingType, {
+  label: string
+  short: string
+  title: string
+  subtitle: string
+  gif: string
+  primary: string
+  soft: string
+  ring: string
+  shadow: string
+  confetti: string[]
+}> = {
+  puntual: {
+    label: 'Primeros en llegar',
+    short: 'Puntuales',
+    title: 'Ranking dorado',
+    subtitle: 'Solo cuenta el escaner de oficina y entradas puntuales.',
+    gif: '/icons-web/ranking.gif',
+    primary: 'from-amber-300 via-yellow-400 to-orange-500',
+    soft: 'from-amber-50 via-yellow-50 to-orange-50',
+    ring: 'ring-amber-200',
+    shadow: 'shadow-amber-500/20',
+    confetti: ['#f59e0b', '#facc15', '#fb923c', '#fde68a', '#f97316'],
   },
-  2: {
-    label: 'Segundo lugar',
-    gradient: 'from-slate-100 via-slate-300 to-slate-500',
-    glow: 'shadow-slate-400/25',
-    height: 'md:min-h-[310px]',
-    icon: 'medal',
-  },
-  3: {
-    label: 'Tercer lugar',
-    gradient: 'from-orange-200 via-orange-500 to-amber-800',
-    glow: 'shadow-orange-500/25',
-    height: 'md:min-h-[290px]',
-    icon: 'medal',
+  tardanza: {
+    label: 'Llegadas tarde',
+    short: 'Tardanzas',
+    title: 'Ranking rojo',
+    subtitle: 'Muestra a quienes llegaron tarde por escaner de oficina.',
+    gif: '/icons-web/ranking-tardanza.gif',
+    primary: 'from-red-500 via-rose-500 to-orange-600',
+    soft: 'from-red-50 via-rose-50 to-orange-50',
+    ring: 'ring-red-200',
+    shadow: 'shadow-red-500/20',
+    confetti: ['#dc2626', '#fb7185', '#f97316', '#fecaca', '#991b1b'],
   },
 }
 
-const particles = Array.from({ length: 26 }, (_, index) => ({
+const confetti = Array.from({ length: 36 }, (_, index) => ({
   id: index,
-  left: `${(index * 37) % 100}%`,
-  top: `${(index * 53) % 100}%`,
-  delay: (index % 9) * 0.22,
-  duration: 4 + (index % 5) * 0.55,
-  size: 5 + (index % 4) * 3,
+  left: `${(index * 31) % 100}%`,
+  delay: (index % 10) * 0.16,
+  duration: 3.8 + (index % 7) * 0.25,
+  colorIndex: index % 5,
 }))
 
 function initials(name: string) {
@@ -85,58 +100,57 @@ function positionLabel(position: number) {
   return `${position}to`
 }
 
-function PodiumCard({ item, index }: { item: RankingItem; index: number }) {
-  const meta = podiumMeta[item.puesto]
-  const Icon = meta.icon === 'crown' ? Crown : Medal
+function PodiumCard({ item, index, type }: { item: RankingItem; index: number; type: RankingType }) {
+  const cfg = typeConfig[type]
+  const isWinner = item.puesto === 1
+  const Icon = isWinner ? Crown : Medal
+  const scale = isWinner ? 'lg:scale-110 lg:-translate-y-5' : ''
 
   return (
     <motion.article
       layout
-      initial={{ opacity: 0, y: 44, rotateX: 12, scale: 0.88 }}
-      animate={{ opacity: 1, y: 0, rotateX: 0, scale: 1 }}
-      whileHover={{ y: -8, rotate: item.puesto === 1 ? 0 : item.puesto === 2 ? -1.5 : 1.5 }}
+      initial={{ opacity: 0, y: 56, rotate: index === 0 ? -3 : 3, scale: 0.86 }}
+      animate={{ opacity: 1, y: 0, rotate: 0, scale: 1 }}
+      whileHover={{ y: -10, rotate: isWinner ? 0 : index === 0 ? -1.5 : 1.5 }}
       transition={{ delay: 0.08 + index * 0.08, type: 'spring', stiffness: 210, damping: 20 }}
-      className={`group relative overflow-hidden rounded-[2.2rem] bg-gradient-to-br ${meta.gradient} p-[2px] shadow-2xl ${meta.glow} ${meta.height}`}
+      className={`relative ${scale}`}
     >
-      <motion.div
-        className="absolute inset-[-30%] bg-[radial-gradient(circle,rgba(255,255,255,0.85),transparent_34%)] opacity-0 blur-2xl group-hover:opacity-70"
-        animate={{ x: ['-30%', '30%', '-30%'], y: ['-20%', '20%', '-20%'] }}
-        transition={{ duration: 6, repeat: Infinity, ease: 'easeInOut' }}
-      />
-      <div className="relative flex h-full flex-col items-center overflow-hidden rounded-[2rem] bg-white/86 px-5 py-6 text-center shadow-inner backdrop-blur-xl">
-        <div className="absolute left-5 top-5 rounded-full bg-white/70 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-slate-500">
-          {meta.label}
-        </div>
+      <div className={`absolute inset-x-5 -bottom-4 h-12 rounded-full bg-gradient-to-r ${cfg.primary} blur-2xl opacity-45`} />
+      <div className={`relative overflow-hidden rounded-[2.25rem] border-2 border-white bg-gradient-to-br ${cfg.soft} p-4 shadow-2xl ${cfg.shadow} ring-1 ${cfg.ring}`}>
         <motion.div
-          animate={{ rotate: item.puesto === 1 ? [0, -7, 7, 0] : [0, 4, -4, 0] }}
-          transition={{ duration: item.puesto === 1 ? 2.6 : 3.4, repeat: Infinity, ease: 'easeInOut' }}
-          className="absolute right-5 top-5 text-slate-950/20"
-        >
-          <Icon size={item.puesto === 1 ? 52 : 42} />
-        </motion.div>
-
-        <motion.div
-          animate={{ y: item.puesto === 1 ? [0, -8, 0] : [0, -4, 0] }}
-          transition={{ duration: item.puesto === 1 ? 2.7 : 3.1, repeat: Infinity, ease: 'easeInOut' }}
-          className={`mt-10 flex items-center justify-center rounded-full bg-gradient-to-br ${meta.gradient} p-1 shadow-xl ${meta.glow}`}
-        >
-          <div className="flex h-24 w-24 items-center justify-center overflow-hidden rounded-full border-4 border-white bg-slate-100 sm:h-28 sm:w-28">
-            {item.foto_url ? (
-              <img src={item.foto_url} alt={item.nombres_completos} className="h-full w-full object-cover" />
-            ) : (
-              <span className="text-2xl font-black">{initials(item.nombres_completos)}</span>
-            )}
+          className={`absolute -right-12 -top-12 h-32 w-32 rounded-full bg-gradient-to-br ${cfg.primary} opacity-25 blur-xl`}
+          animate={{ scale: [1, 1.25, 1], rotate: [0, 90, 0] }}
+          transition={{ duration: 4.2, repeat: Infinity, ease: 'easeInOut' }}
+        />
+        <div className="relative flex min-h-[330px] flex-col items-center rounded-[1.75rem] bg-white/88 p-5 text-center ring-1 ring-white/80">
+          <div className={`absolute left-4 top-4 rounded-full bg-gradient-to-r ${cfg.primary} px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-white shadow-lg`}>
+            {positionLabel(item.puesto)}
           </div>
-        </motion.div>
+          <motion.div
+            animate={{ rotate: [0, -8, 8, 0], scale: [1, 1.08, 1] }}
+            transition={{ duration: isWinner ? 2.4 : 3.2, repeat: Infinity, ease: 'easeInOut' }}
+            className="absolute right-4 top-4 text-slate-900/20"
+          >
+            <Icon size={isWinner ? 58 : 44} />
+          </motion.div>
 
-        <div className="mt-5 inline-flex items-center gap-2 rounded-full bg-slate-950 px-4 py-2 text-sm font-black text-white shadow-lg">
-          <Sparkles size={15} />
-          {positionLabel(item.puesto)} lugar
-        </div>
-        <h2 className="mt-5 line-clamp-2 text-xl font-black leading-tight text-slate-950">{item.nombres_completos}</h2>
-        <p className="mt-2 text-[11px] font-black uppercase tracking-[0.16em] text-slate-500">{item.area || 'Sin area'}</p>
-        <div className="mt-auto pt-6">
-          <div className="inline-flex items-center gap-2 rounded-2xl bg-white px-4 py-2 text-sm font-black text-slate-950 shadow-sm ring-1 ring-slate-200">
+          <motion.div
+            animate={{ y: [0, -10, 0], rotate: isWinner ? [0, -2, 2, 0] : [0, 0, 0] }}
+            transition={{ duration: isWinner ? 2.2 : 3, repeat: Infinity, ease: 'easeInOut' }}
+            className={`mt-9 rounded-full bg-gradient-to-br ${cfg.primary} p-1.5 shadow-xl`}
+          >
+            <div className="flex h-28 w-28 items-center justify-center overflow-hidden rounded-full border-4 border-white bg-slate-100">
+              {item.foto_url ? (
+                <img src={item.foto_url} alt={item.nombres_completos} className="h-full w-full object-cover" />
+              ) : (
+                <span className="text-2xl font-black text-slate-700">{initials(item.nombres_completos)}</span>
+              )}
+            </div>
+          </motion.div>
+
+          <h2 className="mt-5 line-clamp-2 text-xl font-black leading-tight text-slate-950">{item.nombres_completos}</h2>
+          <p className="mt-2 text-[11px] font-black uppercase tracking-[0.15em] text-slate-500">{item.area || 'Sin area'}</p>
+          <div className={`mt-auto flex items-center gap-2 rounded-2xl bg-gradient-to-r ${cfg.primary} px-4 py-2 text-sm font-black text-white shadow-lg ${cfg.shadow}`}>
             <Clock3 size={15} />
             {timeLabel(item.hora_ingreso)}
           </div>
@@ -146,51 +160,48 @@ function PodiumCard({ item, index }: { item: RankingItem; index: number }) {
   )
 }
 
-function RunnerRow({ item, index, total }: { item: RankingItem; index: number; total: number }) {
-  const percentage = Math.max(18, 100 - index * 9)
+function RunnerRow({ item, index, type }: { item: RankingItem; index: number; type: RankingType }) {
+  const cfg = typeConfig[type]
+  const width = Math.max(28, 100 - index * 8)
 
   return (
     <motion.article
       layout
-      initial={{ opacity: 0, x: -26, scale: 0.98 }}
+      initial={{ opacity: 0, x: -26, scale: 0.96 }}
       animate={{ opacity: 1, x: 0, scale: 1 }}
-      exit={{ opacity: 0, x: 18 }}
+      exit={{ opacity: 0, x: 26 }}
       whileHover={{ x: 8, scale: 1.01 }}
-      transition={{ delay: 0.2 + index * 0.045, type: 'spring', stiffness: 260, damping: 24 }}
-      className="group relative overflow-hidden rounded-[1.6rem] border border-white/70 bg-white/82 p-3 shadow-sm backdrop-blur-xl"
+      transition={{ delay: 0.18 + index * 0.045, type: 'spring', stiffness: 260, damping: 24 }}
+      className={`group relative overflow-hidden rounded-[1.8rem] border border-white bg-white p-3 shadow-lg ${cfg.shadow}`}
     >
-      <motion.div
-        className="absolute inset-y-0 left-0 w-1 rounded-full bg-gradient-to-b from-emerald-400 via-cyan-400 to-blue-500"
-        animate={{ opacity: [0.45, 1, 0.45] }}
-        transition={{ duration: 2.5, repeat: Infinity, delay: index * 0.1 }}
-      />
-      <div className="relative flex items-center gap-4">
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-slate-950 text-sm font-black text-white shadow-lg shadow-slate-950/10">
+      <div className={`absolute inset-y-0 left-0 w-2 bg-gradient-to-b ${cfg.primary}`} />
+      <div className="relative flex items-center gap-3 sm:gap-4">
+        <div className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br ${cfg.primary} text-sm font-black text-white shadow-lg ${cfg.shadow}`}>
           #{item.puesto}
         </div>
-        <div className="h-14 w-14 shrink-0 overflow-hidden rounded-full bg-slate-100 ring-4 ring-white">
+        <div className="h-14 w-14 shrink-0 overflow-hidden rounded-full bg-slate-100 ring-4 ring-slate-50">
           {item.foto_url ? (
             <img src={item.foto_url} alt={item.nombres_completos} className="h-full w-full object-cover" />
           ) : (
-            <div className="flex h-full w-full items-center justify-center text-sm font-black">{initials(item.nombres_completos)}</div>
+            <div className="flex h-full w-full items-center justify-center text-sm font-black text-slate-700">{initials(item.nombres_completos)}</div>
           )}
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2">
             <p className="truncate font-black text-slate-950">{item.nombres_completos}</p>
-            {index === 0 && total > 6 ? <Zap className="shrink-0 text-amber-500" size={15} /> : null}
+            {index === 0 ? <Zap className="shrink-0 text-amber-500" size={15} /> : null}
           </div>
           <p className="truncate text-xs font-bold text-slate-400">{item.area || 'Sin area'}</p>
           <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-100">
             <motion.div
               initial={{ width: 0 }}
-              animate={{ width: `${percentage}%` }}
+              animate={{ width: `${width}%` }}
               transition={{ delay: 0.3 + index * 0.04, duration: 0.8, ease: 'easeOut' }}
-              className="h-full rounded-full bg-gradient-to-r from-emerald-400 via-cyan-400 to-blue-500"
+              className={`h-full rounded-full bg-gradient-to-r ${cfg.primary}`}
             />
           </div>
         </div>
-        <div className="rounded-2xl bg-slate-100 px-3 py-2 text-xs font-black text-slate-700 group-hover:bg-slate-950 group-hover:text-white">
+        <div className={`rounded-2xl bg-gradient-to-r ${cfg.primary} px-3 py-2 text-xs font-black text-white shadow-md transition group-hover:scale-105`}>
           {timeLabel(item.hora_ingreso)}
         </div>
       </div>
@@ -201,24 +212,25 @@ function RunnerRow({ item, index, total }: { item: RankingItem; index: number; t
 export default function RankingPage() {
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [backHref, setBackHref] = useState('/escaner')
+  const [type, setType] = useState<RankingType>('puntual')
   const [ranking, setRanking] = useState<RankingItem[]>([])
   const [loading, setLoading] = useState(true)
   const [refreshing, setRefreshing] = useState(false)
   const [lastUpdated, setLastUpdated] = useState<string | null>(null)
 
+  const cfg = typeConfig[type]
   const podium = useMemo(() => ranking.slice(0, 3), [ranking])
   const podiumDisplay = useMemo(() => {
     const byPosition = new Map(podium.map((item) => [item.puesto, item]))
     return [byPosition.get(2), byPosition.get(1), byPosition.get(3)].filter(Boolean) as RankingItem[]
   }, [podium])
   const rest = useMemo(() => ranking.slice(3), [ranking])
-  const leader = ranking[0]
 
-  const loadRanking = async (targetDate = date, silent = false) => {
+  const loadRanking = async (targetDate = date, targetType = type, silent = false) => {
     if (silent) setRefreshing(true)
     else setLoading(true)
     try {
-      const response = await fetch(`/api/ranking?date=${encodeURIComponent(targetDate)}`, { cache: 'no-store' })
+      const response = await fetch(`/api/ranking?date=${encodeURIComponent(targetDate)}&type=${targetType}`, { cache: 'no-store' })
       const payload = await response.json()
       if (!response.ok) throw new Error(payload.error || 'No se pudo cargar el ranking')
       setRanking(payload.ranking ?? [])
@@ -234,55 +246,56 @@ export default function RankingPage() {
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const dateParam = params.get('date')
+    const typeParam = params.get('type')
     if (dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)) setDate(dateParam)
+    if (typeParam === 'tardanza') setType('tardanza')
     if (params.get('from') === 'admin') setBackHref('/')
   }, [])
 
   useEffect(() => {
-    void loadRanking(date)
-    const id = window.setInterval(() => void loadRanking(date, true), 15000)
+    void loadRanking(date, type)
+    const id = window.setInterval(() => void loadRanking(date, type, true), 15000)
     return () => window.clearInterval(id)
-  }, [date])
+  }, [date, type])
 
   return (
-    <main className="relative min-h-screen overflow-hidden bg-[#07111f] px-4 py-5 font-sans text-white sm:px-6">
+    <main className={`relative min-h-screen overflow-hidden bg-gradient-to-br ${cfg.soft} px-4 py-5 font-sans text-slate-950 sm:px-6`}>
       <div className="pointer-events-none fixed inset-0">
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(45,212,191,0.34),transparent_34%),radial-gradient(circle_at_90%_20%,rgba(251,191,36,0.28),transparent_28%),linear-gradient(135deg,#07111f_0%,#10233b_46%,#18290f_100%)]" />
-        <div className="absolute inset-0 opacity-[0.08] [background-image:linear-gradient(rgba(255,255,255,0.7)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.7)_1px,transparent_1px)] [background-size:42px_42px]" />
-        {particles.map((particle) => (
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_15%_12%,rgba(255,255,255,0.9),transparent_24%),radial-gradient(circle_at_80%_8%,rgba(255,255,255,0.7),transparent_18%)]" />
+        {confetti.map((item) => (
           <motion.span
-            key={particle.id}
-            className="absolute rounded-full bg-white/70"
-            style={{ left: particle.left, top: particle.top, width: particle.size, height: particle.size }}
-            animate={{ y: [0, -28, 0], opacity: [0.08, 0.8, 0.08], scale: [0.8, 1.25, 0.8] }}
-            transition={{ duration: particle.duration, repeat: Infinity, delay: particle.delay, ease: 'easeInOut' }}
+            key={item.id}
+            className="absolute top-[-20px] h-3 w-2 rounded-full"
+            style={{ left: item.left, backgroundColor: cfg.confetti[item.colorIndex] }}
+            animate={{ y: ['0vh', '110vh'], rotate: [0, 240, 520], opacity: [0, 1, 0] }}
+            transition={{ duration: item.duration, repeat: Infinity, delay: item.delay, ease: 'linear' }}
           />
         ))}
       </div>
 
       <section className="relative mx-auto flex min-h-[calc(100vh-40px)] w-full max-w-7xl flex-col">
         <header className="flex flex-wrap items-center justify-between gap-3">
-          <Link href={backHref} className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-white/15 bg-white/10 text-white shadow-lg backdrop-blur-xl transition hover:bg-white/20">
+          <Link href={backHref} className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-slate-200 bg-white text-slate-900 shadow-lg transition hover:-translate-y-0.5">
             <ArrowLeft size={19} />
           </Link>
 
           <div className="flex flex-wrap items-center justify-end gap-2">
-            <div className="inline-flex items-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-3 py-2 text-xs font-black text-white/80 backdrop-blur-xl">
-              <ShieldCheck size={15} className="text-emerald-300" />
+            <div className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 shadow-sm">
+              <ShieldCheck size={15} className="text-emerald-500" />
               Solo oficina
             </div>
-            <label className="inline-flex items-center gap-2 rounded-2xl border border-white/15 bg-white/10 px-3 py-2 text-xs font-black text-white/80 backdrop-blur-xl">
+            <label className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 shadow-sm">
               <CalendarDays size={15} />
               <input
                 type="date"
                 value={date}
                 onChange={(event) => setDate(event.target.value)}
-                className="bg-transparent text-white outline-none [color-scheme:dark]"
+                className="bg-transparent text-slate-900 outline-none"
               />
             </label>
             <button
-              onClick={() => void loadRanking(date)}
-              className="inline-flex h-12 items-center gap-2 rounded-2xl bg-white px-4 text-xs font-black text-slate-950 shadow-xl shadow-black/20 transition hover:scale-[1.03]"
+              onClick={() => void loadRanking(date, type)}
+              className={`inline-flex h-12 items-center gap-2 rounded-2xl bg-gradient-to-r ${cfg.primary} px-4 text-xs font-black text-white shadow-xl transition hover:scale-[1.03]`}
             >
               {loading || refreshing ? <Loader2 size={17} className="animate-spin" /> : <RefreshCw size={17} />}
               Actualizar
@@ -292,54 +305,45 @@ export default function RankingPage() {
 
         <motion.div initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }} className="grid gap-6 pt-8 lg:grid-cols-[1.05fr_0.95fr] lg:items-end">
           <div>
-            <motion.div
-              animate={{ boxShadow: ['0 0 0 0 rgba(45,212,191,0.2)', '0 0 0 10px rgba(45,212,191,0)', '0 0 0 0 rgba(45,212,191,0)'] }}
-              transition={{ duration: 2.2, repeat: Infinity }}
-              className="inline-flex items-center gap-2 rounded-full border border-emerald-300/20 bg-emerald-300/10 px-4 py-2 text-[11px] font-black uppercase tracking-[0.26em] text-emerald-200 backdrop-blur-xl"
-            >
-              <span className="h-2 w-2 rounded-full bg-emerald-300" />
-              Ranking en vivo
-            </motion.div>
-            <h1 className="mt-5 max-w-3xl text-5xl font-black leading-[0.9] tracking-tight sm:text-7xl lg:text-8xl">
-              Top 10 primeros en llegar
+            <div className="mb-4 inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-[11px] font-black uppercase tracking-[0.22em] text-slate-500 shadow-sm ring-1 ring-slate-200">
+              <Sparkles size={14} className={type === 'puntual' ? 'text-amber-500' : 'text-red-500'} />
+              {type === 'puntual' ? 'Ranking de puntuales' : 'Ranking de tardanzas'}
+            </div>
+            <h1 className="mt-7 max-w-4xl text-5xl font-black leading-[0.9] tracking-tight sm:text-7xl lg:text-8xl">
+              {cfg.title}
             </h1>
-            <p className="mt-5 max-w-2xl text-sm font-semibold leading-6 text-white/62 sm:text-base">
-              Ranking animado del escaner de oficina. Excluye obra, externo, turno nocturno e inasistencias para que el podio sea limpio.
-            </p>
+            <p className="mt-5 max-w-2xl text-sm font-semibold leading-6 text-slate-600 sm:text-base">{cfg.subtitle}</p>
           </div>
 
           <motion.div
             initial={{ opacity: 0, scale: 0.94 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ delay: 0.15, type: 'spring', stiffness: 180, damping: 22 }}
-            className="overflow-hidden rounded-[2rem] border border-white/15 bg-white/10 p-5 shadow-2xl shadow-black/20 backdrop-blur-xl"
+            className="overflow-hidden rounded-[2rem] border border-white bg-white p-5 shadow-2xl shadow-slate-900/10"
           >
             <div className="flex items-center justify-between gap-4">
               <div>
-                <p className="text-[11px] font-black uppercase tracking-[0.24em] text-white/45">
+                <p className="text-[11px] font-black uppercase tracking-[0.24em] text-slate-400">
                   {format(new Date(`${date}T12:00:00`), "EEEE d 'de' MMMM", { locale: es })}
                 </p>
                 <p className="mt-2 text-3xl font-black">{ranking.length}/10 lugares</p>
+                <p className="mt-1 text-xs font-bold text-slate-400">{lastUpdated ? `Actualizado ${lastUpdated}` : 'Sin actualizar'}</p>
               </div>
-              <motion.div
-                animate={{ rotate: [0, -8, 8, 0], scale: [1, 1.08, 1] }}
-                transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
-                className="flex h-16 w-16 items-center justify-center rounded-3xl bg-gradient-to-br from-yellow-300 to-orange-500 text-slate-950 shadow-xl shadow-orange-500/20"
-              >
-                <Trophy size={34} />
-              </motion.div>
+              <motion.img
+                src={cfg.gif}
+                alt=""
+                className="h-20 w-20 rounded-3xl bg-slate-50 object-contain p-2 shadow-inner"
+                animate={{ rotate: [0, -4, 4, 0], scale: [1, 1.06, 1] }}
+                transition={{ duration: 2.8, repeat: Infinity, ease: 'easeInOut' }}
+              />
             </div>
-            <div className="mt-5 h-3 overflow-hidden rounded-full bg-white/10">
+            <div className="mt-5 h-4 overflow-hidden rounded-full bg-slate-100">
               <motion.div
                 initial={{ width: 0 }}
                 animate={{ width: `${Math.min(100, ranking.length * 10)}%` }}
                 transition={{ duration: 0.8, ease: 'easeOut' }}
-                className="h-full rounded-full bg-gradient-to-r from-emerald-300 via-cyan-300 to-yellow-300"
+                className={`h-full rounded-full bg-gradient-to-r ${cfg.primary}`}
               />
-            </div>
-            <div className="mt-4 flex items-center justify-between text-xs font-bold text-white/50">
-              <span>{leader ? `Lider: ${leader.nombres_completos}` : 'Esperando marcaciones'}</span>
-              <span>{lastUpdated ? `Act. ${lastUpdated}` : 'Sin actualizar'}</span>
             </div>
           </motion.div>
         </motion.div>
@@ -347,8 +351,8 @@ export default function RankingPage() {
         {loading && !ranking.length ? (
           <div className="flex flex-1 items-center justify-center py-24">
             <div className="text-center">
-              <Loader2 className="mx-auto animate-spin text-emerald-200" size={42} />
-              <p className="mt-4 text-sm font-black uppercase tracking-[0.2em] text-white/45">Cargando ranking</p>
+              <Loader2 className="mx-auto animate-spin text-slate-500" size={42} />
+              <p className="mt-4 text-sm font-black uppercase tracking-[0.2em] text-slate-400">Cargando ranking</p>
             </div>
           </div>
         ) : (
@@ -356,36 +360,47 @@ export default function RankingPage() {
             <div className="mt-10 grid gap-4 md:grid-cols-3 md:items-end">
               <AnimatePresence mode="popLayout">
                 {podiumDisplay.map((item, index) => (
-                  <PodiumCard key={item.dni} item={item} index={index} />
+                  <PodiumCard key={item.dni} item={item} index={index} type={type} />
                 ))}
               </AnimatePresence>
             </div>
 
             <div className="mt-7 grid gap-5 lg:grid-cols-[1fr_360px]">
-              <div className="grid gap-3">
+              <section className="rounded-[2.25rem] border border-white bg-white/65 p-4 shadow-xl shadow-slate-900/5 backdrop-blur">
+                <div className="mb-4 flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-[10px] font-black uppercase tracking-[0.22em] text-slate-400">Lista separada</p>
+                    <h2 className="text-xl font-black text-slate-950">{type === 'puntual' ? 'Puntuales en dorado' : 'Tardanzas en rojo'}</h2>
+                  </div>
+                  <div className={`rounded-2xl bg-gradient-to-r ${cfg.primary} px-4 py-2 text-xs font-black text-white shadow-lg ${cfg.shadow}`}>
+                    {rest.length} mas
+                  </div>
+                </div>
+                <div className="grid gap-3">
                 <AnimatePresence mode="popLayout">
                   {rest.map((item, index) => (
-                    <RunnerRow key={item.dni} item={item} index={index} total={rest.length} />
+                    <RunnerRow key={item.dni} item={item} index={index} type={type} />
                   ))}
                 </AnimatePresence>
-              </div>
+                </div>
+              </section>
 
-              <aside className="relative overflow-hidden rounded-[2rem] border border-white/15 bg-white/10 p-5 shadow-2xl shadow-black/10 backdrop-blur-xl">
+              <aside className="relative overflow-hidden rounded-[2rem] border border-white bg-white p-5 shadow-2xl shadow-slate-900/10">
                 <motion.div
-                  className="absolute right-[-60px] top-[-60px] h-36 w-36 rounded-full bg-emerald-300/25 blur-2xl"
-                  animate={{ scale: [1, 1.28, 1], opacity: [0.35, 0.8, 0.35] }}
+                  className={`absolute right-[-60px] top-[-60px] h-36 w-36 rounded-full bg-gradient-to-br ${cfg.primary} opacity-20 blur-2xl`}
+                  animate={{ scale: [1, 1.28, 1], opacity: [0.2, 0.48, 0.2] }}
                   transition={{ duration: 3.6, repeat: Infinity }}
                 />
                 <div className="relative">
-                  <div className="inline-flex items-center gap-2 rounded-full bg-white/10 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-white/50">
-                    <Star size={13} className="text-yellow-300" />
+                  <div className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-[10px] font-black uppercase tracking-[0.22em] text-slate-500">
+                    <Star size={13} className="text-yellow-500" />
                     Reglas
                   </div>
-                  <h2 className="mt-4 text-2xl font-black">Ranking limpio</h2>
-                  <div className="mt-5 grid gap-3 text-sm font-semibold text-white/62">
-                    <p className="rounded-2xl bg-white/8 p-4">Cuenta solo ingresos hechos desde el escaner de oficina.</p>
-                    <p className="rounded-2xl bg-white/8 p-4">Si un trabajador marca varias veces, solo se toma su primera entrada.</p>
-                    <p className="rounded-2xl bg-white/8 p-4">Se actualiza automaticamente cada 15 segundos sin refrescar la pagina.</p>
+                  <h2 className="mt-4 text-2xl font-black">{cfg.label}</h2>
+                  <div className="mt-5 grid gap-3 text-sm font-semibold text-slate-600">
+                    <p className="rounded-2xl bg-slate-50 p-4">Cuenta solo marcaciones realizadas desde el escaner de oficina.</p>
+                    <p className="rounded-2xl bg-slate-50 p-4">Si una persona marca varias veces, se usa su primera entrada del dia.</p>
+                    <p className="rounded-2xl bg-slate-50 p-4">El ranking se actualiza automaticamente cada 15 segundos.</p>
                   </div>
                 </div>
               </aside>
@@ -395,10 +410,10 @@ export default function RankingPage() {
               <motion.div
                 initial={{ opacity: 0, y: 24 }}
                 animate={{ opacity: 1, y: 0 }}
-                className="mt-12 rounded-[2rem] border border-dashed border-white/20 bg-white/10 p-10 text-center backdrop-blur-xl"
+                className="mt-12 rounded-[2rem] border border-dashed border-slate-300 bg-white p-10 text-center shadow-sm"
               >
-                <Trophy className="mx-auto text-white/25" size={48} />
-                <p className="mt-4 text-xl font-black">Aun no hay marcaciones de oficina para este dia.</p>
+                <Trophy className="mx-auto text-slate-300" size={48} />
+                <p className="mt-4 text-xl font-black">No hay registros para este ranking.</p>
               </motion.div>
             )}
           </>
