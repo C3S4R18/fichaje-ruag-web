@@ -229,13 +229,40 @@ function getInitials(name: string) {
 }
 
 function calcHoras(ingreso: string, salida: string | null): string {
-  if (!salida) return '—'
+  const mins = calcMinutos(ingreso, salida)
+  if (mins <= 0) return '—'
+  const h = Math.floor(mins / 60), m = mins % 60
+  return h > 0 ? `${h}h ${m}m` : `${m}m`
+}
+
+function calcMinutos(ingreso: string, salida: string | null): number {
+  if (!salida) return 0
   try {
     const mins = Math.floor((new Date(salida).getTime() - new Date(ingreso).getTime()) / 60000)
-    if (mins <= 0) return '—'
-    const h = Math.floor(mins / 60), m = mins % 60
-    return h > 0 ? `${h}h ${m}m` : `${m}m`
-  } catch { return '—' }
+    return mins > 0 ? mins : 0
+  } catch { return 0 }
+}
+
+function formatMinutos(total: number) {
+  if (total <= 0) return '0h 0m'
+  const h = Math.floor(total / 60), m = total % 60
+  return `${h}h ${m}m`
+}
+
+function weekRangeFor(date: Date) {
+  const start = new Date(date)
+  const day = start.getDay()
+  const diff = day === 0 ? -6 : 1 - day
+  start.setHours(0, 0, 0, 0)
+  start.setDate(start.getDate() + diff)
+  const end = addDays(start, 6)
+  return { from: format(start, 'yyyy-MM-dd'), to: format(end, 'yyyy-MM-dd') }
+}
+
+function formatRecordTime(record: AsistenciaRecord, value?: string | null) {
+  if (record.estado_ingreso === 'INASISTENCIA') return '—'
+  if (record.estado_ingreso === 'DESCANSO MEDICO') return 'DESCANSO'
+  return value ? new Date(value).toLocaleTimeString('es-PE', { timeZone: LIMA_TZ, hour: '2-digit', minute: '2-digit' }) : '—'
 }
 
 // ─── Nota parser ──────────────────────────────────────────────────────────────
@@ -434,6 +461,14 @@ export default function AdminDashboard() {
   const [exportHasta, setExportHasta]     = useState(format(new Date(), 'yyyy-MM-dd'))
   const [exportando, setExportando]       = useState(false)
   const [tipoExport, setTipoExport]       = useState<'dia' | 'rango'>('dia')
+  const initialPreviewRange = useMemo(() => weekRangeFor(new Date()), [])
+  const [showPreview, setShowPreview]     = useState(false)
+  const [previewDesde, setPreviewDesde]   = useState(initialPreviewRange.from)
+  const [previewHasta, setPreviewHasta]   = useState(initialPreviewRange.to)
+  const [previewArea, setPreviewArea]     = useState('TODAS')
+  const [previewBusqueda, setPreviewBusqueda] = useState('')
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewData, setPreviewData]     = useState<AsistenciaRecord[]>([])
   const [metricasLoading, setMetricasLoading] = useState(false)
   const [metricasData, setMetricasData] = useState<MetricasData | null>(null)
   const [vacacionesPendientes, setVacacionesPendientes] = useState(0)
@@ -655,6 +690,41 @@ export default function AdminDashboard() {
     return [...records, ...synthetic]
   }
 
+  const openPreviewModal = () => {
+    const range = weekRangeFor(fechaActual)
+    setPreviewDesde(range.from)
+    setPreviewHasta(range.to)
+    setPreviewArea(filtroArea)
+    setPreviewBusqueda(busqueda)
+    setShowPreview(true)
+  }
+
+  useEffect(() => {
+    if (!showPreview) return
+    if (!previewDesde || !previewHasta || previewDesde > previewHasta) {
+      setPreviewData([])
+      return
+    }
+
+    let cancelled = false
+    setPreviewLoading(true)
+    loadRangeDataset(previewDesde, previewHasta)
+      .then((data) => {
+        if (!cancelled) setPreviewData(sortRecordsForRange(data))
+      })
+      .catch((error) => {
+        if (!cancelled) {
+          setPreviewData([])
+          toast.error(error?.message || 'No se pudo cargar la vista previa')
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setPreviewLoading(false)
+      })
+
+    return () => { cancelled = true }
+  }, [showPreview, previewDesde, previewHasta])
+
   useEffect(() => {
     fetchData(fechaActual)
     if (!isToday(fechaActual)) return
@@ -768,6 +838,18 @@ export default function AdminDashboard() {
         (filtroEstado === 'TODOS' || a.estado_ingreso === filtroEstado)
       ))
   }, [asistencias, busqueda, filtroArea, filtroEstado])
+
+  const previewAreas = useMemo(() => ['TODAS', ...Array.from(new Set([previewArea, ...previewData.map(a => a.area)].filter(Boolean))).filter(a => a !== 'TODAS').sort()], [previewData, previewArea])
+  const previewFiltradas = useMemo(() => {
+    const q = previewBusqueda.toLowerCase().trim()
+    return sortRecordsForRange(previewData.filter(a =>
+      (!q || a.nombres_completos?.toLowerCase().includes(q) || a.dni?.includes(q)) &&
+      (previewArea === 'TODAS' || a.area === previewArea)
+    ))
+  }, [previewData, previewArea, previewBusqueda])
+  const previewConSalida = useMemo(() => previewFiltradas.filter(a => a.hora_salida && a.estado_ingreso !== 'INASISTENCIA' && a.estado_ingreso !== 'DESCANSO MEDICO').length, [previewFiltradas])
+  const previewTotalMinutos = useMemo(() => previewFiltradas.reduce((sum, item) => sum + calcMinutos(item.hora_ingreso, item.hora_salida), 0), [previewFiltradas])
+  const previewTrabajadores = useMemo(() => new Set(previewFiltradas.map(a => a.dni)).size, [previewFiltradas])
 
   const conGPS = useMemo(() => filtradas.map(a => {
     const d = extraerDetalleNota(a.notas)
@@ -1247,6 +1329,10 @@ export default function AdminDashboard() {
                   <ChevronRight size={11} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none rotate-90" />
                 </div>
               ))}
+              <button onClick={openPreviewModal}
+                className="mt-1 flex w-full items-center justify-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2.5 text-[11px] font-black text-blue-700 transition-all hover:bg-blue-100 active:scale-[0.99] dark:border-blue-500/25 dark:bg-blue-500/10 dark:text-blue-300 dark:hover:bg-blue-500/20">
+                <CalendarDays size={13} /> VISTA PREVIA POR RANGO
+              </button>
             </div>
           </div>
 
@@ -1545,6 +1631,151 @@ export default function AdminDashboard() {
                   className="w-full mt-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black py-3 rounded-xl flex justify-center items-center gap-2 transition-all active:scale-95 disabled:opacity-50 text-sm">
                   {exportando ? <Loader2 className="animate-spin" size={16} /> : <><Download size={14} /> DESCARGAR</>}
                 </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showPreview && (
+          <motion.div className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+            style={{ background: 'rgba(15,23,42,0.66)', backdropFilter: 'blur(12px)' }}
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            onClick={() => setShowPreview(false)}>
+            <motion.div className="w-full max-w-6xl overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900"
+              initial={{ scale: 0.94, y: 18 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.94, y: 18 }}
+              transition={{ type: 'spring', stiffness: 360, damping: 30 }}
+              onClick={e => e.stopPropagation()}>
+              <div className="h-1.5 bg-gradient-to-r from-blue-600 via-sky-500 to-emerald-400" />
+              <div className="max-h-[86vh] overflow-y-auto p-5 sm:p-6">
+                <div className="mb-5 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <div className="inline-flex items-center gap-2 rounded-full bg-blue-50 px-3 py-1 text-[11px] font-black uppercase tracking-[0.14em] text-blue-700 dark:bg-blue-500/10 dark:text-blue-300">
+                      <CalendarDays size={12} /> Vista previa de rango
+                    </div>
+                    <h3 className="mt-2 text-2xl font-black text-slate-900 dark:text-white">Entradas, salidas y horas</h3>
+                    <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">Selecciona un intervalo, filtra por area y revisa las horas acumuladas antes de exportar.</p>
+                  </div>
+                  <button onClick={() => setShowPreview(false)} className="self-start rounded-xl border border-slate-200 p-2 text-slate-400 hover:bg-slate-50 dark:border-slate-700 dark:hover:bg-slate-800"><X size={16} /></button>
+                </div>
+
+                <div className="grid gap-3 lg:grid-cols-[1fr_1fr_1.25fr_1.25fr_auto]">
+                  <label className="block">
+                    <span className="mb-1 block text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">Desde</span>
+                    <input type="date" value={previewDesde} onChange={e => setPreviewDesde(e.target.value)}
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-black outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950" />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">Hasta</span>
+                    <input type="date" value={previewHasta} onChange={e => setPreviewHasta(e.target.value)}
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-black outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950" />
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">Area</span>
+                    <select value={previewArea} onChange={e => setPreviewArea(e.target.value)}
+                      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-sm font-black outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950">
+                      {previewAreas.map(area => <option key={area} value={area}>{area === 'TODAS' ? 'Todas las areas' : area}</option>)}
+                    </select>
+                  </label>
+                  <label className="block">
+                    <span className="mb-1 block text-[10px] font-black uppercase tracking-[0.16em] text-slate-400">Buscar</span>
+                    <div className="relative">
+                      <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input value={previewBusqueda} onChange={e => setPreviewBusqueda(e.target.value)} placeholder="Nombre o DNI"
+                        className="w-full rounded-2xl border border-slate-200 bg-slate-50 py-2.5 pl-9 pr-3 text-sm font-bold outline-none focus:border-blue-500 dark:border-slate-700 dark:bg-slate-950" />
+                    </div>
+                  </label>
+                  <div className="flex items-end">
+                    <button onClick={() => {
+                      const range = weekRangeFor(fechaActual)
+                      setPreviewDesde(range.from)
+                      setPreviewHasta(range.to)
+                    }} className="w-full rounded-2xl border border-slate-200 px-3 py-2.5 text-[11px] font-black text-slate-600 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800">
+                      LUN-DOM
+                    </button>
+                  </div>
+                </div>
+
+                <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                  {[
+                    { label: 'Registros', value: previewFiltradas.length, color: 'text-blue-600', sub: `${previewTrabajadores} trabajadores` },
+                    { label: 'Con salida', value: previewConSalida, color: 'text-emerald-600', sub: 'turnos cerrados' },
+                    { label: 'Horas total', value: formatMinutos(previewTotalMinutos), color: 'text-indigo-600', sub: 'del filtro' },
+                    { label: 'Promedio', value: formatMinutos(previewConSalida ? Math.round(previewTotalMinutos / previewConSalida) : 0), color: 'text-sky-600', sub: 'por salida' },
+                    { label: 'Rango', value: dateKeysBetween(previewDesde, previewHasta).length, color: 'text-slate-700 dark:text-slate-200', sub: 'dias' },
+                  ].map(item => (
+                    <div key={item.label} className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/50">
+                      <p className="text-[10px] font-black uppercase tracking-[0.15em] text-slate-400">{item.label}</p>
+                      <p className={`mt-1 text-2xl font-black tabular-nums ${item.color}`}>{item.value}</p>
+                      <p className="mt-0.5 text-[10px] font-bold text-slate-400">{item.sub}</p>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200 dark:border-slate-800">
+                  <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 dark:border-slate-800 dark:bg-slate-950/60">
+                    <p className="text-[11px] font-black uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">Detalle del intervalo</p>
+                    {previewLoading && <span className="inline-flex items-center gap-2 text-[11px] font-black text-blue-600"><Loader2 size={13} className="animate-spin" /> Cargando</span>}
+                  </div>
+                  <div className="max-h-[420px] overflow-auto">
+                    {previewLoading ? (
+                      <div className="flex justify-center py-16"><CustomLoader text="Cargando rango..." /></div>
+                    ) : previewFiltradas.length === 0 ? (
+                      <div className="flex flex-col items-center justify-center gap-2 py-16 text-slate-400">
+                        <Search size={34} />
+                        <p className="text-sm font-black">Sin registros para ese filtro</p>
+                      </div>
+                    ) : (
+                      <table className="min-w-[920px] w-full text-left text-sm">
+                        <thead className="sticky top-0 z-10 bg-slate-100 text-[10px] font-black uppercase tracking-[0.14em] text-slate-500 dark:bg-slate-950 dark:text-slate-400">
+                          <tr>
+                            <th className="px-4 py-3">Fecha</th>
+                            <th className="px-4 py-3">Trabajador</th>
+                            <th className="px-4 py-3">Area</th>
+                            <th className="px-4 py-3 text-center">Entrada</th>
+                            <th className="px-4 py-3 text-center">Salida</th>
+                            <th className="px-4 py-3 text-center">Horas</th>
+                            <th className="px-4 py-3 text-center">Estado</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100 dark:divide-slate-800">
+                          {previewFiltradas.map((item) => {
+                            const horas = calcHoras(item.hora_ingreso, item.hora_salida)
+                            return (
+                              <tr key={item.id} className="bg-white hover:bg-slate-50 dark:bg-slate-900 dark:hover:bg-slate-800/60">
+                                <td className="px-4 py-3 font-black text-slate-600 dark:text-slate-300">
+                                  <span className="capitalize">{format(new Date(`${item.fecha}T12:00:00`), 'EEE d MMM', { locale: es })}</span>
+                                  <p className="font-mono text-[10px] font-bold text-slate-400">{item.fecha}</p>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center gap-3">
+                                    <div className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-full bg-slate-100 text-[11px] font-black text-slate-500 dark:bg-slate-800">
+                                      {item.foto_url ? <img src={item.foto_url} alt="" className="h-full w-full object-cover" /> : getInitials(item.nombres_completos)}
+                                    </div>
+                                    <div className="min-w-0">
+                                      <p className="max-w-[260px] truncate font-black text-slate-900 dark:text-white">{item.nombres_completos}</p>
+                                      <p className="font-mono text-[10px] font-bold text-slate-400">{item.dni}</p>
+                                    </div>
+                                  </div>
+                                </td>
+                                <td className="px-4 py-3 text-xs font-bold text-slate-500 dark:text-slate-400">{item.area || 'SIN AREA'}</td>
+                                <td className="px-4 py-3 text-center font-black tabular-nums text-emerald-600">{formatRecordTime(item, item.hora_ingreso)}</td>
+                                <td className="px-4 py-3 text-center font-black tabular-nums text-slate-700 dark:text-slate-200">{formatRecordTime(item, item.hora_salida)}</td>
+                                <td className="px-4 py-3 text-center font-black tabular-nums text-blue-600">{horas}</td>
+                                <td className="px-4 py-3 text-center">
+                                  <span className={`rounded-full px-2.5 py-1 text-[10px] font-black ${item.estado_ingreso === 'PUNTUAL' ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300' : item.estado_ingreso === 'INASISTENCIA' ? 'bg-orange-50 text-orange-700 dark:bg-orange-500/10 dark:text-orange-300' : item.estado_ingreso === 'DESCANSO MEDICO' ? 'bg-fuchsia-50 text-fuchsia-700 dark:bg-fuchsia-500/10 dark:text-fuchsia-300' : 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300'}`}>
+                                    {item.estado_ingreso}
+                                  </span>
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+                </div>
               </div>
             </motion.div>
           </motion.div>
