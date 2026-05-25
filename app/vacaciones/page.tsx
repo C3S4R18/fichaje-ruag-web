@@ -77,6 +77,8 @@ type MonthDetail = {
   col: MonthCol
   imported: number
   approved: number
+  deducted: number
+  visible: number
   requests: RequestRow[]
 }
 
@@ -215,6 +217,32 @@ function overlapDaysInMonth(item: RequestRow, year: number, month: number) {
   if (overlapStart > overlapEnd) return 0
   return Math.floor((overlapEnd.getTime() - overlapStart.getTime()) / 86400000) + 1
 }
+function isRetroactiveRequest(item: RequestRow) {
+  return item.estado === 'aprobada' && asDate(item.fecha_fin).getTime() < asDate(item.created_at).getTime()
+}
+function visibleImportedDays(imported: number, approved: number, deducted: number) {
+  return Math.max(imported + approved - deducted, 0)
+}
+function buildMonthDetail(row: Balance, col: MonthCol, sourceRequests: RequestRow[]): MonthDetail {
+  const imported = num(row[col.key])
+  const requests = sourceRequests.filter((item) => item.dni === row.dni && overlapsYear(item, row.periodo) && overlapsMonth(item, row.periodo, col.monthIndex))
+  const approved = requests
+    .filter((item) => item.estado === 'aprobada' && !isRetroactiveRequest(item))
+    .reduce((sum, item) => sum + overlapDaysInMonth(item, row.periodo, col.monthIndex), 0)
+  const deducted = requests
+    .filter(isRetroactiveRequest)
+    .reduce((sum, item) => sum + overlapDaysInMonth(item, row.periodo, col.monthIndex), 0)
+  return {
+    row,
+    col,
+    imported,
+    approved,
+    deducted,
+    visible: visibleImportedDays(imported, approved, deducted),
+    requests,
+  }
+}
+const monthDetailKey = (row: Balance, col: MonthCol) => `${row.id}:${String(col.key)}`
 
 const prevStatus = (estado: string) =>
   estado === 'aprobada'
@@ -229,12 +257,16 @@ function MonthModal({
   onAddManual,
   onEditRequest,
   onDeleteRequest,
+  onClearImported,
+  clearingImported,
 }: {
   detail: MonthDetail | null
   onClose: () => void
   onAddManual: (row: Balance, monthIndex: number) => void
   onEditRequest: (row: RequestRow) => void
   onDeleteRequest: (row: RequestRow) => void
+  onClearImported: (row: Balance, col: MonthCol) => void
+  clearingImported: boolean
 }) {
   if (!detail) return null
   return (
@@ -248,18 +280,27 @@ function MonthModal({
           </div>
           <button onClick={onClose} className="rounded-xl border border-slate-200 p-2 dark:border-slate-700"><X size={16} /></button>
         </div>
-        <div className="grid gap-3 border-b border-slate-200 p-5 sm:grid-cols-3 dark:border-slate-800">
+        <div className="grid gap-3 border-b border-slate-200 p-5 sm:grid-cols-4 dark:border-slate-800">
           <div className="rounded-2xl bg-slate-50 p-4 dark:bg-slate-950"><p className="text-[10px] font-black uppercase text-slate-400">Importado</p><p className="mt-2 text-2xl font-black">{detail.imported}</p></div>
           <div className="rounded-2xl bg-blue-50 p-4 dark:bg-blue-500/10"><p className="text-[10px] font-black uppercase text-blue-500">Aprobado</p><p className="mt-2 text-2xl font-black text-blue-700 dark:text-blue-300">{detail.approved}</p></div>
-          <div className="rounded-2xl bg-emerald-50 p-4 dark:bg-emerald-500/10"><p className="text-[10px] font-black uppercase text-emerald-500">Visible</p><p className="mt-2 text-2xl font-black text-emerald-700 dark:text-emerald-300">{detail.imported + detail.approved}</p></div>
+          <div className="rounded-2xl bg-red-50 p-4 dark:bg-red-500/10"><p className="text-[10px] font-black uppercase text-red-500">Resta</p><p className="mt-2 text-2xl font-black text-red-700 dark:text-red-300">{detail.deducted}</p></div>
+          <div className="rounded-2xl bg-emerald-50 p-4 dark:bg-emerald-500/10"><p className="text-[10px] font-black uppercase text-emerald-500">Visible</p><p className="mt-2 text-2xl font-black text-emerald-700 dark:text-emerald-300">{detail.visible}</p></div>
         </div>
-        <div className="border-b border-slate-200 p-5 dark:border-slate-800">
+        <div className="flex flex-wrap items-center gap-2 border-b border-slate-200 p-5 dark:border-slate-800">
           <button
             onClick={() => onAddManual(detail.row, detail.col.monthIndex)}
             className="inline-flex items-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-xs font-black text-white"
           >
             <UserPlus size={14} />
             REGISTRAR VACACIONES MANUAL
+          </button>
+          <button
+            onClick={() => onClearImported(detail.row, detail.col)}
+            disabled={clearingImported || detail.imported <= 0}
+            className="inline-flex items-center gap-2 rounded-xl border border-red-200 px-4 py-2 text-xs font-black text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-500/30 dark:text-red-300 dark:hover:bg-red-500/10"
+          >
+            {clearingImported ? <Loader2 size={14} className="animate-spin" /> : <XCircle size={14} />}
+            IMPORTADO A 0
           </button>
         </div>
         <div className="max-h-[420px] space-y-3 overflow-y-auto p-5">
@@ -271,6 +312,11 @@ function MonthModal({
                 <div>
                   <p className="text-sm font-black text-slate-900 dark:text-white">{longDate(item.fecha_inicio)} al {longDate(item.fecha_fin)}</p>
                   <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Pedido: {item.dias_solicitados} dias - En este mes: {overlapDaysInMonth(item, detail.row.periodo, detail.col.monthIndex)} dias</p>
+                  {isRetroactiveRequest(item) && (
+                    <p className="mt-2 inline-flex rounded-full bg-red-50 px-2.5 py-1 text-[10px] font-black uppercase text-red-600 dark:bg-red-500/10 dark:text-red-300">
+                      Resta al importado
+                    </p>
+                  )}
                 </div>
                 <div className="flex shrink-0 items-center gap-2">
                   <button onClick={() => onEditRequest(item)} className="rounded-lg border border-blue-200 p-1.5 text-blue-600 hover:bg-blue-50 dark:border-blue-500/30 dark:text-blue-300 dark:hover:bg-blue-500/10" title="Editar solicitud">
@@ -539,7 +585,7 @@ function DeleteRequestModal({
             Se eliminaran las vacaciones del <span className="font-black">{longDate(target.fecha_inicio)} al {longDate(target.fecha_fin)}</span> ({target.dias_solicitados} dias). Esta accion no se puede deshacer.
           </p>
           <p className="mt-3 rounded-2xl bg-slate-50 px-4 py-3 text-xs text-slate-500 dark:bg-slate-950 dark:text-slate-400">
-            Los dias volveran a contar como disponibles en el saldo del trabajador.
+            El detalle mensual y los saldos visibles se recalcularan automaticamente.
           </p>
         </div>
         <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 p-5 dark:border-slate-800">
@@ -577,6 +623,7 @@ function VacacionesPageContent() {
   const [deleting, setDeleting] = useState(false)
   const [deleteRequestTarget, setDeleteRequestTarget] = useState<RequestRow | null>(null)
   const [deletingRequest, setDeletingRequest] = useState(false)
+  const [clearingMonthKey, setClearingMonthKey] = useState<string | null>(null)
   const currentYear = new Date().getFullYear()
   const requestedYear = Number(searchParams.get('year') || 0) || null
 
@@ -631,6 +678,15 @@ function VacacionesPageContent() {
     return () => { supabase.removeChannel(channel) }
   }, [fetchAll])
 
+  useEffect(() => {
+    setDetail((prev) => {
+      if (!prev) return prev
+      const nextRow = balances.find((row) => row.id === prev.row.id)
+      if (!nextRow) return null
+      return buildMonthDetail(nextRow, prev.col, requests)
+    })
+  }, [balances, requests])
+
   const years = useMemo(() => Array.from(new Set(balances.map((row) => num(row.periodo)))).filter(Boolean).sort((a, b) => b - a), [balances])
   const activeYear = requestedYear && years.includes(requestedYear) ? requestedYear : (years[0] ?? currentYear)
   const balancesYear = useMemo(() => (
@@ -673,24 +729,24 @@ function VacacionesPageContent() {
 
   const getMonthRequests = useCallback((dni: string, year: number, monthIndex: number) => requestsYear.filter((row) => row.dni === dni && overlapsMonth(row, year, monthIndex)), [requestsYear])
   const getMonthView = useCallback((row: Balance, col: MonthCol) => {
-    const imported = num(row[col.key])
-    const monthRequests = getMonthRequests(row.dni, row.periodo, col.monthIndex)
-    const approved = monthRequests.filter((item) => item.estado === 'aprobada').reduce((sum, item) => sum + overlapDaysInMonth(item, row.periodo, col.monthIndex), 0)
-    return { imported, approved, total: imported + approved, requests: monthRequests }
-  }, [getMonthRequests])
+    const monthDetail = buildMonthDetail(row, col, requestsYear)
+    return { imported: monthDetail.imported, approved: monthDetail.approved, deducted: monthDetail.deducted, total: monthDetail.visible, requests: monthDetail.requests }
+  }, [requestsYear])
 
   const derived = useCallback((row: Balance) => {
-    const approvedDays = requestsYear.filter((item) => item.dni === row.dni && item.estado === 'aprobada').reduce((sum, item) => sum + num(item.dias_solicitados), 0)
-    const pendientesPrev = num(row.dias_pendientes) - approvedDays
+    const importedTotal = num(row.total_gozados)
+    const visibleGozados = months.reduce((sum, col) => sum + getMonthView(row, col).total, 0)
+    const saldoDelta = visibleGozados - importedTotal
+    const pendientesPrev = num(row.dias_pendientes) - saldoDelta
     const amount = renewalAmount(row)
     const isDue = renewalDue(row)
     const porVencer = isDue ? 0 : amount
     const pendingBase = num(row.renovaciones_aplicadas) > 0 && row.vacaciones_pendientes_periodo != null
       ? num(row.vacaciones_pendientes_periodo)
       : num(row.dias_pendientes) + (isDue ? amount : 0)
-    const pendientesPeriodo = pendingBase - approvedDays
-    return { approvedDays, pendientesPrev, pendientesPeriodo, gozados: num(row.total_gozados) + approvedDays, porVencer }
-  }, [requestsYear])
+    const pendientesPeriodo = pendingBase - saldoDelta
+    return { saldoDelta, pendientesPrev, pendientesPeriodo, gozados: visibleGozados, porVencer }
+  }, [getMonthView])
 
   const exportExcel = useCallback(async () => {
     if (!balancesYear.length) return toast.error('No hay datos para exportar')
@@ -925,6 +981,41 @@ function VacacionesPageContent() {
     void fetchAll()
   }, [deleteRequestTarget, fetchAll])
 
+  const clearImportedMonth = useCallback(async (row: Balance, col: MonthCol) => {
+    const imported = num(row[col.key])
+    if (imported <= 0) {
+      toast.info('El importado de este mes ya esta en 0')
+      return
+    }
+
+    const key = monthDetailKey(row, col)
+    const nextTotalGozados = months.reduce((sum, month) => sum + (month.key === col.key ? 0 : num(row[month.key])), 0)
+    setClearingMonthKey(key)
+
+    const payload = {
+      [col.key]: 0,
+      total_gozados: nextTotalGozados,
+    }
+    const { data, error } = await supabase
+      .from('vacaciones_saldos')
+      .update(payload)
+      .eq('id', row.id)
+      .select('*')
+      .single()
+
+    setClearingMonthKey(null)
+
+    if (error) {
+      toast.error(error.message)
+      return
+    }
+
+    const updatedRow = (data ?? { ...row, [col.key]: 0, total_gozados: nextTotalGozados }) as Balance
+    setBalances((prev) => prev.map((item) => item.id === row.id ? updatedRow : item))
+    setDetail((prev) => prev && prev.row.id === row.id && prev.col.key === col.key ? buildMonthDetail(updatedRow, prev.col, requests) : prev)
+    toast.success(`Importado ${col.label} puesto en 0`)
+  }, [requests])
+
   const openNewEditor = useCallback(() => {
     setEditorDraft(blankDraft())
     setEditorOpen(true)
@@ -1156,7 +1247,15 @@ function VacacionesPageContent() {
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-6 text-slate-900 dark:bg-slate-950 dark:text-white sm:px-6 lg:px-8">
       <Toaster position="top-center" richColors />
-      <MonthModal detail={detail} onClose={() => setDetail(null)} onAddManual={openManualRequest} onEditRequest={openEditRequest} onDeleteRequest={setDeleteRequestTarget} />
+      <MonthModal
+        detail={detail}
+        onClose={() => setDetail(null)}
+        onAddManual={openManualRequest}
+        onEditRequest={openEditRequest}
+        onDeleteRequest={setDeleteRequestTarget}
+        onClearImported={clearImportedMonth}
+        clearingImported={Boolean(detail && clearingMonthKey === monthDetailKey(detail.row, detail.col))}
+      />
       <EditorModal
         open={editorOpen}
         draft={editorDraft}
@@ -1294,7 +1393,7 @@ function VacacionesPageContent() {
                             <td className="px-1.5 py-3 text-center font-black">{num(row.saldo_arrastre)}</td>
                             {months.map((col) => {
                               const view = getMonthView(row, col)
-                              return <td key={col.key} className="px-0.5 py-2"><button onClick={() => setDetail({ row, col, imported: view.imported, approved: view.approved, requests: view.requests })} className={`w-full rounded-lg px-0.5 py-1 font-black ${view.total > 0 || view.requests.length ? 'bg-slate-100 text-slate-700 hover:bg-blue-50 hover:text-blue-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-blue-500/20 dark:hover:text-blue-200' : 'text-slate-300 hover:bg-slate-100 dark:text-slate-700 dark:hover:bg-slate-800'}`}>{view.total}</button></td>
+                              return <td key={col.key} className="px-0.5 py-2"><button onClick={() => setDetail(buildMonthDetail(row, col, requestsYear))} className={`w-full rounded-lg px-0.5 py-1 font-black ${view.total > 0 || view.requests.length ? 'bg-slate-100 text-slate-700 hover:bg-blue-50 hover:text-blue-700 dark:bg-slate-800 dark:text-slate-100 dark:hover:bg-blue-500/20 dark:hover:text-blue-200' : 'text-slate-300 hover:bg-slate-100 dark:text-slate-700 dark:hover:bg-slate-800'}`}>{view.total}</button></td>
                             })}
                             <td className="px-1.5 py-3 text-center font-black text-blue-600 dark:text-blue-300">{d.gozados}</td>
                             <td className="px-1.5 py-3 text-center font-black">{d.pendientesPrev}</td>
