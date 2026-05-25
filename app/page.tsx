@@ -13,9 +13,11 @@ import {
   LogOut, UserPlus, Loader2, Search, FileSpreadsheet, SlidersHorizontal,
   Users, ShieldCheck, AlignLeft, MapPin, Map as MapIcon, Download,
   HardHat, Trash2, MessageSquareText, X, Sunrise, Sun, Sunset, MoonStar,
-  Store, Moon, RefreshCw, Activity, BarChart3, TrendingUp, Trophy, Stethoscope
+  Store, Moon, RefreshCw, Activity, BarChart3, TrendingUp, Trophy, Stethoscope,
+  Cake, Gift, PartyPopper
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
+import LottiePlayer from '@/components/LottiePlayer'
 import MapGL, {
   Marker, NavigationControl, FullscreenControl, GeolocateControl, type MapRef
 } from 'react-map-gl/mapbox'
@@ -24,6 +26,7 @@ import 'mapbox-gl/dist/mapbox-gl.css'
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type TimeOfDay = 'dawn' | 'day' | 'dusk' | 'night'
+type BirthdayItem = { dni: string; nombre: string; area: string; foto: string; fecha: string; daysUntil: number; turningAge: number | null; isToday: boolean; label: string }
 type TipoMarcacion = 'ninguna' | 'ingreso_obra' | 'salida_obra' | 'externo' | 'nota' | 'nocturno'
 type EstadoAsistencia = 'PUNTUAL' | 'TARDANZA' | 'INASISTENCIA' | 'DESCANSO MEDICO'
 
@@ -114,6 +117,24 @@ function getLimaDateKey(date = new Date()) {
   const day = parts.find((part) => part.type === 'day')?.value ?? '01'
 
   return `${year}-${month}-${day}`
+}
+
+const MESES_CUMPLE = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
+
+function computeBirthday(fecha: string): { daysUntil: number; turningAge: number | null; isToday: boolean; label: string } | null {
+  const parts = String(fecha).slice(0, 10).split('-').map(Number)
+  if (parts.length < 3 || !parts[1] || !parts[2]) return null
+  const [year, month, day] = parts
+  const todayKey = getLimaDateKey()
+  const [ty, tm, td] = todayKey.split('-').map(Number)
+  const todayMid = new Date(ty, tm - 1, td)
+  const safeDay = (m: number, d: number, y: number) => Math.min(d, new Date(y, m, 0).getDate())
+  let next = new Date(ty, month - 1, safeDay(month, day, ty))
+  if (next < todayMid) next = new Date(ty + 1, month - 1, safeDay(month, day, ty + 1))
+  const daysUntil = Math.round((next.getTime() - todayMid.getTime()) / 86400000)
+  const turningAge = year > 1900 ? next.getFullYear() - year : null
+  const label = `${day} de ${MESES_CUMPLE[month - 1] ?? ''}`
+  return { daysUntil, turningAge, isToday: daysUntil === 0, label }
 }
 
 function getWeekday(dateKey: string) {
@@ -421,6 +442,9 @@ export default function AdminDashboard() {
   const [descansosPendientesPreview, setDescansosPendientesPreview] = useState<string[]>([])
   const pendingVacacionesRef = useRef(0)
   const pendingDescansosRef = useRef(0)
+  const [cumpleHoy, setCumpleHoy] = useState<BirthdayItem[]>([])
+  const [cumpleProximos, setCumpleProximos] = useState<BirthdayItem[]>([])
+  const cumpleNotifiedRef = useRef(false)
 
   useEffect(() => {
     setMounted(true)
@@ -673,6 +697,49 @@ export default function AdminDashboard() {
       .subscribe()
 
     return () => { supabase.removeChannel(canalVacaciones) }
+  }, [])
+
+  const fetchBirthdays = async () => {
+    const { data, error } = await supabase
+      .from('fotocheck_perfiles')
+      .select('dni, nombres_completos, area, foto_url, fecha_cumpleanos')
+      .not('fecha_cumpleanos', 'is', null)
+    if (error) return
+
+    const items: BirthdayItem[] = []
+    for (const row of data ?? []) {
+      if (isInactiveArea(row.area) || !row.fecha_cumpleanos) continue
+      const info = computeBirthday(row.fecha_cumpleanos)
+      if (!info) continue
+      items.push({
+        dni: row.dni,
+        nombre: row.nombres_completos,
+        area: getVisibleArea(row.area),
+        foto: row.foto_url || '',
+        fecha: String(row.fecha_cumpleanos).slice(0, 10),
+        ...info,
+      })
+    }
+    items.sort((a, b) => a.daysUntil - b.daysUntil)
+    const hoy = items.filter((i) => i.isToday)
+    setCumpleHoy(hoy)
+    setCumpleProximos(items.filter((i) => !i.isToday).slice(0, 5))
+
+    if (hoy.length && !cumpleNotifiedRef.current) {
+      cumpleNotifiedRef.current = true
+      const nombres = hoy.map((h) => h.nombre.split(' ')[0]).join(', ')
+      toast.success('🎉 ¡Hoy hay cumpleaños!', { description: nombres, duration: 9000 })
+      new Audio('/notification.mp3').play().catch(() => {})
+    }
+  }
+
+  useEffect(() => {
+    void fetchBirthdays()
+    const canalCumple = supabase.channel('admin-cumple-rt')
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'fotocheck_perfiles' }, () => { void fetchBirthdays() })
+      .subscribe()
+    const t = setInterval(() => { void fetchBirthdays() }, 60 * 60 * 1000)
+    return () => { supabase.removeChannel(canalCumple); clearInterval(t) }
   }, [])
 
   useEffect(() => {
@@ -1074,6 +1141,46 @@ export default function AdminDashboard() {
         </div>
       </header>
 
+      {/* Banner de cumpleaños del día */}
+      <AnimatePresence>
+        {cumpleHoy.length > 0 && (
+          <motion.div
+            className="max-w-[1600px] mx-auto w-full px-4 sm:px-6 pt-5"
+            initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}
+          >
+            <div className="relative overflow-hidden rounded-3xl border shadow-lg"
+              style={{ background: 'linear-gradient(120deg, #FFE4F1, #FFFFFF 45%, #EDE9FE)', borderColor: '#EC489955' }}>
+              <div className="pointer-events-none absolute inset-0 opacity-80">
+                <LottiePlayer src="/lottie/confetti.json" style={{ width: '100%', height: '100%' }} />
+              </div>
+              <div className="relative z-10 flex items-center gap-4 p-4 sm:p-5">
+                <div className="shrink-0 hidden sm:block">
+                  <LottiePlayer src="/lottie/birthday-cake.json" style={{ width: 84, height: 84 }} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2 mb-1" style={{ color: '#DB2777' }}>
+                    <PartyPopper size={16} />
+                    <span className="text-[11px] font-black uppercase tracking-[0.16em]">Cumpleaños de hoy</span>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                    {cumpleHoy.map((c) => (
+                      <span key={c.dni} className="flex items-center gap-2 text-sm sm:text-base font-black text-slate-800 dark:text-slate-100">
+                        <span className="inline-flex w-8 h-8 rounded-full overflow-hidden bg-pink-100 items-center justify-center text-[10px] text-pink-600 font-black">
+                          {c.foto ? <img src={c.foto} alt="" className="w-full h-full object-cover" /> : c.nombre.split(' ').slice(0, 2).map(w => w[0]).join('')}
+                        </span>
+                        {c.nombre}{c.turningAge ? <span className="text-pink-600 font-bold">· {c.turningAge} años</span> : null}
+                      </span>
+                    ))}
+                  </div>
+                  <p className="text-xs font-semibold mt-1" style={{ color: '#9D174D' }}>¡No olvides saludarlos! 🎂🎈</p>
+                </div>
+                <Gift size={26} className="shrink-0 hidden md:block" style={{ color: '#DB2777' }} />
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       <main className="flex-1 max-w-[1600px] mx-auto w-full px-4 sm:px-6 py-6 sm:py-8 flex flex-col xl:flex-row gap-6">
 
         {/* Date and filters */}
@@ -1142,6 +1249,31 @@ export default function AdminDashboard() {
               ))}
             </div>
           </div>
+
+          {/* Próximos cumpleaños */}
+          {(cumpleHoy.length > 0 || cumpleProximos.length > 0) && (
+            <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
+              <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] mb-3 flex items-center gap-1.5"><Cake size={11} /> Cumpleaños</p>
+              <div className="space-y-2">
+                {[...cumpleHoy, ...cumpleProximos].slice(0, 6).map((c) => (
+                  <div key={c.dni} className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-full overflow-hidden shrink-0 bg-pink-100 flex items-center justify-center text-[10px] font-black text-pink-600">
+                      {c.foto ? <img src={c.foto} alt="" className="w-full h-full object-cover" /> : c.nombre.split(' ').slice(0, 2).map(w => w[0]).join('')}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-black text-slate-700 dark:text-slate-200 truncate">{c.nombre}</p>
+                      <p className="text-[10px] font-bold text-slate-400">{c.label}{c.turningAge ? ` · ${c.turningAge} años` : ''}</p>
+                    </div>
+                    {c.isToday ? (
+                      <span className="px-2 py-1 rounded-full text-[9px] font-black text-white shrink-0" style={{ background: 'linear-gradient(135deg, #EC4899, #7C3AED)' }}>HOY</span>
+                    ) : (
+                      <span className="text-[10px] font-black text-slate-400 shrink-0">{c.daysUntil}d</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {false && (
           <div className="bg-white dark:bg-slate-900 p-3 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm flex flex-col gap-2">

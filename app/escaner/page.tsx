@@ -9,6 +9,7 @@ import {
   ChevronRight, CheckCircle2, HardHat, Store, Moon, Star,
   PlaneTakeoff, Phone, RefreshCw, Wallet, Menu, Badge, Cloud, CloudOff,
   BookOpen, Camera, FileText, Image as ImageIcon, Send, Stethoscope, Upload,
+  Cake, Gift, PartyPopper,
 } from 'lucide-react'
 import { format, parseISO, differenceInDays } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -16,10 +17,14 @@ import { toast } from 'sonner'
 import { motion, AnimatePresence } from 'framer-motion'
 import { supabase } from '@/utils/supabase/client'
 import { activateDeviceSession, clearWorkerSession, hasDeviceSessionToken, isCurrentDeviceSession } from '@/utils/device-session'
+import { ensureBirthdayPush } from '@/utils/push'
+import LottiePlayer from '@/components/LottiePlayer'
+import CalendarPicker from '@/components/CalendarPicker'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface Perfil      { dni: string; nombres: string; area: string; foto_url: string }
+interface Perfil      { dni: string; nombres: string; area: string; foto_url: string; fecha_cumpleanos?: string | null }
+interface BirthdayPerson { dni: string; nombres: string; area: string; foto_url: string; fecha: string }
 interface Asistencia  { id: string; fecha?: string; hora_ingreso: string; estado_ingreso: string; hora_salida: string | null; notas: string | null }
 interface PendingAttendance {
   id: string
@@ -94,6 +99,7 @@ type WorkerFeature =
   | 'updates'
   | 'support'
   | 'rrhh'
+  | 'birthdays'
 
 const INACTIVE_AREA_PREFIX = '__INACTIVO__|'
 
@@ -251,6 +257,26 @@ const formatTimeLima = (value?: string | null) => {
     }).format(new Date(value))
   } catch {
     return '--:--'
+  }
+}
+
+// ─── Cumpleaños ─────────────────────────────────────────────────────────────
+const birthdayInfo = (fecha: string, today = new Date()) => {
+  const [year, month, day] = fecha.split('-').map(Number)
+  const todayMid = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+  let next = new Date(today.getFullYear(), (month || 1) - 1, day || 1)
+  if (next < todayMid) next = new Date(today.getFullYear() + 1, (month || 1) - 1, day || 1)
+  const daysUntil = Math.round((next.getTime() - todayMid.getTime()) / 86400000)
+  const turningAge = year ? next.getFullYear() - year : null
+  return { next, daysUntil, turningAge, isToday: daysUntil === 0 }
+}
+
+const formatBirthdayDate = (fecha: string) => {
+  try {
+    const [, month, day] = fecha.split('-').map(Number)
+    return format(new Date(2000, (month || 1) - 1, day || 1), "d 'de' MMMM", { locale: es })
+  } catch {
+    return fecha
   }
 }
 
@@ -456,6 +482,215 @@ function WorkerInfoScreen({
   )
 }
 
+function BirthdaysScreen({ myDni, onClose }: { myDni?: string | null; onClose: () => void }) {
+  const [loading, setLoading] = useState(true)
+  const [people, setPeople] = useState<BirthdayPerson[]>([])
+
+  useEffect(() => {
+    let active = true
+    ;(async () => {
+      try {
+        const { data } = await supabase
+          .from('fotocheck_perfiles')
+          .select('dni, nombres_completos, area, foto_url, fecha_cumpleanos')
+          .not('fecha_cumpleanos', 'is', null)
+        if (!active) return
+        const list = (data ?? [])
+          .filter((row: any) => !isInactiveArea(row.area) && row.fecha_cumpleanos)
+          .map((row: any) => ({ dni: row.dni, nombres: row.nombres_completos, area: getVisibleArea(row.area), foto_url: row.foto_url || '', fecha: String(row.fecha_cumpleanos).slice(0, 10) }))
+        setPeople(list)
+      } catch {
+        // silencioso: lista vacia
+      } finally {
+        if (active) setLoading(false)
+      }
+    })()
+    return () => { active = false }
+  }, [])
+
+  const ordered = people
+    .map((p) => ({ ...p, info: birthdayInfo(p.fecha) }))
+    .sort((a, b) => a.info.daysUntil - b.info.daysUntil)
+  const todayList = ordered.filter((p) => p.info.isToday)
+
+  return (
+    <motion.div
+      className="fixed inset-0 z-50 flex items-stretch justify-center"
+      style={{ background: 'rgba(15,23,42,0.42)', backdropFilter: 'blur(10px)' }}
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+      onClick={onClose}
+    >
+      <motion.div
+        className="w-full max-w-lg p-5 pt-[calc(env(safe-area-inset-top)+16px)] pb-[calc(env(safe-area-inset-bottom)+24px)] flex flex-col"
+        style={{ background: 'linear-gradient(180deg, #FFF5FA, #FFFFFF, #F3F0FF)', minHeight: '100vh' }}
+        initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
+        transition={{ type: 'spring', stiffness: 380, damping: 36 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-3 mb-5">
+          <button onClick={onClose} className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: '#0F172A', color: 'white' }}>
+            <ChevronLeft size={22} />
+          </button>
+          <motion.div
+            className="w-16 h-16 rounded-3xl flex items-center justify-center overflow-hidden border"
+            style={{ background: 'white', borderColor: '#EC489933', boxShadow: '0 18px 40px #EC489922' }}
+            animate={{ y: [0, -5, 0] }} transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
+          >
+            <LottiePlayer src="/lottie/birthday-cake.json" style={{ width: 56, height: 56 }} />
+          </motion.div>
+          <div className="min-w-0">
+            <h3 className="font-black text-xl" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Cumpleaños</h3>
+            <p className="text-sm font-semibold leading-snug" style={{ color: 'var(--text-3)' }}>Mira qué cumpleaños se acercan en tu equipo.</p>
+          </div>
+        </div>
+
+        {todayList.length > 0 && (
+          <motion.div
+            className="relative overflow-hidden rounded-[30px] border mb-5"
+            style={{ background: 'linear-gradient(150deg, #FFE4F1, #FFFFFF 55%, #F0E9FF)', borderColor: '#EC489955', boxShadow: '0 22px 50px rgba(236,72,153,0.22)' }}
+            initial={{ opacity: 0, scale: 0.94, y: 14 }} animate={{ opacity: 1, scale: 1, y: 0 }}
+            transition={{ type: 'spring', stiffness: 260, damping: 22 }}
+          >
+            {/* Confetti de fondo */}
+            <div className="pointer-events-none absolute inset-0 z-0 opacity-90">
+              <LottiePlayer src="/lottie/confetti.json" className="w-full h-full" style={{ width: '100%', height: '100%' }} />
+            </div>
+
+            <div className="relative z-10 p-5">
+              <div className="flex items-center gap-2 mb-3" style={{ color: '#DB2777' }}>
+                <PartyPopper size={18} />
+                <span className="text-xs font-black uppercase tracking-[0.16em]">
+                  {todayList.some((p) => p.dni === myDni) ? '¡Hoy es tu cumpleaños!' : '¡Hoy cumple!'}
+                </span>
+              </div>
+
+              {/* Pastel + regalos animados */}
+              <div className="flex items-center justify-center gap-2 mb-1">
+                <LottiePlayer src="/lottie/birthday-cake.json" style={{ width: 120, height: 120 }} />
+                <LottiePlayer src="/lottie/birthday-gifts.json" style={{ width: 96, height: 96 }} />
+              </div>
+
+              <div className="space-y-2.5">
+                {todayList.map((p) => (
+                  <motion.div
+                    key={p.dni}
+                    className="flex items-center gap-3 rounded-2xl p-2.5"
+                    style={{ background: 'rgba(255,255,255,0.72)', border: '1px solid #EC489933' }}
+                    initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}
+                  >
+                    <div className="w-12 h-12 rounded-full overflow-hidden shrink-0 ring-2" style={{ background: 'var(--blue-light)', boxShadow: '0 0 0 3px #EC489922' }}>
+                      {p.foto_url ? <img src={p.foto_url} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-sm font-black" style={{ color: 'var(--blue)' }}>{getInitials(p.nombres)}</div>}
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-sm font-black truncate" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>{p.nombres}{p.dni === myDni ? ' (tú)' : ''}</p>
+                      <p className="text-xs font-black" style={{ color: '#DB2777' }}>{p.info.turningAge ? `Cumple ${p.info.turningAge} años hoy 🎂` : '¡Feliz cumpleaños! 🎂'}</p>
+                    </div>
+                  </motion.div>
+                ))}
+              </div>
+            </div>
+          </motion.div>
+        )}
+
+        <div className="overflow-y-auto scrollbar-hide flex-1 space-y-3 pr-1">
+          {loading ? (
+            <div className="flex items-center justify-center py-16"><Loader2 className="animate-spin" size={26} style={{ color: '#DB2777' }} /></div>
+          ) : ordered.length === 0 ? (
+            <div className="rounded-[24px] border border-dashed p-8 text-center" style={{ borderColor: 'var(--border-2)' }}>
+              <Cake size={32} className="mx-auto mb-3" style={{ color: 'var(--text-3)' }} />
+              <p className="text-sm font-bold" style={{ color: 'var(--text-3)' }}>Aún no hay cumpleaños registrados. Agrega tu fecha desde el menú.</p>
+            </div>
+          ) : ordered.map((p, index) => (
+            <motion.article
+              key={p.dni}
+              className="rounded-[24px] border p-4 flex items-center gap-3"
+              style={{ background: 'rgba(255,255,255,0.92)', borderColor: p.info.isToday ? '#EC489955' : 'var(--border)', boxShadow: '0 14px 30px rgba(15,23,42,0.06)' }}
+              initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(index * 0.04, 0.4) }}
+            >
+              <div className="w-12 h-12 rounded-full overflow-hidden shrink-0" style={{ background: 'var(--blue-light)' }}>
+                {p.foto_url ? <img src={p.foto_url} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-sm font-black" style={{ color: 'var(--blue)' }}>{getInitials(p.nombres)}</div>}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-black truncate" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>{p.nombres}{p.dni === myDni ? ' (tú)' : ''}</p>
+                <p className="text-xs font-bold mt-0.5 flex items-center gap-1.5" style={{ color: 'var(--text-3)' }}>
+                  <Gift size={12} style={{ color: '#DB2777' }} /> {formatBirthdayDate(p.fecha)}{p.info.turningAge ? ` · ${p.info.turningAge} años` : ''}
+                </p>
+              </div>
+              <div className="text-right shrink-0">
+                {p.info.isToday ? (
+                  <span className="px-3 py-1.5 rounded-full text-[11px] font-black" style={{ background: 'linear-gradient(135deg, #EC4899, #7C3AED)', color: 'white' }}>¡HOY!</span>
+                ) : (
+                  <>
+                    <p className="text-lg font-black leading-none" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>{p.info.daysUntil}</p>
+                    <p className="text-[10px] font-black uppercase tracking-wider" style={{ color: 'var(--text-3)' }}>{p.info.daysUntil === 1 ? 'día' : 'días'}</p>
+                  </>
+                )}
+              </div>
+            </motion.article>
+          ))}
+        </div>
+      </motion.div>
+    </motion.div>
+  )
+}
+
+function BirthdayPromptModal({ open, value, onChange, onSave, onSkip, saving }: {
+  open: boolean; value: string; onChange: (v: string) => void; onSave: () => void; onSkip: () => void; saving: boolean
+}) {
+  const [showCal, setShowCal] = useState(false)
+  if (!open) return null
+  return (
+    <motion.div
+      className="fixed inset-0 z-[90] flex items-center justify-center p-5"
+      style={{ background: 'rgba(30,27,75,0.5)', backdropFilter: 'blur(12px)' }}
+      initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+    >
+      <motion.div
+        className="w-full max-w-sm rounded-3xl p-7 relative overflow-hidden"
+        style={{ background: 'var(--surface)', boxShadow: 'var(--shadow-lg)', border: '1.5px solid var(--border)' }}
+        initial={{ scale: 0.92, y: 14 }} animate={{ scale: 1, y: 0 }}
+        transition={{ type: 'spring', stiffness: 440, damping: 30 }}
+      >
+        <div className="absolute -right-12 -top-12 h-32 w-32 rounded-full opacity-30 blur-2xl" style={{ background: '#EC4899' }} />
+        <div className="relative z-10 flex flex-col items-center text-center">
+          <div className="w-20 h-20 rounded-3xl flex items-center justify-center overflow-hidden border mb-4" style={{ background: 'white', borderColor: '#EC489933', boxShadow: '0 18px 40px #EC489922' }}>
+            <LottiePlayer src="/lottie/birthday-cake.json" style={{ width: 68, height: 68 }} />
+          </div>
+          <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-[0.16em] mb-2" style={{ background: 'rgba(236,72,153,0.12)', color: '#DB2777' }}>Nueva función</span>
+          <h3 className="text-xl font-black" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Agrega tu fecha de cumpleaños</h3>
+          <p className="text-sm font-semibold mt-2 mb-5" style={{ color: 'var(--text-3)' }}>
+            Así tu equipo sabrá cuándo celebrarte. Solo se usa para el módulo de cumpleaños 🎂
+          </p>
+          <button
+            type="button"
+            onClick={() => setShowCal(true)}
+            className="w-full flex items-center justify-center gap-2 px-5 py-4 rounded-2xl outline-none font-semibold"
+            style={{ background: 'var(--surface-2)', border: '1.5px solid var(--border-2)', color: value ? 'var(--text-1)' : 'var(--text-3)' }}
+          >
+            <Cake size={18} style={{ color: '#EC4899' }} />
+            {value ? `${formatBirthdayDate(value)} de ${value.split('-')[0]}` : 'Selecciona tu fecha'}
+          </button>
+          {showCal && (
+            <CalendarPicker value={value} onClose={() => setShowCal(false)} onSelect={onChange} />
+          )}
+          <motion.button
+            onClick={onSave}
+            disabled={saving || !value}
+            className="w-full mt-5 py-4 rounded-2xl font-black text-white flex items-center justify-center gap-2 disabled:opacity-40"
+            style={{ background: 'linear-gradient(135deg, #EC4899, #7C3AED)', fontFamily: 'Sora, sans-serif' }}
+            whileTap={{ scale: 0.98 }}
+          >
+            {saving ? <Loader2 className="animate-spin" size={20} /> : <><Cake size={18} /> GUARDAR</>}
+          </motion.button>
+          <button onClick={onSkip} disabled={saving} className="mt-3 text-sm font-bold" style={{ color: 'var(--text-3)' }}>
+            Más tarde
+          </button>
+        </div>
+      </motion.div>
+    </motion.div>
+  )
+}
+
 function ModalCard({ children, onClick }: { children: React.ReactNode; onClick?: (e: React.MouseEvent) => void }) {
   return (
     <motion.div
@@ -516,6 +751,10 @@ export default function EscanerWeb() {
   const [showGuide, setShowGuide]           = useState(false)
   const [showUpdates, setShowUpdates]       = useState(false)
   const [showSideMenu, setShowSideMenu]     = useState(false)
+  const [showBirthdays, setShowBirthdays]   = useState(false)
+  const [showBirthdayPrompt, setShowBirthdayPrompt] = useState(false)
+  const [birthdayDraft, setBirthdayDraft]   = useState('')
+  const [savingBirthday, setSavingBirthday] = useState(false)
   const [showNota, setShowNota]             = useState(false)
   const [showObra, setShowObra]             = useState(false)
   const [showExterno, setShowExterno]       = useState(false)
@@ -575,12 +814,37 @@ export default function EscanerWeb() {
     if (feature === 'rankingLate') router.push('/ranking?type=tardanza')
     if (feature === 'guide') setShowGuide(true)
     if (feature === 'updates') setShowUpdates(true)
+    if (feature === 'birthdays') setShowBirthdays(true)
     if (feature === 'support' && perfil) abrirSoporteWhatsApp(perfil)
     if (feature === 'rrhh') {
       const phone = '51987834538'
       const text = encodeURIComponent(`Hola RRHH, soy ${perfil?.nombres ?? ''} DNI ${perfil?.dni ?? ''}. Necesito ayuda.`)
       window.open(`https://wa.me/${phone}?text=${text}`, '_blank')
     }
+  }
+
+  const saveBirthday = async () => {
+    if (!perfil || !birthdayDraft) return
+    setSavingBirthday(true)
+    try {
+      const { error } = await supabase.from('fotocheck_perfiles').update({ fecha_cumpleanos: birthdayDraft }).eq('dni', perfil.dni)
+      if (error) throw error
+      setPerfil({ ...perfil, fecha_cumpleanos: birthdayDraft })
+      setShowBirthdayPrompt(false)
+      store.remove('RUAG_BIRTHDAY_PROMPT_SKIPPED')
+      toast.success('¡Fecha de cumpleaños guardada! 🎂')
+      // Activa el aviso push del cumpleaños (pide permiso si hace falta).
+      void ensureBirthdayPush(perfil.dni, true)
+    } catch (e: any) {
+      toast.error(e?.message || 'No se pudo guardar tu cumpleaños')
+    } finally {
+      setSavingBirthday(false)
+    }
+  }
+
+  const skipBirthdayPrompt = () => {
+    setShowBirthdayPrompt(false)
+    store.set('RUAG_BIRTHDAY_PROMPT_SKIPPED', '1')
   }
 
   const cargarVacaciones = async (dniArg?: string | null, withLoader = true) => {
@@ -818,7 +1082,11 @@ export default function EscanerWeb() {
         store.set('RUAG_AREA', visibleArea)
         store.set('RUAG_FOTO', data.foto_url || '')
         void cacheProfilePhoto(data.foto_url)
-        p = { dni: data.dni, nombres: data.nombres_completos, area: visibleArea, foto_url: data.foto_url || '' }
+        p = { dni: data.dni, nombres: data.nombres_completos, area: visibleArea, foto_url: data.foto_url || '', fecha_cumpleanos: data.fecha_cumpleanos ?? null }
+        // Nueva función: si ya tiene cuenta pero no registró su cumpleaños, ofrecer agregarlo.
+        if (!data.fecha_cumpleanos && store.get('RUAG_BIRTHDAY_PROMPT_SKIPPED') !== '1') {
+          setShowBirthdayPrompt(true)
+        }
       } else {
         const area = store.get('RUAG_AREA')
         const foto = store.get('RUAG_FOTO')
@@ -925,6 +1193,13 @@ export default function EscanerWeb() {
     if (!showMedicalLeave || !perfil) return
     void cargarDescansosMedicos(perfil.dni, true)
   }, [showMedicalLeave, perfil])
+
+  // Mantiene viva la suscripción de push del cumpleaños (sin pedir permiso si aún no lo dio).
+  useEffect(() => {
+    if (perfil?.dni && perfil.fecha_cumpleanos) {
+      void ensureBirthdayPush(perfil.dni, false)
+    }
+  }, [perfil?.dni, perfil?.fecha_cumpleanos])
 
   useEffect(() => {
     if (!perfil) return
@@ -1408,48 +1683,99 @@ export default function EscanerWeb() {
     const total = new Date(y, mo + 1, 0).getDate()
     const fDay  = new Date(y, mo, 1).getDay()
     const blanks = fDay === 0 ? 6 : fDay - 1
+    const todayStr = format(new Date(), 'yyyy-MM-dd')
+
+    let countPuntual = 0, countTardanza = 0, countVacaciones = 0
+    for (let d = 1; d <= total; d++) {
+      const ds = `${y}-${String(mo + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`
+      const e = historialMes.find(x => x.fecha === ds)
+      if (getApprovedVacationRequestsForDay(ds).length > 0) countVacaciones++
+      else if (e?.estado_ingreso === 'PUNTUAL') countPuntual++
+      else if (e?.estado_ingreso === 'TARDANZA') countTardanza++
+    }
+
+    const stats: [string, number, string, string][] = [
+      ['Puntual', countPuntual, 'var(--green)', 'var(--green-light)'],
+      ['Tardanza', countTardanza, 'var(--red)', 'var(--red-light)'],
+      ['Vacaciones', countVacaciones, 'var(--blue)', 'var(--blue-light)'],
+    ]
 
     return (
-      <div className="grid grid-cols-7 gap-1.5 mt-4">
-        {['L','M','M','J','V','S','D'].map((d, i) => (
-          <div key={i} className="text-center text-xs font-black pb-2" style={{ color: 'var(--text-3)' }}>{d}</div>
-        ))}
-        {Array.from({ length: blanks }, (_, i) => <div key={`b${i}`} className="h-10" />)}
-        {Array.from({ length: total }, (_, i) => {
-          const day  = i + 1
-          const dStr = `${y}-${String(mo + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-          const e    = historialMes.find(x => x.fecha === dStr)
-          const vacationRequests = getApprovedVacationRequestsForDay(dStr)
-          const hasVacation = vacationRequests.length > 0
-          const isPuntual  = e?.estado_ingreso === 'PUNTUAL'
-          const isTardanza = e?.estado_ingreso === 'TARDANZA'
-          const isInteractive = Boolean(e) || hasVacation
-
-          return (
-            <motion.button
-              key={day}
-              disabled={!isInteractive}
-              onClick={() => {
-                if (hasVacation) {
-                  setSelectedVacationDay({ fecha: dStr, solicitudes: vacationRequests })
-                } else if (e) {
-                  setSelectedDay(e)
-                }
-              }}
-              className="aspect-square rounded-xl flex items-center justify-center text-sm font-bold border transition-all"
-              style={{
-                background:   hasVacation ? 'var(--blue-light)' : isPuntual ? 'var(--green-light)' : isTardanza ? 'var(--red-light)' : 'var(--surface-2)',
-                borderColor:  hasVacation ? '#93C5FD' : isPuntual ? '#6EE7B7' : isTardanza ? '#FCA5A5' : 'var(--border)',
-                color:        hasVacation ? 'var(--blue)' : isPuntual ? 'var(--green)' : isTardanza ? 'var(--red)' : 'var(--text-3)',
-                opacity:      !isInteractive ? 0.5 : 1,
-              }}
-              whileHover={isInteractive ? { scale: 1.1 } : {}}
-              whileTap={isInteractive ? { scale: 0.95 } : {}}
+      <div>
+        {/* Resumen del mes */}
+        <div className="grid grid-cols-3 gap-2.5 mb-5">
+          {stats.map(([label, value, color, bg], i) => (
+            <motion.div
+              key={label}
+              className="rounded-2xl p-3 border text-center relative overflow-hidden"
+              style={{ background: bg, borderColor: `${color}33` }}
+              initial={{ opacity: 0, y: 12, scale: 0.96 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              transition={{ delay: i * 0.06, type: 'spring', stiffness: 320, damping: 24 }}
             >
-              {day}
-            </motion.button>
-          )
-        })}
+              <p className="text-2xl font-black leading-none" style={{ color, fontFamily: 'Sora, sans-serif' }}>{value}</p>
+              <p className="text-[10px] font-black uppercase tracking-wider mt-1.5" style={{ color }}>{label}</p>
+            </motion.div>
+          ))}
+        </div>
+
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={`${y}-${mo}`}
+            className="grid grid-cols-7 gap-1.5"
+            initial={{ opacity: 0, x: 24 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -24 }}
+            transition={{ duration: 0.28, ease: [0.34, 1.1, 0.64, 1] }}
+          >
+            {['L','M','M','J','V','S','D'].map((d, i) => (
+              <div key={i} className="text-center text-[11px] font-black pb-2 uppercase tracking-wider" style={{ color: 'var(--text-3)' }}>{d}</div>
+            ))}
+            {Array.from({ length: blanks }, (_, i) => <div key={`b${i}`} className="aspect-square" />)}
+            {Array.from({ length: total }, (_, i) => {
+              const day  = i + 1
+              const dStr = `${y}-${String(mo + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+              const e    = historialMes.find(x => x.fecha === dStr)
+              const vacationRequests = getApprovedVacationRequestsForDay(dStr)
+              const hasVacation = vacationRequests.length > 0
+              const isPuntual  = e?.estado_ingreso === 'PUNTUAL'
+              const isTardanza = e?.estado_ingreso === 'TARDANZA'
+              const isInteractive = Boolean(e) || hasVacation
+              const isToday = dStr === todayStr
+              const isFuture = dStr > todayStr
+              const dotColor = hasVacation ? 'var(--blue)' : isPuntual ? 'var(--green)' : isTardanza ? 'var(--red)' : null
+
+              return (
+                <motion.button
+                  key={day}
+                  disabled={!isInteractive}
+                  onClick={() => {
+                    if (hasVacation) setSelectedVacationDay({ fecha: dStr, solicitudes: vacationRequests })
+                    else if (e) setSelectedDay(e)
+                  }}
+                  className="relative aspect-square rounded-2xl flex flex-col items-center justify-center text-sm font-black border"
+                  style={{
+                    background: hasVacation ? 'var(--blue-light)' : isPuntual ? 'var(--green-light)' : isTardanza ? 'var(--red-light)' : 'var(--surface-2)',
+                    borderColor: isToday ? 'var(--blue)' : hasVacation ? '#93C5FD' : isPuntual ? '#6EE7B7' : isTardanza ? '#FCA5A5' : 'var(--border)',
+                    borderWidth: isToday ? 2 : 1,
+                    color: hasVacation ? 'var(--blue)' : isPuntual ? 'var(--green)' : isTardanza ? 'var(--red)' : 'var(--text-3)',
+                    opacity: isFuture && !isInteractive ? 0.35 : !isInteractive ? 0.6 : 1,
+                    boxShadow: isToday ? '0 6px 18px rgba(79,70,229,0.22)' : 'none',
+                  }}
+                  initial={{ opacity: 0, scale: 0.5 }}
+                  animate={{ opacity: isFuture && !isInteractive ? 0.35 : 1, scale: 1 }}
+                  transition={{ delay: Math.min(0.15 + i * 0.012, 0.6), type: 'spring', stiffness: 420, damping: 26 }}
+                  whileHover={isInteractive ? { scale: 1.12, zIndex: 1 } : {}}
+                  whileTap={isInteractive ? { scale: 0.92 } : {}}
+                >
+                  <span className="leading-none">{day}</span>
+                  {dotColor && <span className="absolute bottom-1.5 w-1.5 h-1.5 rounded-full" style={{ background: dotColor }} />}
+                  {isToday && <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full border-2" style={{ background: 'var(--blue)', borderColor: 'var(--surface)' }} />}
+                </motion.button>
+              )
+            })}
+          </motion.div>
+        </AnimatePresence>
       </div>
     )
   }
@@ -1516,7 +1842,7 @@ export default function EscanerWeb() {
         const start = touchStartRef.current
         const t = e.changedTouches[0]
         touchStartRef.current = null
-        if (!start || showSideMenu || showLogros || showCalendar || showVacations || showMedicalLeave || showGuide || showUpdates || showNota || showObra || showExterno || showNocturno) return
+        if (!start || showSideMenu || showLogros || showCalendar || showVacations || showMedicalLeave || showGuide || showUpdates || showBirthdays || showBirthdayPrompt || showNota || showObra || showExterno || showNocturno) return
         const dx = t.clientX - start.x
         const dy = Math.abs(t.clientY - start.y)
         const middleBand = start.y > window.innerHeight * 0.22 && start.y < window.innerHeight * 0.78
@@ -1593,8 +1919,9 @@ export default function EscanerWeb() {
 
               <div className="mt-6 flex-1 space-y-3 overflow-y-auto pr-1 pb-[calc(env(safe-area-inset-bottom)+18px)]">
                 {[
-                  { key: 'logros', label: 'Logros', desc: 'Insignias y progreso', gif: '/icons-web/logros.gif', icon: <Trophy size={20} />, colors: ['#F59E0B', '#FBBF24'] },
                   { key: 'calendar', label: 'Calendario', desc: 'Historial mensual', gif: '/icons-web/calendario.gif', icon: <Calendar size={20} />, colors: ['#2563EB', '#06B6D4'] },
+                  { key: 'logros', label: 'Logros', desc: 'Insignias y progreso', gif: '/icons-web/logros.gif', icon: <Trophy size={20} />, colors: ['#F59E0B', '#FBBF24'] },
+                  { key: 'birthdays', label: 'Cumpleaños', desc: 'Próximos y del día', gif: '/icons-web/cumpleanos.gif', icon: <Cake size={20} />, colors: ['#EC4899', '#7C3AED'] },
                   { key: 'vacations', label: 'Vacaciones', desc: 'Saldo y solicitudes', gif: '/icons-web/vacaciones.gif', icon: <PlaneTakeoff size={20} />, colors: ['#0EA5E9', '#6366F1'] },
                   { key: 'medical', label: 'Descanso medico', desc: 'Certificado para RRHH', gif: '/icons-web/descanso-medico.gif', icon: <Stethoscope size={20} />, colors: ['#7C3AED', '#EC4899'] },
                   { key: 'ranking', label: 'Ranking puntual', desc: 'Top 10 de oficina', gif: '/icons-web/ranking.gif', icon: <Star size={20} />, colors: ['#F59E0B', '#F97316'] },
@@ -1617,7 +1944,9 @@ export default function EscanerWeb() {
                     />
                     <span className="relative w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 overflow-hidden border"
                       style={{ background: `linear-gradient(135deg, ${item.colors[0]}18, ${item.colors[1]}24)`, borderColor: `${item.colors[0]}24` }}>
-                      <img src={item.gif} alt="" className="h-11 w-11 object-contain" />
+                      {item.key === 'birthdays'
+                        ? <LottiePlayer src="/lottie/birthday-cake.json" style={{ width: 46, height: 46 }} />
+                        : <img src={item.gif} alt="" className="h-11 w-11 object-contain" />}
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-sm font-black" style={{ color: 'var(--text-1)' }}>{item.label}</span>
@@ -2831,6 +3160,7 @@ export default function EscanerWeb() {
             color="#0F766E"
             onClose={() => setShowUpdates(false)}
             items={[
+              ['v5.0 - Cumpleaños', 'Mira qué cumpleaños se acercan y el día que cumplen tus compañeros.'],
               ['v4.9 - Ranking separado', 'Ranking puntual y ranking tardanza ahora son accesos independientes.'],
               ['v4.8 - Descanso medico', 'Puedes subir una o varias evidencias y revisar el historial de aprobacion.'],
               ['v4.7 - Sidebar animado', 'El panel rapido incluye GIFs y tarjetas modernas.'],
@@ -2839,6 +3169,23 @@ export default function EscanerWeb() {
             ]}
           />
         )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showBirthdays && (
+          <BirthdaysScreen myDni={perfil?.dni} onClose={() => setShowBirthdays(false)} />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        <BirthdayPromptModal
+          open={showBirthdayPrompt}
+          value={birthdayDraft}
+          onChange={setBirthdayDraft}
+          onSave={() => void saveBirthday()}
+          onSkip={skipBirthdayPrompt}
+          saving={savingBirthday}
+        />
       </AnimatePresence>
 
       <AnimatePresence>

@@ -2,11 +2,18 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Camera, Edit2, ChevronDown, Loader2, RotateCcw, X, CheckCircle } from 'lucide-react'
+import { Camera, Edit2, ChevronDown, Loader2, RotateCcw, X, CheckCircle, Cake } from 'lucide-react'
 import { toast } from 'sonner'
 import { supabase } from '@/utils/supabase/client'
 import { motion, AnimatePresence } from 'framer-motion'
 import { activateDeviceSession } from '@/utils/device-session'
+import CalendarPicker from '@/components/CalendarPicker'
+
+const MESES_LABEL = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
+const formatBirthdayLabel = (v: string) => {
+  const [y, m, d] = v.split('-').map(Number)
+  return `${d} de ${MESES_LABEL[m - 1] ?? ''} de ${y}`
+}
 
 const INACTIVE_AREA_PREFIX = '__INACTIVO__|'
 
@@ -37,6 +44,8 @@ export default function SetupProfileWeb() {
   const [nombres, setNombres]         = useState('')
   const [dni, setDni]                 = useState('')
   const [selectedArea, setSelectedArea] = useState('')
+  const [fechaCumple, setFechaCumple] = useState('')
+  const [showCalPicker, setShowCalPicker] = useState(false)
   const [imageFile, setImageFile]     = useState<File | null>(null)
   const [imagePreview, setImagePreview] = useState<string | null>(null)
   const [isUploading, setIsUploading] = useState(false)
@@ -68,7 +77,7 @@ export default function SetupProfileWeb() {
   }
 
   const handleSave = async () => {
-    if (!nombres.trim() || dni.length !== 8 || !selectedArea || !imageFile) {
+    if (!nombres.trim() || dni.length !== 8 || !selectedArea || !fechaCumple || !imageFile) {
       toast.error('Completa todos los campos y sube tu foto')
       return
     }
@@ -92,7 +101,7 @@ export default function SetupProfileWeb() {
       setUploadProgress(80)
       const { error: dbError } = await supabase
         .from('fotocheck_perfiles')
-        .upsert({ dni, nombres_completos: nombres.trim(), area: selectedArea, foto_url: fotoUrl }, { onConflict: 'dni' })
+        .upsert({ dni, nombres_completos: nombres.trim(), area: selectedArea, foto_url: fotoUrl, fecha_cumpleanos: fechaCumple }, { onConflict: 'dni' })
       if (dbError) throw dbError
 
       setUploadProgress(100)
@@ -384,7 +393,30 @@ export default function SetupProfileWeb() {
               <ChevronDown size={20} />
             </div>
           </div>
+
+          {/* Fecha de cumpleaños */}
+          <div>
+            <label className="mb-2 block text-[11px] font-black uppercase tracking-[0.16em]" style={{ color: 'var(--text-3)' }}>
+              Fecha de cumpleaños
+            </label>
+            <button
+              type="button"
+              onClick={() => setShowCalPicker(true)}
+              className="w-full flex items-center gap-3 px-5 py-4 rounded-2xl outline-none transition-all font-medium text-left"
+              style={{ background: 'var(--surface)', border: '1.5px solid var(--border)', color: fechaCumple ? 'var(--text-1)' : 'var(--text-3)' }}
+            >
+              <Cake size={20} style={{ color: '#EC4899' }} />
+              {fechaCumple ? formatBirthdayLabel(fechaCumple) : 'Selecciona tu fecha'}
+            </button>
+            <p className="mt-2 text-xs font-semibold" style={{ color: 'var(--text-3)' }}>
+              La usaremos para avisar a tu equipo cuando se acerque tu cumpleaños 🎂
+            </p>
+          </div>
         </div>
+
+        {showCalPicker && (
+          <CalendarPicker value={fechaCumple} onClose={() => setShowCalPicker(false)} onSelect={setFechaCumple} />
+        )}
 
         {/* Botón guardar */}
         <motion.button

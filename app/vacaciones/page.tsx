@@ -228,11 +228,13 @@ function MonthModal({
   onClose,
   onAddManual,
   onEditRequest,
+  onDeleteRequest,
 }: {
   detail: MonthDetail | null
   onClose: () => void
   onAddManual: (row: Balance, monthIndex: number) => void
   onEditRequest: (row: RequestRow) => void
+  onDeleteRequest: (row: RequestRow) => void
 }) {
   if (!detail) return null
   return (
@@ -274,6 +276,9 @@ function MonthModal({
                   <button onClick={() => onEditRequest(item)} className="rounded-lg border border-blue-200 p-1.5 text-blue-600 hover:bg-blue-50 dark:border-blue-500/30 dark:text-blue-300 dark:hover:bg-blue-500/10" title="Editar solicitud">
                     <Pencil size={12} />
                   </button>
+                  <button onClick={() => onDeleteRequest(item)} className="rounded-lg border border-red-200 p-1.5 text-red-600 hover:bg-red-50 dark:border-red-500/30 dark:text-red-300 dark:hover:bg-red-500/10" title="Eliminar solicitud">
+                    <Trash2 size={12} />
+                  </button>
                   <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase ${prevStatus(item.estado)}`}>{item.estado}</span>
                 </div>
               </div>
@@ -295,6 +300,7 @@ function ManualRequestModal({
   onSave,
   saving,
   isEdit = false,
+  onDelete,
 }: {
   open: boolean
   draft: ManualRequestDraft
@@ -303,6 +309,7 @@ function ManualRequestModal({
   onSave: () => void
   saving: boolean
   isEdit?: boolean
+  onDelete?: () => void
 }) {
   if (!open) return null
 
@@ -353,6 +360,11 @@ function ManualRequestModal({
         <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 p-5 dark:border-slate-800">
           <p className="text-xs text-slate-500 dark:text-slate-400">Al guardar, los dias se recalculan automaticamente entre fecha inicio y fin.</p>
           <div className="flex flex-wrap gap-2">
+            {isEdit && onDelete && (
+              <button onClick={onDelete} disabled={saving} className="inline-flex items-center gap-1.5 rounded-xl border border-red-200 px-4 py-2 text-xs font-black text-red-600 hover:bg-red-50 disabled:opacity-50 dark:border-red-500/30 dark:text-red-300 dark:hover:bg-red-500/10">
+                <Trash2 size={13} /> ELIMINAR
+              </button>
+            )}
             <button onClick={onClose} className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-black dark:border-slate-700">CANCELAR</button>
             <button onClick={onSave} disabled={saving || totalDias <= 0} className="rounded-xl bg-blue-600 px-4 py-2 text-xs font-black text-white disabled:opacity-50">
               {saving ? 'GUARDANDO...' : isEdit ? 'GUARDAR CAMBIOS' : 'GUARDAR VACACIONES'}
@@ -497,6 +509,51 @@ function DeleteWorkerModal({
   )
 }
 
+function DeleteRequestModal({
+  target,
+  onClose,
+  onConfirm,
+  deleting,
+}: {
+  target: RequestRow | null
+  onClose: () => void
+  onConfirm: () => void
+  deleting: boolean
+}) {
+  if (!target) return null
+  return (
+    <div className="fixed inset-0 z-[140] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm" onClick={deleting ? undefined : onClose}>
+      <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start gap-4 border-b border-slate-200 p-5 dark:border-slate-800">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-300">
+            <Trash2 size={22} />
+          </div>
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-red-400">Eliminar vacaciones</p>
+            <h3 className="mt-1 text-lg font-black text-slate-900 dark:text-white">Borrar esta solicitud</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">{target.trabajador_nombre} - {target.area || 'SIN AREA'}</p>
+          </div>
+        </div>
+        <div className="p-5">
+          <p className="text-sm text-slate-600 dark:text-slate-300">
+            Se eliminaran las vacaciones del <span className="font-black">{longDate(target.fecha_inicio)} al {longDate(target.fecha_fin)}</span> ({target.dias_solicitados} dias). Esta accion no se puede deshacer.
+          </p>
+          <p className="mt-3 rounded-2xl bg-slate-50 px-4 py-3 text-xs text-slate-500 dark:bg-slate-950 dark:text-slate-400">
+            Los dias volveran a contar como disponibles en el saldo del trabajador.
+          </p>
+        </div>
+        <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 p-5 dark:border-slate-800">
+          <button onClick={onClose} disabled={deleting} className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-black disabled:opacity-50 dark:border-slate-700">CANCELAR</button>
+          <button onClick={onConfirm} disabled={deleting} className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-xs font-black text-white disabled:opacity-50">
+            {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+            {deleting ? 'ELIMINANDO...' : 'ELIMINAR VACACIONES'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function VacacionesPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -518,6 +575,8 @@ function VacacionesPageContent() {
   const [editingRequestId, setEditingRequestId] = useState<string | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Balance | null>(null)
   const [deleting, setDeleting] = useState(false)
+  const [deleteRequestTarget, setDeleteRequestTarget] = useState<RequestRow | null>(null)
+  const [deletingRequest, setDeletingRequest] = useState(false)
   const currentYear = new Date().getFullYear()
   const requestedYear = Number(searchParams.get('year') || 0) || null
 
@@ -850,6 +909,22 @@ function VacacionesPageContent() {
     else toast.success(estado === 'aprobada' ? `Vacaciones aprobadas para ${row.trabajador_nombre}` : `Vacaciones rechazadas para ${row.trabajador_nombre}`)
   }, [])
 
+  const confirmDeleteRequest = useCallback(async () => {
+    if (!deleteRequestTarget) return
+    setDeletingRequest(true)
+    const { error } = await supabase.from('vacaciones_solicitudes').delete().eq('id', deleteRequestTarget.id)
+    setDeletingRequest(false)
+    if (error) {
+      toast.error(error.message)
+      return
+    }
+    setRequests((prev) => prev.filter((row) => row.id !== deleteRequestTarget.id))
+    setDetail((prev) => prev ? { ...prev, requests: prev.requests.filter((r) => r.id !== deleteRequestTarget.id) } : prev)
+    toast.success(`Vacaciones eliminadas de ${deleteRequestTarget.trabajador_nombre}`)
+    setDeleteRequestTarget(null)
+    void fetchAll()
+  }, [deleteRequestTarget, fetchAll])
+
   const openNewEditor = useCallback(() => {
     setEditorDraft(blankDraft())
     setEditorOpen(true)
@@ -1081,7 +1156,7 @@ function VacacionesPageContent() {
   return (
     <div className="min-h-screen bg-slate-50 px-4 py-6 text-slate-900 dark:bg-slate-950 dark:text-white sm:px-6 lg:px-8">
       <Toaster position="top-center" richColors />
-      <MonthModal detail={detail} onClose={() => setDetail(null)} onAddManual={openManualRequest} onEditRequest={openEditRequest} />
+      <MonthModal detail={detail} onClose={() => setDetail(null)} onAddManual={openManualRequest} onEditRequest={openEditRequest} onDeleteRequest={setDeleteRequestTarget} />
       <EditorModal
         open={editorOpen}
         draft={editorDraft}
@@ -1100,12 +1175,26 @@ function VacacionesPageContent() {
         onSave={() => void saveManualRequest()}
         saving={manualSaving}
         isEdit={Boolean(editingRequestId)}
+        onDelete={() => {
+          const row = requests.find((r) => r.id === editingRequestId)
+          if (!row) return
+          setManualOpen(false)
+          setEditingRequestId(null)
+          setManualDraft(blankManualRequestDraft())
+          setDeleteRequestTarget(row)
+        }}
       />
       <DeleteWorkerModal
         target={deleteTarget}
         onClose={() => setDeleteTarget(null)}
         onConfirm={() => void confirmDeleteWorker()}
         deleting={deleting}
+      />
+      <DeleteRequestModal
+        target={deleteRequestTarget}
+        onClose={() => setDeleteRequestTarget(null)}
+        onConfirm={() => void confirmDeleteRequest()}
+        deleting={deletingRequest}
       />
       <div className="mx-auto max-w-[1800px] space-y-6">
         <header className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
@@ -1235,6 +1324,9 @@ function VacacionesPageContent() {
                       <div className="flex shrink-0 items-center gap-2">
                         <button onClick={() => openEditRequest(item)} className="rounded-lg border border-blue-200 p-1.5 text-blue-600 hover:bg-blue-50 dark:border-blue-500/30 dark:text-blue-300 dark:hover:bg-blue-500/10" title="Editar solicitud">
                           <Pencil size={12} />
+                        </button>
+                        <button onClick={() => setDeleteRequestTarget(item)} className="rounded-lg border border-red-200 p-1.5 text-red-600 hover:bg-red-50 dark:border-red-500/30 dark:text-red-300 dark:hover:bg-red-500/10" title="Eliminar solicitud">
+                          <Trash2 size={12} />
                         </button>
                         <span className={`rounded-full border px-2.5 py-1 text-[10px] font-black uppercase ${prevStatus(item.estado)}`}>{item.estado}</span>
                       </div>
