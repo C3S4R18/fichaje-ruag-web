@@ -734,18 +734,14 @@ function VacacionesPageContent() {
   }, [requestsYear])
 
   const derived = useCallback((row: Balance) => {
-    const importedTotal = num(row.total_gozados)
     const visibleGozados = months.reduce((sum, col) => sum + getMonthView(row, col).total, 0)
-    const saldoDelta = visibleGozados - importedTotal
-    const pendientesPrev = num(row.dias_pendientes) - saldoDelta
+    const renewalCredit = row.fecha_vencimiento ? (num(row.vacaciones_por_vencer) > 0 ? num(row.vacaciones_por_vencer) : 30) : 0
+    const pendientesPrev = num(row.saldo_arrastre) - visibleGozados
     const amount = renewalAmount(row)
     const isDue = renewalDue(row)
     const porVencer = isDue ? 0 : amount
-    const pendingBase = num(row.renovaciones_aplicadas) > 0 && row.vacaciones_pendientes_periodo != null
-      ? num(row.vacaciones_pendientes_periodo)
-      : num(row.dias_pendientes) + (isDue ? amount : 0)
-    const pendientesPeriodo = pendingBase - saldoDelta
-    return { saldoDelta, pendientesPrev, pendientesPeriodo, gozados: visibleGozados, porVencer }
+    const pendientesPeriodo = pendientesPrev + renewalCredit
+    return { pendientesPrev, pendientesPeriodo, gozados: visibleGozados, porVencer }
   }, [getMonthView])
 
   const exportExcel = useCallback(async () => {
