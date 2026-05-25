@@ -15,6 +15,7 @@ import {
   Pencil,
   RefreshCw,
   Search,
+  Trash2,
   UserPlus,
   X,
   XCircle,
@@ -451,6 +452,51 @@ function EditorModal({
   )
 }
 
+function DeleteWorkerModal({
+  target,
+  onClose,
+  onConfirm,
+  deleting,
+}: {
+  target: Balance | null
+  onClose: () => void
+  onConfirm: () => void
+  deleting: boolean
+}) {
+  if (!target) return null
+  return (
+    <div className="fixed inset-0 z-[130] flex items-center justify-center bg-slate-950/60 p-4 backdrop-blur-sm" onClick={deleting ? undefined : onClose}>
+      <div className="w-full max-w-md rounded-3xl border border-slate-200 bg-white shadow-2xl dark:border-slate-700 dark:bg-slate-900" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-start gap-4 border-b border-slate-200 p-5 dark:border-slate-800">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-red-50 text-red-600 dark:bg-red-500/10 dark:text-red-300">
+            <Trash2 size={22} />
+          </div>
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[0.18em] text-red-400">Quitar de la tabla</p>
+            <h3 className="mt-1 text-lg font-black text-slate-900 dark:text-white">Eliminar fila del trabajador</h3>
+            <p className="text-sm text-slate-500 dark:text-slate-400">{target.trabajador_nombre} - {target.area || 'SIN AREA'}</p>
+          </div>
+        </div>
+        <div className="p-5">
+          <p className="text-sm text-slate-600 dark:text-slate-300">
+            Se quitara la fila de <span className="font-black">{target.trabajador_nombre}</span> del control de vacaciones {target.periodo}. Esta accion no se puede deshacer.
+          </p>
+          <p className="mt-3 rounded-2xl bg-slate-50 px-4 py-3 text-xs text-slate-500 dark:bg-slate-950 dark:text-slate-400">
+            Solo se elimina su fila de esta tabla. Las solicitudes y su fotocheck no se modifican.
+          </p>
+        </div>
+        <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 p-5 dark:border-slate-800">
+          <button onClick={onClose} disabled={deleting} className="rounded-xl border border-slate-200 px-4 py-2 text-xs font-black disabled:opacity-50 dark:border-slate-700">CANCELAR</button>
+          <button onClick={onConfirm} disabled={deleting} className="inline-flex items-center gap-2 rounded-xl bg-red-600 px-4 py-2 text-xs font-black text-white disabled:opacity-50">
+            {deleting ? <Loader2 size={14} className="animate-spin" /> : <Trash2 size={14} />}
+            {deleting ? 'ELIMINANDO...' : 'ELIMINAR FILA'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function VacacionesPageContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -470,6 +516,8 @@ function VacacionesPageContent() {
   const [manualSaving, setManualSaving] = useState(false)
   const [manualDraft, setManualDraft] = useState<ManualRequestDraft>(blankManualRequestDraft())
   const [editingRequestId, setEditingRequestId] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<Balance | null>(null)
+  const [deleting, setDeleting] = useState(false)
   const currentYear = new Date().getFullYear()
   const requestedYear = Number(searchParams.get('year') || 0) || null
 
@@ -1013,6 +1061,21 @@ function VacacionesPageContent() {
     void fetchAll()
   }, [activeYear, editorDraft, fetchAll])
 
+  const confirmDeleteWorker = useCallback(async () => {
+    if (!deleteTarget) return
+    setDeleting(true)
+    const { error } = await supabase.from('vacaciones_saldos').delete().eq('id', deleteTarget.id)
+    setDeleting(false)
+    if (error) {
+      toast.error(error.message)
+      return
+    }
+    setBalances((prev) => prev.filter((row) => row.id !== deleteTarget.id))
+    toast.success(`${deleteTarget.trabajador_nombre} fue eliminado de la tabla`)
+    setDeleteTarget(null)
+    void fetchAll()
+  }, [deleteTarget, fetchAll])
+
   if (!mounted) return <div className="flex min-h-screen items-center justify-center bg-slate-50 dark:bg-slate-950"><Loader2 className="animate-spin text-blue-600" size={28} /></div>
 
   return (
@@ -1038,6 +1101,12 @@ function VacacionesPageContent() {
         saving={manualSaving}
         isEdit={Boolean(editingRequestId)}
       />
+      <DeleteWorkerModal
+        target={deleteTarget}
+        onClose={() => setDeleteTarget(null)}
+        onConfirm={() => void confirmDeleteWorker()}
+        deleting={deleting}
+      />
       <div className="mx-auto max-w-[1800px] space-y-6">
         <header className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
           <div className="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
@@ -1055,7 +1124,7 @@ function VacacionesPageContent() {
             <div className="flex flex-wrap gap-2">
               <Link href="/vacaciones/historico" className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black dark:border-slate-700 dark:bg-slate-900"><Archive size={14} /> HISTORICO</Link>
               <button onClick={() => void fetchAll()} className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black dark:border-slate-700 dark:bg-slate-900"><RefreshCw size={14} /> ACTUALIZAR</button>
-              <button onClick={openNewEditor} className="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-black text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300"><UserPlus size={14} /> NUEVO RRHH</button>
+              <button onClick={openNewEditor} className="inline-flex items-center gap-2 rounded-xl border border-blue-200 bg-blue-50 px-3 py-2 text-xs font-black text-blue-700 dark:border-blue-500/30 dark:bg-blue-500/10 dark:text-blue-300"><UserPlus size={14} /> NUEVO TRABAJADOR</button>
               <button onClick={exportExcel} disabled={exporting || !balancesYear.length} className="inline-flex items-center gap-2 rounded-xl bg-emerald-600 px-3 py-2 text-xs font-black text-white disabled:opacity-50">{exporting ? <Loader2 size={14} className="animate-spin" /> : <Download size={14} />} EXPORTAR</button>
             </div>
           </div>
@@ -1125,6 +1194,9 @@ function VacacionesPageContent() {
                                   </button>
                                   <button onClick={() => openEditEditor(row)} className="rounded-lg border border-slate-200 p-1.5 text-slate-500 hover:bg-slate-100 dark:border-slate-700 dark:text-slate-300 dark:hover:bg-slate-800" title="Editar trabajador">
                                     <Pencil size={12} />
+                                  </button>
+                                  <button onClick={() => setDeleteTarget(row)} className="rounded-lg border border-red-200 p-1.5 text-red-600 hover:bg-red-50 dark:border-red-500/30 dark:text-red-300 dark:hover:bg-red-500/10" title="Eliminar trabajador de la tabla">
+                                    <Trash2 size={12} />
                                   </button>
                                 </div>
                               </div>
