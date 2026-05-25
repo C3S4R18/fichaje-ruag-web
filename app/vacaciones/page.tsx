@@ -220,14 +220,14 @@ function overlapDaysInMonth(item: RequestRow, year: number, month: number) {
 function isRetroactiveRequest(item: RequestRow) {
   return item.estado === 'aprobada' && asDate(item.fecha_fin).getTime() < asDate(item.created_at).getTime()
 }
-function visibleImportedDays(imported: number, approved: number, deducted: number) {
-  return Math.max(imported + approved - deducted, 0)
+function visibleImportedDays(imported: number, approved: number) {
+  return Math.max(imported + approved, 0)
 }
 function buildMonthDetail(row: Balance, col: MonthCol, sourceRequests: RequestRow[]): MonthDetail {
   const imported = num(row[col.key])
   const requests = sourceRequests.filter((item) => item.dni === row.dni && overlapsYear(item, row.periodo) && overlapsMonth(item, row.periodo, col.monthIndex))
   const approved = requests
-    .filter((item) => item.estado === 'aprobada' && !isRetroactiveRequest(item))
+    .filter((item) => item.estado === 'aprobada')
     .reduce((sum, item) => sum + overlapDaysInMonth(item, row.periodo, col.monthIndex), 0)
   const deducted = requests
     .filter(isRetroactiveRequest)
@@ -238,7 +238,7 @@ function buildMonthDetail(row: Balance, col: MonthCol, sourceRequests: RequestRo
     imported,
     approved,
     deducted,
-    visible: visibleImportedDays(imported, approved, deducted),
+    visible: visibleImportedDays(imported, approved),
     requests,
   }
 }
@@ -314,7 +314,7 @@ function MonthModal({
                   <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">Pedido: {item.dias_solicitados} dias - En este mes: {overlapDaysInMonth(item, detail.row.periodo, detail.col.monthIndex)} dias</p>
                   {isRetroactiveRequest(item) && (
                     <p className="mt-2 inline-flex rounded-full bg-red-50 px-2.5 py-1 text-[10px] font-black uppercase text-red-600 dark:bg-red-500/10 dark:text-red-300">
-                      Resta al importado
+                      Resta al saldo
                     </p>
                   )}
                 </div>
