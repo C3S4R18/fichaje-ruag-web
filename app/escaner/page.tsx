@@ -15,6 +15,8 @@ import { format, parseISO, differenceInDays } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { toast } from 'sonner'
 import { motion, AnimatePresence } from 'framer-motion'
+import { animate, stagger } from 'animejs'
+import type { AnimationParams, JSAnimation } from 'animejs'
 import { supabase } from '@/utils/supabase/client'
 import { activateDeviceSession, clearWorkerSession, hasDeviceSessionToken, isCurrentDeviceSession } from '@/utils/device-session'
 import { ensureBirthdayPush, pushSupported } from '@/utils/push'
@@ -2099,6 +2101,91 @@ export default function EscanerWeb() {
 
   // ── Render ─────────────────────────────────────────────────────────────────
 
+  const showOfflineFotocheck = Boolean(!asistenciaHoy && !isOnline && perfil)
+  const showScannerView = Boolean(!asistenciaHoy && !showOfflineFotocheck)
+
+  useEffect(() => {
+    if (isLoading || typeof window === 'undefined') return
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+
+    const animations: JSAnimation[] = []
+    const runAnime = (selector: string, params: AnimationParams) => {
+      if (!document.querySelector(selector)) return
+      animations.push(animate(selector, params))
+    }
+
+    if (showScannerView) {
+      runAnime('.anime-scanner-card', {
+        opacity: [0, 1],
+        translateY: [18, 0],
+        scale: [0.985, 1],
+        duration: 620,
+        ease: 'out(3)',
+      })
+      runAnime('.anime-scanner-panel', {
+        opacity: [0, 1],
+        translateY: [18, 0],
+        duration: 520,
+        delay: 90,
+        ease: 'outQuad',
+      })
+      runAnime('.anime-scanner-action', {
+        opacity: [0, 1],
+        translateY: [16, 0],
+        scale: [0.94, 1],
+        duration: 460,
+        delay: stagger(70),
+        ease: 'outBack',
+      })
+    }
+
+    if (showOfflineFotocheck || asistenciaHoy) {
+      runAnime('.anime-fotocheck-card', {
+        opacity: [0, 1],
+        translateY: [20, 0],
+        scale: [0.975, 1],
+        duration: 640,
+        ease: 'out(3)',
+      })
+      runAnime('.anime-profile-photo', {
+        scale: [0.9, 1],
+        rotate: [-2, 0],
+        duration: 640,
+        delay: 110,
+        ease: 'outBack',
+      })
+      runAnime('.anime-fotocheck-chip', {
+        opacity: [0, 1],
+        translateY: [8, 0],
+        scale: [0.96, 1],
+        duration: 420,
+        delay: stagger(55, { start: 160 }),
+        ease: 'outQuad',
+      })
+      runAnime('.anime-fotocheck-action', {
+        opacity: [0, 1],
+        translateY: [12, 0],
+        duration: 420,
+        delay: stagger(80, { start: 180 }),
+        ease: 'outQuad',
+      })
+    }
+
+    if (showSideMenu) {
+      runAnime('.anime-menu-item', {
+        opacity: [0, 1],
+        translateX: [18, 0],
+        duration: 430,
+        delay: stagger(38, { start: 120 }),
+        ease: 'outQuad',
+      })
+    }
+
+    return () => {
+      animations.forEach((animation) => animation.pause())
+    }
+  }, [asistenciaHoy?.id, isLoading, perfil?.dni, scanState, showOfflineFotocheck, showScannerView, showSideMenu])
+
   if (isLoading || !perfil) {
     return (
       <div className="min-h-screen flex flex-col items-center justify-center" style={{ background: 'var(--bg)' }}>
@@ -2115,8 +2202,6 @@ export default function EscanerWeb() {
     )
   }
 
-  const showOfflineFotocheck = Boolean(!asistenciaHoy && !isOnline && perfil)
-  const showScannerView = Boolean(!asistenciaHoy && !showOfflineFotocheck)
   const cachedProfilePhoto = store.get(PROFILE_PHOTO_DATA_KEY) || ''
   const profilePhotoSrc = (!isOnline && cachedProfilePhoto) ? cachedProfilePhoto : (perfil.foto_url || cachedProfilePhoto)
   const isPuntual   = asistenciaHoy?.estado_ingreso === 'PUNTUAL'
@@ -2249,7 +2334,7 @@ export default function EscanerWeb() {
                   { key: 'rrhh', label: 'RRHH', desc: 'Recursos humanos', gif: '/icons-web/rrhh.gif', icon: <Badge size={20} />, colors: ['#2563EB', '#06B6D4'] },
                 ].map((item) => (
                   <motion.button key={item.key} onClick={() => openFeature(item.key as WorkerFeature)}
-                    className="group relative w-full overflow-hidden rounded-[24px] border p-3 flex items-center gap-3 text-left"
+                    className="anime-menu-item group relative w-full overflow-hidden rounded-[24px] border p-3 flex items-center gap-3 text-left"
                     style={{ background: 'rgba(255,255,255,0.82)', borderColor: `${item.colors[0]}30`, boxShadow: '0 12px 28px rgba(15,23,42,0.06)' }}
                     whileHover={{ x: -3 }}
                     whileTap={{ scale: 0.98 }}>
@@ -2309,7 +2394,7 @@ export default function EscanerWeb() {
 
           {/* Camera box */}
           <motion.div
-            className="relative flex-1 rounded-3xl overflow-hidden min-h-[320px] max-h-[55vh]"
+            className="anime-scanner-card relative flex-1 rounded-3xl overflow-hidden min-h-[320px] max-h-[55vh]"
             style={{ background: '#0f0f1a', boxShadow: 'var(--shadow-lg)', border: '2px solid var(--border)' }}
             initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, ease: [0.34, 1.2, 0.64, 1] }}
@@ -2423,7 +2508,7 @@ export default function EscanerWeb() {
           {/* Bottom panel */}
           {scanState === 'ESCANEO' && (
             <motion.div
-              className="mt-4 rounded-3xl p-4"
+              className="anime-scanner-panel mt-4 rounded-3xl p-4"
               style={{ background: 'var(--surface)', border: '1.5px solid var(--border)', boxShadow: 'var(--shadow-md)' }}
               initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.2 }}
@@ -2440,7 +2525,7 @@ export default function EscanerWeb() {
                   <motion.button
                     key={btn.label}
                     onClick={btn.onClick}
-                    className="flex flex-col items-center justify-center py-3.5 rounded-2xl font-bold text-sm gap-1.5 transition-all border"
+                    className="anime-scanner-action flex flex-col items-center justify-center py-3.5 rounded-2xl font-bold text-sm gap-1.5 transition-all border"
                     style={{ background: btn.bg, color: btn.color, borderColor: btn.border }}
                     whileHover={{ scale: 1.04, y: -2 }} whileTap={{ scale: 0.96 }}
                   >
@@ -2478,7 +2563,7 @@ export default function EscanerWeb() {
           <input type="file" accept="image/*" ref={fileInputRef} onChange={handleFoto} className="hidden" />
 
           <motion.div
-            className="relative"
+            className="anime-fotocheck-card relative"
             initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, ease: [0.34, 1.2, 0.64, 1] }}
           >
@@ -2527,7 +2612,7 @@ export default function EscanerWeb() {
 
               {/* Photo */}
               <div className="flex justify-center mb-5">
-                <div className="relative">
+                <div className="anime-profile-photo relative">
                   {/* Anillo cónico animado alrededor de la foto */}
                   <motion.div
                     className="absolute -inset-[6px] rounded-full"
@@ -2590,11 +2675,11 @@ export default function EscanerWeb() {
               </p>
 
               <div className="flex justify-center items-center gap-2 mt-3">
-                <span className="px-4 py-1.5 rounded-full text-[11px] font-extrabold tracking-[0.18em] uppercase"
+                <span className="anime-fotocheck-chip px-4 py-1.5 rounded-full text-[11px] font-extrabold tracking-[0.18em] uppercase"
                   style={{ background: 'var(--blue-light)', color: 'var(--blue)', border: '1.5px solid var(--border-2)', fontFamily: 'Sora, sans-serif' }}>
                   {perfil.area}
                 </span>
-                <span className="px-2.5 py-1 rounded-full text-[9px] font-black tracking-[0.18em] uppercase flex items-center gap-1"
+                <span className="anime-fotocheck-chip px-2.5 py-1 rounded-full text-[9px] font-black tracking-[0.18em] uppercase flex items-center gap-1"
                   style={{ background: 'rgba(5,150,105,0.10)', color: 'var(--green)', border: '1px solid rgba(5,150,105,0.25)', fontFamily: 'Sora, sans-serif' }}>
                   <CheckCircle2 size={10} strokeWidth={3} /> VERIFICADO
                 </span>
@@ -2602,7 +2687,7 @@ export default function EscanerWeb() {
 
               {perfil.fecha_cumpleanos && (
                 <div className="flex justify-center mt-2">
-                  <span className="px-3 py-1.5 rounded-full text-[10px] font-black flex items-center gap-1.5"
+                  <span className="anime-fotocheck-chip px-3 py-1.5 rounded-full text-[10px] font-black flex items-center gap-1.5"
                     style={{ background: 'rgba(236,72,153,0.10)', color: '#DB2777', border: '1px solid rgba(236,72,153,0.24)', fontFamily: 'Sora, sans-serif' }}>
                     <Cake size={13} /> Cumpleaños: {formatBirthdayDate(perfil.fecha_cumpleanos)}
                   </span>
@@ -2611,7 +2696,7 @@ export default function EscanerWeb() {
 
               {(isPendingLocal || cardIsOfflineOnly) && (
                 <div className="flex justify-center mt-3">
-                  <span className="px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-[0.14em] flex items-center gap-1.5"
+                  <span className="anime-fotocheck-chip px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-[0.14em] flex items-center gap-1.5"
                     style={{ background: 'rgba(255,247,237,0.96)', color: 'var(--amber)', border: '1px solid rgba(245,158,11,0.28)' }}>
                     <CloudOff size={13} />
                     {isPendingLocal ? 'Pendiente offline' : 'Modo offline'}
@@ -2648,7 +2733,7 @@ export default function EscanerWeb() {
           {cardIsOfflineOnly ? (
             <div className="flex flex-col gap-3">
               <motion.div
-                className="rounded-3xl p-5 text-center"
+                className="anime-fotocheck-action rounded-3xl p-5 text-center"
                 style={{ background: 'rgba(255,247,237,0.92)', border: '1.5px solid rgba(245,158,11,0.28)', boxShadow: 'var(--shadow-sm)' }}
                 initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
               >
@@ -2659,7 +2744,7 @@ export default function EscanerWeb() {
               </motion.div>
               <motion.button
                 onClick={handleOfflineEntry}
-                className="w-full h-[64px] rounded-2xl flex items-center justify-center gap-3 font-black text-base text-white"
+                className="anime-fotocheck-action w-full h-[64px] rounded-2xl flex items-center justify-center gap-3 font-black text-base text-white"
                 style={{ background: 'linear-gradient(135deg, #0F766E, #22C55E)', fontFamily: 'Sora, sans-serif', boxShadow: '0 12px 28px rgba(16,185,129,0.28)' }}
                 whileTap={{ scale: 0.97 }}
               >
@@ -2669,7 +2754,7 @@ export default function EscanerWeb() {
             </div>
           ) : asistenciaHoy?.hora_salida ? (
             <motion.div
-              className="rounded-3xl p-6 flex flex-col items-center text-center"
+              className="anime-fotocheck-action rounded-3xl p-6 flex flex-col items-center text-center"
               style={{ background: 'var(--green-light)', border: '1.5px solid #6EE7B7', boxShadow: 'var(--shadow-sm)' }}
               initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
             >
@@ -2681,7 +2766,7 @@ export default function EscanerWeb() {
             <div className="flex flex-col gap-3">
               <motion.button
                 onClick={() => { setIsRemoteExit(false); setNotaTexto(''); setShowNota(true) }}
-                className="w-full py-4 rounded-2xl flex items-center justify-center gap-2 font-semibold text-sm transition-all border"
+                className="anime-fotocheck-action w-full py-4 rounded-2xl flex items-center justify-center gap-2 font-semibold text-sm transition-all border"
                 style={{ background: 'var(--surface)', color: 'var(--text-2)', borderColor: 'var(--border)', boxShadow: 'var(--shadow-sm)' }}
                 whileHover={{ y: -1, boxShadow: 'var(--shadow-md)' }} whileTap={{ scale: 0.98 }}
               >
@@ -2693,7 +2778,7 @@ export default function EscanerWeb() {
               <motion.button
                 onClick={handleSalida}
                 disabled={isMarkingExit}
-                className="w-full h-[64px] rounded-2xl flex items-center justify-center gap-3 font-black text-base disabled:opacity-60 relative overflow-hidden"
+                className="anime-fotocheck-action w-full h-[64px] rounded-2xl flex items-center justify-center gap-3 font-black text-base disabled:opacity-60 relative overflow-hidden"
                 style={{
                   background: 'linear-gradient(135deg, #DC2626, #B91C1C)',
                   color: 'white',
