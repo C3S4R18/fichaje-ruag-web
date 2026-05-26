@@ -21,8 +21,8 @@ export function pushSupported(): boolean {
 }
 
 /**
- * Registra el service worker, pide permiso si hace falta, crea la suscripción Web Push
- * y la guarda en Supabase para que la Edge Function "birthday-push" pueda avisar el cumpleaños.
+ * Registra el service worker, pide permiso si hace falta, crea la suscripcion Web Push
+ * y la guarda en Supabase para avisos de cumpleanos y recordatorios de salida.
  *
  * @param dni del trabajador
  * @param promptIfNeeded si es true, pide permiso al usuario; si es false, solo suscribe cuando ya está concedido.

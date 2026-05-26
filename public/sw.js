@@ -1,4 +1,4 @@
-// Service worker para Web Push (aviso de cumpleaños en 2do plano).
+// Service worker para Web Push en segundo plano.
 self.addEventListener('install', () => self.skipWaiting())
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()))
 

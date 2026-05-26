@@ -57,3 +57,35 @@ create policy "push_subscriptions eliminacion anon"
 --   $$
 -- );
 
+-- OPCIONAL: programar tambien recordatorios de salida PWA/iPhone.
+-- 17:30 Lima = 22:30 UTC, 18:00 Lima = 23:00 UTC.
+--
+-- select cron.schedule(
+--   'departure-push-1730',
+--   '30 22 * * *',
+--   $$
+--   select net.http_post(
+--     url     := 'https://<PROJECT_REF>.supabase.co/functions/v1/departure-push',
+--     headers := jsonb_build_object(
+--       'Content-Type', 'application/json',
+--       'Authorization', 'Bearer <SERVICE_ROLE_KEY>'
+--     ),
+--     body    := '{"slot":"1730"}'::jsonb
+--   );
+--   $$
+-- );
+--
+-- select cron.schedule(
+--   'departure-push-1800',
+--   '0 23 * * *',
+--   $$
+--   select net.http_post(
+--     url     := 'https://<PROJECT_REF>.supabase.co/functions/v1/departure-push',
+--     headers := jsonb_build_object(
+--       'Content-Type', 'application/json',
+--       'Authorization', 'Bearer <SERVICE_ROLE_KEY>'
+--     ),
+--     body    := '{"slot":"1800"}'::jsonb
+--   );
+--   $$
+-- );
