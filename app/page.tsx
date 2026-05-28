@@ -870,6 +870,32 @@ export default function AdminDashboard() {
     map.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 80, duration: 1200, pitch: 60 })
   }, [vistaActual, conGPS])
 
+  // FIX MÓVIL: mapbox-gl no repinta cuando el contenedor cambia de tamaño después del mount.
+  // Forzamos resize al entrar a 'mapa', al rotar la pantalla y cuando el contenedor cambia.
+  useEffect(() => {
+    if (vistaActual !== 'mapa') return
+    const m = mapRef.current?.getMap()
+    if (!m) return
+    const resize = () => { try { m.resize() } catch {} }
+    const t1 = window.setTimeout(resize, 50)
+    const t2 = window.setTimeout(resize, 300)
+    const t3 = window.setTimeout(resize, 800)
+    window.addEventListener('resize', resize)
+    window.addEventListener('orientationchange', resize)
+    let observer: ResizeObserver | null = null
+    const container = m.getContainer?.()
+    if (container && typeof ResizeObserver !== 'undefined') {
+      observer = new ResizeObserver(resize)
+      observer.observe(container)
+    }
+    return () => {
+      window.clearTimeout(t1); window.clearTimeout(t2); window.clearTimeout(t3)
+      window.removeEventListener('resize', resize)
+      window.removeEventListener('orientationchange', resize)
+      observer?.disconnect()
+    }
+  }, [vistaActual])
+
   // ── Stats — multi-turno ───────────────────────────────────────────────────
 
   const trabajadoresUnicos = useMemo(() => new Set(asistencias.map(a => a.dni)).size, [asistencias])
@@ -1338,27 +1364,102 @@ export default function AdminDashboard() {
 
           {/* Próximos cumpleaños */}
           {(cumpleHoy.length > 0 || cumpleProximos.length > 0) && (
-            <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
-              <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.15em] mb-3 flex items-center gap-1.5"><Cake size={11} /> Cumpleaños</p>
-              <div className="space-y-2">
-                {[...cumpleHoy, ...cumpleProximos].slice(0, 6).map((c) => (
-                  <div key={c.dni} className="flex items-center gap-2.5">
-                    <div className="w-9 h-9 rounded-full overflow-hidden shrink-0 bg-pink-100 flex items-center justify-center text-[10px] font-black text-pink-600">
-                      {c.foto ? <img src={c.foto} alt="" className="w-full h-full object-cover" /> : c.nombre.split(' ').slice(0, 2).map(w => w[0]).join('')}
+            <motion.div
+              className="relative overflow-hidden rounded-2xl border shadow-sm"
+              style={{ background: 'linear-gradient(160deg, #FFFFFF, #FDF4FF 60%, #FAF5FF)', borderColor: '#EC489933' }}
+              initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.45, ease: [0.34, 1.2, 0.64, 1] }}
+            >
+              {/* Glow decorativo */}
+              <motion.div
+                className="pointer-events-none absolute -top-10 -right-10 h-32 w-32 rounded-full blur-2xl"
+                style={{ background: 'radial-gradient(circle, rgba(236,72,153,0.35), transparent 70%)' }}
+                animate={{ scale: [1, 1.15, 1], opacity: [0.5, 0.85, 0.5] }}
+                transition={{ duration: 3.6, repeat: Infinity, ease: 'easeInOut' }}
+              />
+              {cumpleHoy.length > 0 && (
+                <div className="pointer-events-none absolute inset-0 opacity-40">
+                  <LottiePlayer src="/lottie/confetti.json" style={{ width: '100%', height: '100%' }} />
+                </div>
+              )}
+
+              <div className="relative z-10 p-4">
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2.5">
+                    <motion.div
+                      className="w-9 h-9 rounded-2xl overflow-hidden bg-white border flex items-center justify-center"
+                      style={{ borderColor: '#EC489955', boxShadow: '0 6px 16px rgba(236,72,153,0.18)' }}
+                      animate={{ y: [0, -2, 0] }} transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
+                    >
+                      <LottiePlayer src="/lottie/birthday-cake.json" style={{ width: 32, height: 32 }} />
+                    </motion.div>
+                    <div>
+                      <p className="text-[10px] font-black text-pink-500 uppercase tracking-[0.18em] leading-none">Cumpleaños</p>
+                      <p className="text-[10px] font-bold text-slate-400 mt-1">{cumpleHoy.length > 0 ? `¡Hoy cumple ${cumpleHoy.length}!` : 'Próximos del mes'}</p>
                     </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-xs font-black text-slate-700 dark:text-slate-200 truncate">{c.nombre}</p>
-                      <p className="text-[10px] font-bold text-slate-400">{c.label}{c.turningAge ? ` · ${c.turningAge} años` : ''}</p>
-                    </div>
-                    {c.isToday ? (
-                      <span className="px-2 py-1 rounded-full text-[9px] font-black text-white shrink-0" style={{ background: 'linear-gradient(135deg, #EC4899, #7C3AED)' }}>HOY</span>
-                    ) : (
-                      <span className="text-[10px] font-black text-slate-400 shrink-0">{c.daysUntil}d</span>
-                    )}
                   </div>
-                ))}
+                  {cumpleHoy.length > 0 && (
+                    <motion.span
+                      className="px-2 py-1 rounded-full text-[9px] font-black text-white"
+                      style={{ background: 'linear-gradient(135deg, #EC4899, #7C3AED)' }}
+                      animate={{ scale: [1, 1.08, 1] }} transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
+                    >🎉 HOY</motion.span>
+                  )}
+                </div>
+
+                <motion.div
+                  className="space-y-2"
+                  initial="hidden" animate="show"
+                  variants={{ hidden: {}, show: { transition: { staggerChildren: 0.06 } } }}
+                >
+                  {[...cumpleHoy, ...cumpleProximos].slice(0, 6).map((c) => {
+                    const proximity = c.isToday ? 'today' : c.daysUntil <= 7 ? 'soon' : 'later'
+                    const ring = proximity === 'today' ? '#EC4899' : proximity === 'soon' ? '#F59E0B' : '#94A3B8'
+                    return (
+                      <motion.div
+                        key={c.dni}
+                        className="flex items-center gap-2.5 rounded-xl p-2 border transition-all"
+                        style={{
+                          background: proximity === 'today' ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.6)',
+                          borderColor: proximity === 'today' ? '#EC489966' : 'rgba(226,232,240,0.8)',
+                          boxShadow: proximity === 'today' ? '0 4px 14px rgba(236,72,153,0.18)' : 'none',
+                        }}
+                        variants={{ hidden: { opacity: 0, x: -10 }, show: { opacity: 1, x: 0 } }}
+                        whileHover={{ x: 2, scale: 1.01 }}
+                      >
+                        <div className="relative shrink-0">
+                          <div className="w-9 h-9 rounded-full overflow-hidden bg-pink-100 flex items-center justify-center text-[10px] font-black text-pink-600"
+                            style={{ boxShadow: `0 0 0 2px white, 0 0 0 3px ${ring}55` }}>
+                            {c.foto ? <img src={c.foto} alt="" className="w-full h-full object-cover" /> : c.nombre.split(' ').slice(0, 2).map(w => w[0]).join('')}
+                          </div>
+                          {proximity === 'today' && (
+                            <motion.span
+                              className="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white"
+                              style={{ background: '#EC4899' }}
+                              animate={{ scale: [1, 1.3, 1] }} transition={{ duration: 1.2, repeat: Infinity }}
+                            />
+                          )}
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-xs font-black text-slate-800 dark:text-slate-100 truncate leading-tight">{c.nombre}</p>
+                          <p className="text-[10px] font-bold mt-0.5 flex items-center gap-1" style={{ color: ring }}>
+                            <Cake size={9} /> {c.label}{c.turningAge ? ` · ${c.turningAge}` : ''}
+                          </p>
+                        </div>
+                        {proximity === 'today' ? (
+                          <span className="px-2 py-1 rounded-lg text-[9px] font-black text-white shrink-0" style={{ background: 'linear-gradient(135deg, #EC4899, #7C3AED)' }}>HOY</span>
+                        ) : (
+                          <div className="text-right shrink-0">
+                            <p className="text-sm font-black leading-none tabular-nums" style={{ color: ring }}>{c.daysUntil}</p>
+                            <p className="text-[8px] font-black uppercase tracking-wider" style={{ color: ring + 'bb' }}>{c.daysUntil === 1 ? 'día' : 'días'}</p>
+                          </div>
+                        )}
+                      </motion.div>
+                    )
+                  })}
+                </motion.div>
               </div>
-            </div>
+            </motion.div>
           )}
 
           {false && (

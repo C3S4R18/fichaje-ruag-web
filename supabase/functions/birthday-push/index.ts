@@ -33,14 +33,39 @@ function limaMonthDay(offsetDays = 0) {
   }
 }
 
+async function sendToDni(dni: string, payload: { title: string; body: string; tag?: string }) {
+  const { data: subs } = await supabase
+    .from('push_subscriptions')
+    .select('endpoint, subscription')
+    .eq('dni', dni)
+  let sent = 0
+  let cleaned = 0
+  for (const s of subs ?? []) {
+    try {
+      await webpush.sendNotification(
+        s.subscription as webpush.PushSubscription,
+        JSON.stringify({ ...payload, url: '/escaner', tag: payload.tag ?? 'ruag-cumple' }),
+      )
+      sent++
+    } catch (e) {
+      const code = (e as { statusCode?: number })?.statusCode
+      if (code === 404 || code === 410) {
+        await supabase.from('push_subscriptions').delete().eq('endpoint', s.endpoint)
+        cleaned++
+      }
+    }
+  }
+  return { sent, cleaned }
+}
+
 Deno.serve(async () => {
   const today = limaMonthDay(0)
   const tomorrow = limaMonthDay(1)
 
+  // 1. Trabajadores con fecha de cumpleaños registrada.
   const { data: perfiles, error } = await supabase
     .from('fotocheck_perfiles')
     .select('dni, nombres_completos, fecha_cumpleanos')
-    .not('fecha_cumpleanos', 'is', null)
 
   if (error) {
     return new Response(JSON.stringify({ error: error.message }), {
@@ -53,38 +78,31 @@ Deno.serve(async () => {
   let cleaned = 0
 
   for (const p of perfiles ?? []) {
-    const parts = String(p.fecha_cumpleanos).slice(0, 10).split('-')
-    const m = Number(parts[1])
-    const d = Number(parts[2])
+    const fecha = p.fecha_cumpleanos as string | null
+    let payload: { title: string; body: string; tag?: string } | null = null
 
-    let payload: { title: string; body: string } | null = null
-    if (m === today.m && d === today.d) {
-      payload = { title: '🎉 ¡Feliz cumpleaños!', body: 'Hoy es tu día. ¡Que lo disfrutes muchísimo! 🥳🎂' }
-    } else if (m === tomorrow.m && d === tomorrow.d) {
-      payload = { title: '🎂 ¡Mañana es tu cumpleaños!', body: 'Mañana cumples años. Prepárate para celebrar 🎈' }
-    }
-    if (!payload) continue
-
-    const { data: subs } = await supabase
-      .from('push_subscriptions')
-      .select('endpoint, subscription')
-      .eq('dni', p.dni)
-
-    for (const s of subs ?? []) {
-      try {
-        await webpush.sendNotification(
-          s.subscription as webpush.PushSubscription,
-          JSON.stringify({ ...payload, url: '/escaner', tag: 'ruag-cumple' }),
-        )
-        sent++
-      } catch (e) {
-        const code = (e as { statusCode?: number })?.statusCode
-        if (code === 404 || code === 410) {
-          await supabase.from('push_subscriptions').delete().eq('endpoint', s.endpoint)
-          cleaned++
-        }
+    if (fecha) {
+      const parts = String(fecha).slice(0, 10).split('-')
+      const m = Number(parts[1])
+      const d = Number(parts[2])
+      if (m === today.m && d === today.d) {
+        payload = { title: '🎉 ¡Feliz cumpleaños!', body: 'Hoy es tu día. ¡Que lo disfrutes muchísimo! 🥳🎂', tag: 'ruag-cumple-hoy' }
+      } else if (m === tomorrow.m && d === tomorrow.d) {
+        payload = { title: '🎂 ¡Mañana es tu cumpleaños!', body: 'Mañana cumples años. Prepárate para celebrar 🎈', tag: 'ruag-cumple-manana' }
+      }
+    } else {
+      // Sin cumpleaños registrado → recordatorio amable.
+      payload = {
+        title: '🎂 Agrega tu fecha de cumpleaños',
+        body: 'Así tu equipo sabrá cuándo celebrarte. Solo toma 10 segundos en la app.',
+        tag: 'ruag-cumple-setup',
       }
     }
+
+    if (!payload) continue
+    const r = await sendToDni(p.dni, payload)
+    sent += r.sent
+    cleaned += r.cleaned
   }
 
   return new Response(JSON.stringify({ ok: true, sent, cleaned }), {

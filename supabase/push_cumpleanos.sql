@@ -56,6 +56,40 @@ create policy "push_subscriptions eliminacion anon"
 --   );
 --   $$
 -- );
+--
+-- ── Recordatorio de salida ─────────────────────────────────────────────────
+-- 17:50 Lima = 22:50 UTC ⇒ "Falta poco para ir a casa"
+-- 18:00 Lima = 23:00 UTC ⇒ "Hora de irse, no olvides marcar tu salida"
+--
+-- select cron.schedule(
+--   'exit-reminder-soon',
+--   '50 22 * * *',
+--   $$
+--   select net.http_post(
+--     url     := 'https://<PROJECT_REF>.supabase.co/functions/v1/exit-reminder-push',
+--     headers := jsonb_build_object(
+--       'Content-Type', 'application/json',
+--       'Authorization', 'Bearer <SERVICE_ROLE_KEY>'
+--     ),
+--     body    := '{"kind":"soon"}'::jsonb
+--   );
+--   $$
+-- );
+--
+-- select cron.schedule(
+--   'exit-reminder-now',
+--   '0 23 * * *',
+--   $$
+--   select net.http_post(
+--     url     := 'https://<PROJECT_REF>.supabase.co/functions/v1/exit-reminder-push',
+--     headers := jsonb_build_object(
+--       'Content-Type', 'application/json',
+--       'Authorization', 'Bearer <SERVICE_ROLE_KEY>'
+--     ),
+--     body    := '{"kind":"now"}'::jsonb
+--   );
+--   $$
+-- );
 
 -- OPCIONAL: programar tambien recordatorios de salida PWA/iPhone.
 -- 17:30 Lima = 22:30 UTC, 18:00 Lima = 23:00 UTC.
