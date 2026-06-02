@@ -205,6 +205,14 @@ function renewalAmount(row: Pick<Balance, 'fecha_vencimiento' | 'vacaciones_por_
 function renewalDue(row: Pick<Balance, 'fecha_vencimiento' | 'vacaciones_por_vencer' | 'renovaciones_aplicadas'>, today = todayKey()) {
   return Boolean(row.fecha_vencimiento && row.fecha_vencimiento <= today && renewalAmount(row) > 0)
 }
+function renewalAvailableCredit(row: Pick<Balance, 'dias_pendientes' | 'fecha_vencimiento' | 'vacaciones_por_vencer' | 'vacaciones_pendientes_periodo'>, today = todayKey()) {
+  if (!row.fecha_vencimiento || row.fecha_vencimiento > today) return 0
+  const configured = num(row.vacaciones_por_vencer)
+  if (configured > 0) return configured
+  const appliedPeriod = row.vacaciones_pendientes_periodo == null ? 0 : num(row.vacaciones_pendientes_periodo)
+  const inferred = appliedPeriod - num(row.dias_pendientes)
+  return inferred > 0 ? inferred : 30
+}
 const overlapsYear = (item: RequestRow, year: number) => asDate(item.fecha_inicio) <= new Date(Date.UTC(year, 11, 31, 12)) && asDate(item.fecha_fin) >= new Date(Date.UTC(year, 0, 1, 12))
 const overlapsMonth = (item: RequestRow, year: number, month: number) => asDate(item.fecha_inicio) <= new Date(Date.UTC(year, month + 1, 0, 12)) && asDate(item.fecha_fin) >= new Date(Date.UTC(year, month, 1, 12))
 function overlapDaysInMonth(item: RequestRow, year: number, month: number) {
@@ -735,12 +743,12 @@ function VacacionesPageContent() {
 
   const derived = useCallback((row: Balance) => {
     const visibleGozados = months.reduce((sum, col) => sum + getMonthView(row, col).total, 0)
-    const renewalCredit = row.fecha_vencimiento ? (num(row.vacaciones_por_vencer) > 0 ? num(row.vacaciones_por_vencer) : 30) : 0
+    const renewalCredit = renewalAvailableCredit(row)
     const pendientesPrev = num(row.saldo_arrastre) - visibleGozados
     const amount = renewalAmount(row)
     const isDue = renewalDue(row)
     const porVencer = isDue ? 0 : amount
-    const pendientesPeriodo = pendientesPrev + renewalCredit
+    const pendientesPeriodo = Math.max(pendientesPrev + renewalCredit, 0)
     return { pendientesPrev, pendientesPeriodo, gozados: visibleGozados, porVencer }
   }, [getMonthView])
 

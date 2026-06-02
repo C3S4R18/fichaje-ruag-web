@@ -245,6 +245,17 @@ const overlapsVacationYear = (item: VacacionSolicitud, year: number) =>
 
 const formatShortDate = (value: string) => format(toDateAtNoon(value), 'dd MMM yyyy', { locale: es })
 
+const todayKey = () => format(new Date(), 'yyyy-MM-dd')
+
+const vacationRenewalCredit = (saldo: VacacionesSaldo | null) => {
+  if (!saldo?.fecha_vencimiento || saldo.fecha_vencimiento > todayKey()) return 0
+  const configured = num(saldo.vacaciones_por_vencer)
+  if (configured > 0) return configured
+  const appliedPeriod = saldo.vacaciones_pendientes_periodo == null ? 0 : num(saldo.vacaciones_pendientes_periodo)
+  const inferred = appliedPeriod - num(saldo.dias_pendientes)
+  return inferred > 0 ? inferred : 30
+}
+
 const formatDateTimeLabel = (value?: string | null) => {
   if (!value) return '--'
   try {
@@ -2215,21 +2226,10 @@ export default function EscanerWeb() {
       overlapsVacationYear(item, vacacionesSaldo?.periodo ?? new Date().getFullYear())
     )
     .reduce((sum, item) => sum + num(item.dias_solicitados), 0)
-  const porVencerDb = vacacionesSaldo ? num(vacacionesSaldo.vacaciones_por_vencer) : 0
-  const porVencerDisplay = vacacionesSaldo
-    ? porVencerDb > 0
-      ? porVencerDb
-      : vacacionesSaldo.fecha_vencimiento
-        ? 30
-        : 0
-    : 0
-  const pendingPeriodoDb = vacacionesSaldo ? num(vacacionesSaldo.vacaciones_pendientes_periodo) : 0
-  const pendingBase = vacacionesSaldo
-    ? pendingPeriodoDb > 0
-      ? pendingPeriodoDb
-      : num(vacacionesSaldo.dias_pendientes) + porVencerDisplay
-    : 0
-  const pendingDisplay = pendingBase - approvedVacationDays
+  const renewalCreditDisplay = vacationRenewalCredit(vacacionesSaldo)
+  const pend2025Display = vacacionesSaldo ? num(vacacionesSaldo.saldo_arrastre) : 0
+  const pendingBase = vacacionesSaldo ? num(vacacionesSaldo.dias_pendientes) + renewalCreditDisplay : 0
+  const pendingDisplay = Math.max(pendingBase - approvedVacationDays, 0)
   const gozadosDisplay = vacacionesSaldo ? num(vacacionesSaldo.total_gozados) + approvedVacationDays : 0
   const diasSolicitadosPreview = differenceInDays(toDateAtNoon(vacationEnd), toDateAtNoon(vacationStart)) + 1
 
@@ -3168,8 +3168,8 @@ export default function EscanerWeb() {
                           {[
                             { label: 'Pendientes', value: pendingDisplay, color: 'var(--green)', bg: 'var(--green-light)', icon: <Wallet size={16} /> },
                             { label: 'Gozados', value: gozadosDisplay, color: 'var(--blue)', bg: 'var(--blue-light)', icon: <PlaneTakeoff size={16} /> },
-                            { label: 'Arrastre', value: num(vacacionesSaldo.saldo_arrastre), color: 'var(--text-2)', bg: 'var(--surface)', icon: <History size={16} /> },
-                            { label: 'Extra', value: num(vacacionesSaldo.dias_extra), color: '#D97706', bg: '#FEF3C7', icon: <Calendar size={16} /> },
+                            { label: 'Pend 2025', value: pend2025Display, color: 'var(--text-2)', bg: 'var(--surface)', icon: <History size={16} /> },
+                            { label: 'Pend. 2026', value: pendingDisplay, color: '#D97706', bg: '#FEF3C7', icon: <Calendar size={16} /> },
                           ].map((item) => (
                             <div key={item.label} className="rounded-2xl p-4 border" style={{ background: item.bg, borderColor: 'var(--border)' }}>
                               <div className="flex items-center justify-between gap-3">

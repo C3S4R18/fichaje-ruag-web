@@ -61,6 +61,24 @@ function num(value: number | null | undefined) {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
+function todayKey(date = new Date()) {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Lima',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(date)
+}
+
+function renewalAvailableCredit(row: VacationBalance, today = todayKey()) {
+  if (!row.fecha_vencimiento || row.fecha_vencimiento > today) return 0
+  const configured = num(row.vacaciones_por_vencer)
+  if (configured > 0) return configured
+  const appliedPeriod = row.vacaciones_pendientes_periodo == null ? 0 : num(row.vacaciones_pendientes_periodo)
+  const inferred = appliedPeriod - num(row.dias_pendientes)
+  return inferred > 0 ? inferred : 30
+}
+
 export async function POST(req: NextRequest) {
   const authHeader = req.headers.get('authorization')
   if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
@@ -125,12 +143,9 @@ export async function POST(req: NextRequest) {
       }, {})
 
     const rowsToInsert = (previousRows as VacationBalance[]).map((row) => {
-      const carryBase =
-        row.vacaciones_pendientes_periodo != null
-          ? num(row.vacaciones_pendientes_periodo)
-          : num(row.dias_pendientes) + (row.fecha_vencimiento ? 30 : 0)
+      const carryBase = num(row.dias_pendientes) + renewalAvailableCredit(row)
       const approvedDays = approvedByDni[row.dni] ?? 0
-      const carry = carryBase - approvedDays
+      const carry = Math.max(carryBase - approvedDays, 0)
       const nextFechaVencimiento = shiftDateToYear(row.fecha_vencimiento, currentYear)
       const vacacionesPorVencer = nextFechaVencimiento ? 30 : num(row.vacaciones_por_vencer)
 
