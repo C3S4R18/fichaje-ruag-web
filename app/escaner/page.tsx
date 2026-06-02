@@ -256,6 +256,30 @@ const vacationRenewalCredit = (saldo: VacacionesSaldo | null) => {
   return inferred > 0 ? inferred : 30
 }
 
+// ── Sync con el cálculo del dashboard (Control estilo Excel) ────────────────
+// Replica de "derived" en app/vacaciones/page.tsx para que las cifras coincidan.
+const vacationRenewalAmount = (saldo: VacacionesSaldo | null) => {
+  if (!saldo?.fecha_vencimiento || num(saldo.renovaciones_aplicadas) > 0) return 0
+  const configured = num(saldo.vacaciones_por_vencer)
+  return configured > 0 ? configured : 30
+}
+const vacationRenewalDue = (saldo: VacacionesSaldo | null) =>
+  Boolean(saldo?.fecha_vencimiento && saldo.fecha_vencimiento <= todayKey() && vacationRenewalAmount(saldo) > 0)
+
+function derivedVacationBalances(saldo: VacacionesSaldo | null, approvedDays: number) {
+  if (!saldo) return { pendientesPrev: 0, pendientesPeriodo: 0, gozados: 0, porVencer: 0 }
+  const amount = vacationRenewalAmount(saldo)
+  const isDue = vacationRenewalDue(saldo)
+  const pendientesPrev = num(saldo.dias_pendientes) - approvedDays
+  const porVencer = isDue ? 0 : amount
+  const pendingBase = num(saldo.renovaciones_aplicadas) > 0 && saldo.vacaciones_pendientes_periodo != null
+    ? num(saldo.vacaciones_pendientes_periodo)
+    : num(saldo.dias_pendientes) + (isDue ? amount : 0)
+  const pendientesPeriodo = pendingBase - approvedDays
+  const gozados = num(saldo.total_gozados) + approvedDays
+  return { pendientesPrev, pendientesPeriodo, gozados, porVencer }
+}
+
 const formatDateTimeLabel = (value?: string | null) => {
   if (!value) return '--'
   try {
@@ -2226,11 +2250,12 @@ export default function EscanerWeb() {
       overlapsVacationYear(item, vacacionesSaldo?.periodo ?? new Date().getFullYear())
     )
     .reduce((sum, item) => sum + num(item.dias_solicitados), 0)
-  const renewalCreditDisplay = vacationRenewalCredit(vacacionesSaldo)
-  const pend2025Display = vacacionesSaldo ? num(vacacionesSaldo.saldo_arrastre) : 0
-  const pendingBase = vacacionesSaldo ? num(vacacionesSaldo.dias_pendientes) + renewalCreditDisplay : 0
-  const pendingDisplay = Math.max(pendingBase - approvedVacationDays, 0)
-  const gozadosDisplay = vacacionesSaldo ? num(vacacionesSaldo.total_gozados) + approvedVacationDays : 0
+  // Mismas fórmulas que el dashboard "Control estilo Excel" → cifras sincronizadas.
+  const balances = derivedVacationBalances(vacacionesSaldo, approvedVacationDays)
+  const pendingDisplay   = Math.max(balances.pendientesPeriodo, 0)
+  const pend2025Display  = Math.max(balances.pendientesPrev, 0)
+  const gozadosDisplay   = balances.gozados
+  const porVencerDisplay = balances.porVencer
   const diasSolicitadosPreview = differenceInDays(toDateAtNoon(vacationEnd), toDateAtNoon(vacationStart)) + 1
 
   return (
@@ -3165,12 +3190,19 @@ export default function EscanerWeb() {
                           {(vacacionesSaldo.area || perfil.area || 'Sin area')} · {(vacacionesSaldo.cargo || 'Sin cargo')}
                         </p>
                         <div className="grid grid-cols-2 gap-3 mt-5">
-                          {[
-                            { label: 'Pendientes', value: pendingDisplay, color: 'var(--green)', bg: 'var(--green-light)', icon: <Wallet size={16} /> },
-                            { label: 'Gozados', value: gozadosDisplay, color: 'var(--blue)', bg: 'var(--blue-light)', icon: <PlaneTakeoff size={16} /> },
-                            { label: 'Pend 2025', value: pend2025Display, color: 'var(--text-2)', bg: 'var(--surface)', icon: <History size={16} /> },
-                            { label: 'Pend. 2026', value: pendingDisplay, color: '#D97706', bg: '#FEF3C7', icon: <Calendar size={16} /> },
-                          ].map((item) => (
+                          {(() => {
+                            const periodo = num(vacacionesSaldo.periodo) || new Date().getFullYear()
+                            const tiles: { label: string; value: number; color: string; bg: string; icon: React.ReactNode }[] = [
+                              { label: 'Pendientes', value: pendingDisplay, color: 'var(--green)', bg: 'var(--green-light)', icon: <Wallet size={16} /> },
+                              { label: 'Gozados', value: gozadosDisplay, color: 'var(--blue)', bg: 'var(--blue-light)', icon: <PlaneTakeoff size={16} /> },
+                              { label: `Pend ${periodo - 1}`, value: pend2025Display, color: 'var(--text-2)', bg: 'var(--surface)', icon: <History size={16} /> },
+                              { label: `Pend ${periodo}`, value: pendingDisplay, color: '#D97706', bg: '#FEF3C7', icon: <Calendar size={16} /> },
+                            ]
+                            if (porVencerDisplay > 0) {
+                              tiles.push({ label: 'Por vencer', value: porVencerDisplay, color: '#B45309', bg: '#FEF3C7', icon: <RefreshCw size={16} /> })
+                            }
+                            return tiles
+                          })().map((item) => (
                             <div key={item.label} className="rounded-2xl p-4 border" style={{ background: item.bg, borderColor: 'var(--border)' }}>
                               <div className="flex items-center justify-between gap-3">
                                 <span className="text-[11px] font-black uppercase tracking-[0.12em]" style={{ color: item.color }}>{item.label}</span>
