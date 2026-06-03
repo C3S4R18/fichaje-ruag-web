@@ -52,6 +52,18 @@ interface VacacionesSaldo {
   periodo?: number
   saldo_arrastre: number
   dias_extra: number
+  gozados_ene?: number | null
+  gozados_feb?: number | null
+  gozados_mar?: number | null
+  gozados_abr?: number | null
+  gozados_may?: number | null
+  gozados_jun?: number | null
+  gozados_jul?: number | null
+  gozados_ago?: number | null
+  gozados_set?: number | null
+  gozados_oct?: number | null
+  gozados_nov?: number | null
+  gozados_dic?: number | null
   total_gozados: number
   dias_pendientes: number
   fecha_vencimiento: string
@@ -77,6 +89,22 @@ interface VacationCalendarDay {
   fecha: string
   solicitudes: VacacionSolicitud[]
 }
+
+const VACATION_MONTH_KEYS = [
+  'gozados_ene',
+  'gozados_feb',
+  'gozados_mar',
+  'gozados_abr',
+  'gozados_may',
+  'gozados_jun',
+  'gozados_jul',
+  'gozados_ago',
+  'gozados_set',
+  'gozados_oct',
+  'gozados_nov',
+  'gozados_dic',
+] as const
+
 interface MedicalLeaveRequest {
   id: string
   dni: string
@@ -266,18 +294,35 @@ const vacationRenewalAmount = (saldo: VacacionesSaldo | null) => {
 const vacationRenewalDue = (saldo: VacacionesSaldo | null) =>
   Boolean(saldo?.fecha_vencimiento && saldo.fecha_vencimiento <= todayKey() && vacationRenewalAmount(saldo) > 0)
 
-function derivedVacationBalances(saldo: VacacionesSaldo | null, approvedDays: number) {
-  if (!saldo) return { pendientesPrev: 0, pendientesPeriodo: 0, gozados: 0, porVencer: 0 }
+function overlapVacationDaysInMonth(item: VacacionSolicitud, year: number, monthIndex: number) {
+  const start = toDateAtNoon(item.fecha_inicio)
+  const end = toDateAtNoon(item.fecha_fin)
+  const monthStart = new Date(Date.UTC(year, monthIndex, 1, 12))
+  const monthEnd = new Date(Date.UTC(year, monthIndex + 1, 0, 12))
+  const overlapStart = start > monthStart ? start : monthStart
+  const overlapEnd = end < monthEnd ? end : monthEnd
+  if (overlapStart > overlapEnd) return 0
+  return Math.floor((overlapEnd.getTime() - overlapStart.getTime()) / 86400000) + 1
+}
+
+function derivedVacationBalances(saldo: VacacionesSaldo | null, solicitudes: VacacionSolicitud[]) {
+  if (!saldo) return { periodosAnteriores: 0, pendientesPeriodo: 0, gozados: 0, porVencer: 0 }
+  const year = num(saldo.periodo) || new Date().getFullYear()
+  const approvedRequests = solicitudes.filter((item) => normalizeStatus(item.estado) === 'aprobada' && overlapsVacationYear(item, year))
   const amount = vacationRenewalAmount(saldo)
   const isDue = vacationRenewalDue(saldo)
-  const pendientesPrev = num(saldo.dias_pendientes) - approvedDays
+  const visibleGozados = VACATION_MONTH_KEYS.reduce((sum, key, monthIndex) => {
+    const imported = num(saldo[key])
+    const approved = approvedRequests.reduce((acc, item) => acc + overlapVacationDaysInMonth(item, year, monthIndex), 0)
+    return sum + Math.max(imported + approved, 0)
+  }, 0)
+  const periodosAnteriores = num(saldo.saldo_arrastre)
+  const pendientesPrev = periodosAnteriores - visibleGozados
   const porVencer = isDue ? 0 : amount
-  const pendingBase = num(saldo.renovaciones_aplicadas) > 0 && saldo.vacaciones_pendientes_periodo != null
-    ? num(saldo.vacaciones_pendientes_periodo)
-    : num(saldo.dias_pendientes) + (isDue ? amount : 0)
-  const pendientesPeriodo = pendingBase - approvedDays
-  const gozados = num(saldo.total_gozados) + approvedDays
-  return { pendientesPrev, pendientesPeriodo, gozados, porVencer }
+  const renewalCredit = vacationRenewalCredit(saldo)
+  const pendingBase = pendientesPrev + renewalCredit
+  const pendientesPeriodo = Math.max(pendingBase, 0)
+  return { periodosAnteriores, pendientesPeriodo, gozados: visibleGozados, porVencer }
 }
 
 const formatDateTimeLabel = (value?: string | null) => {
@@ -2244,16 +2289,10 @@ export default function EscanerWeb() {
   const cardIsOfflineOnly = showOfflineFotocheck && !asistenciaHoy
   const statusColor = cardIsOfflineOnly ? 'var(--amber)' : isPuntual ? 'var(--green)' : 'var(--red)'
   const statusBg    = cardIsOfflineOnly ? 'var(--amber-light)' : isPuntual ? 'var(--green-light)' : 'var(--red-light)'
-  const approvedVacationDays = vacacionesSolicitudes
-    .filter((item) =>
-      normalizeStatus(item.estado) === 'aprobada' &&
-      overlapsVacationYear(item, vacacionesSaldo?.periodo ?? new Date().getFullYear())
-    )
-    .reduce((sum, item) => sum + num(item.dias_solicitados), 0)
   // Mismas fórmulas que el dashboard "Control estilo Excel" → cifras sincronizadas.
-  const balances = derivedVacationBalances(vacacionesSaldo, approvedVacationDays)
+  const balances = derivedVacationBalances(vacacionesSaldo, vacacionesSolicitudes)
   const pendingDisplay   = Math.max(balances.pendientesPeriodo, 0)
-  const pend2025Display  = Math.max(balances.pendientesPrev, 0)
+  const periodosAnterioresDisplay = balances.periodosAnteriores
   const gozadosDisplay   = balances.gozados
   const porVencerDisplay = balances.porVencer
   const diasSolicitadosPreview = differenceInDays(toDateAtNoon(vacationEnd), toDateAtNoon(vacationStart)) + 1
@@ -3195,8 +3234,8 @@ export default function EscanerWeb() {
                             const tiles: { label: string; value: number; color: string; bg: string; icon: React.ReactNode }[] = [
                               { label: 'Pendientes', value: pendingDisplay, color: 'var(--green)', bg: 'var(--green-light)', icon: <Wallet size={16} /> },
                               { label: 'Gozados', value: gozadosDisplay, color: 'var(--blue)', bg: 'var(--blue-light)', icon: <PlaneTakeoff size={16} /> },
-                              { label: `Pend ${periodo - 1}`, value: pend2025Display, color: 'var(--text-2)', bg: 'var(--surface)', icon: <History size={16} /> },
-                              { label: `Pend ${periodo}`, value: pendingDisplay, color: '#D97706', bg: '#FEF3C7', icon: <Calendar size={16} /> },
+                              { label: 'Periodos anteriores', value: periodosAnterioresDisplay, color: 'var(--text-2)', bg: 'var(--surface)', icon: <History size={16} /> },
+                              { label: `Pend. ${periodo}`, value: pendingDisplay, color: '#D97706', bg: '#FEF3C7', icon: <Calendar size={16} /> },
                             ]
                             if (porVencerDisplay > 0) {
                               tiles.push({ label: 'Por vencer', value: porVencerDisplay, color: '#B45309', bg: '#FEF3C7', icon: <RefreshCw size={16} /> })
