@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 import LottiePlayer from '@/components/LottiePlayer'
+import CalendarPicker from '@/components/CalendarPicker'
 import MapGL, {
   Marker, NavigationControl, FullscreenControl, GeolocateControl, type MapRef
 } from 'react-map-gl/mapbox'
@@ -431,6 +432,7 @@ export default function AdminDashboard() {
   const [loading, setLoading]             = useState(true)
   const [isInitialLoad, setIsInitialLoad] = useState(true)
   const [fechaActual, setFechaActual]     = useState(new Date())
+  const [showFechaPicker, setShowFechaPicker] = useState(false)
   const [isDark, setIsDark]               = useState(false)
   const [mounted, setMounted]             = useState(false)
   const [modoEdicion, setModoEdicion]     = useState(false)
@@ -793,7 +795,7 @@ export default function AdminDashboard() {
     items.sort((a, b) => a.daysUntil - b.daysUntil)
     const hoy = items.filter((i) => i.isToday)
     setCumpleHoy(hoy)
-    setCumpleProximos(items.filter((i) => !i.isToday).slice(0, 5))
+    setCumpleProximos(items.filter((i) => !i.isToday))
 
     if (hoy.length && !cumpleNotifiedRef.current) {
       cumpleNotifiedRef.current = true
@@ -1319,20 +1321,39 @@ export default function AdminDashboard() {
               <button onClick={() => setFechaActual(p => subDays(p, 1))} className="p-2 hover:bg-white dark:hover:bg-slate-800 rounded-lg transition-all text-slate-400 hover:text-slate-700 dark:hover:text-white">
                 <ChevronLeft size={15} />
               </button>
-              <div className="relative flex-1 flex items-center justify-center cursor-pointer py-1">
+              <button
+                type="button"
+                onClick={() => setShowFechaPicker(true)}
+                className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg hover:bg-white dark:hover:bg-slate-800 transition-all"
+                title="Abrir calendario"
+              >
+                <CalendarDays size={13} className="text-blue-500" />
                 <span className="font-black text-sm text-slate-700 dark:text-slate-200 capitalize">
                   {isToday(fechaActual) ? '· Hoy ·' : format(fechaActual, "d MMM yy", { locale: es })}
                 </span>
-                <input type="date" className="absolute inset-0 opacity-0 cursor-pointer w-full"
-                  value={format(fechaActual, 'yyyy-MM-dd')}
-                  onChange={e => { if (e.target.value) { const [y,m,d] = e.target.value.split('-').map(Number); setFechaActual(new Date(y,m-1,d)) } }} />
-              </div>
+              </button>
               <button onClick={() => setFechaActual(p => addDays(p, 1))} disabled={isToday(fechaActual)}
                 className="p-2 hover:bg-white dark:hover:bg-slate-800 rounded-lg transition-all text-slate-400 hover:text-slate-700 dark:hover:text-white disabled:opacity-20">
                 <ChevronRight size={15} />
               </button>
             </div>
+            {!isToday(fechaActual) && (
+              <button onClick={() => setFechaActual(new Date())}
+                className="mt-2 w-full text-[10px] font-black text-blue-600 hover:text-blue-700 uppercase tracking-wider">
+                Volver a hoy
+              </button>
+            )}
           </div>
+
+          {showFechaPicker && (
+            <CalendarPicker
+              value={format(fechaActual, 'yyyy-MM-dd')}
+              onClose={() => setShowFechaPicker(false)}
+              onSelect={(v) => { const [y, m, d] = v.split('-').map(Number); setFechaActual(new Date(y, m - 1, d)) }}
+              accent="#2563EB"
+              accent2="#06B6D4"
+            />
+          )}
 
           {/* Filters */}
           <div className="bg-white dark:bg-slate-900 p-4 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm">
@@ -1365,100 +1386,158 @@ export default function AdminDashboard() {
           {/* Próximos cumpleaños */}
           {(cumpleHoy.length > 0 || cumpleProximos.length > 0) && (
             <motion.div
-              className="relative overflow-hidden rounded-2xl border shadow-sm"
-              style={{ background: 'linear-gradient(160deg, #FFFFFF, #FDF4FF 60%, #FAF5FF)', borderColor: '#EC489933' }}
+              className="relative overflow-hidden rounded-3xl border shadow-lg shadow-pink-500/5"
+              style={{ background: 'linear-gradient(155deg, #FFFFFF, #FFF1F9 35%, #FAF5FF 70%, #EEF4FF)', borderColor: '#EC489933' }}
               initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.45, ease: [0.34, 1.2, 0.64, 1] }}
             >
-              {/* Glow decorativo */}
+              {/* Glow orbs */}
               <motion.div
-                className="pointer-events-none absolute -top-10 -right-10 h-32 w-32 rounded-full blur-2xl"
-                style={{ background: 'radial-gradient(circle, rgba(236,72,153,0.35), transparent 70%)' }}
-                animate={{ scale: [1, 1.15, 1], opacity: [0.5, 0.85, 0.5] }}
+                className="pointer-events-none absolute -top-12 -right-10 h-36 w-36 rounded-full blur-3xl"
+                style={{ background: 'radial-gradient(circle, rgba(236,72,153,0.38), transparent 70%)' }}
+                animate={{ scale: [1, 1.18, 1], opacity: [0.5, 0.9, 0.5] }}
                 transition={{ duration: 3.6, repeat: Infinity, ease: 'easeInOut' }}
               />
+              <motion.div
+                className="pointer-events-none absolute -bottom-16 -left-10 h-36 w-36 rounded-full blur-3xl"
+                style={{ background: 'radial-gradient(circle, rgba(124,58,237,0.30), transparent 70%)' }}
+                animate={{ scale: [1.1, 1, 1.1], opacity: [0.45, 0.75, 0.45] }}
+                transition={{ duration: 4.2, repeat: Infinity, ease: 'easeInOut' }}
+              />
               {cumpleHoy.length > 0 && (
-                <div className="pointer-events-none absolute inset-0 opacity-40">
+                <div className="pointer-events-none absolute inset-0 opacity-50">
                   <LottiePlayer src="/lottie/confetti.json" style={{ width: '100%', height: '100%' }} />
                 </div>
               )}
 
-              <div className="relative z-10 p-4">
-                <div className="flex items-center justify-between mb-3">
-                  <div className="flex items-center gap-2.5">
-                    <motion.div
-                      className="w-9 h-9 rounded-2xl overflow-hidden bg-white border flex items-center justify-center"
-                      style={{ borderColor: '#EC489955', boxShadow: '0 6px 16px rgba(236,72,153,0.18)' }}
-                      animate={{ y: [0, -2, 0] }} transition={{ duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
-                    >
-                      <LottiePlayer src="/lottie/birthday-cake.json" style={{ width: 32, height: 32 }} />
-                    </motion.div>
-                    <div>
-                      <p className="text-[10px] font-black text-pink-500 uppercase tracking-[0.18em] leading-none">Cumpleaños</p>
-                      <p className="text-[10px] font-bold text-slate-400 mt-1">{cumpleHoy.length > 0 ? `¡Hoy cumple ${cumpleHoy.length}!` : 'Próximos del mes'}</p>
-                    </div>
+              {/* Header sticky */}
+              <div className="relative z-10 flex items-center justify-between gap-2 px-4 pt-4 pb-3">
+                <div className="flex items-center gap-2.5">
+                  <motion.div
+                    className="w-10 h-10 rounded-2xl overflow-hidden bg-white border flex items-center justify-center"
+                    style={{ borderColor: '#EC489955', boxShadow: '0 8px 22px rgba(236,72,153,0.22)' }}
+                    animate={{ y: [0, -3, 0], rotate: [0, -4, 4, 0] }}
+                    transition={{ duration: 2.6, repeat: Infinity, ease: 'easeInOut' }}
+                  >
+                    <LottiePlayer src="/lottie/birthday-cake.json" style={{ width: 34, height: 34 }} />
+                  </motion.div>
+                  <div>
+                    <p className="text-[10px] font-black text-pink-500 uppercase tracking-[0.18em] leading-none">Cumpleaños</p>
+                    <p className="text-[10px] font-bold text-slate-400 mt-1">
+                      {cumpleHoy.length > 0
+                        ? `🎉 Hoy cumple${cumpleHoy.length > 1 ? 'n' : ''} ${cumpleHoy.length}`
+                        : `${cumpleProximos.length} próximo${cumpleProximos.length === 1 ? '' : 's'}`}
+                    </p>
                   </div>
-                  {cumpleHoy.length > 0 && (
-                    <motion.span
-                      className="px-2 py-1 rounded-full text-[9px] font-black text-white"
-                      style={{ background: 'linear-gradient(135deg, #EC4899, #7C3AED)' }}
-                      animate={{ scale: [1, 1.08, 1] }} transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
-                    >🎉 HOY</motion.span>
-                  )}
                 </div>
+                {cumpleHoy.length > 0 ? (
+                  <motion.span
+                    className="px-2.5 py-1 rounded-full text-[9px] font-black text-white shadow-md shadow-pink-500/30"
+                    style={{ background: 'linear-gradient(135deg, #EC4899, #7C3AED)' }}
+                    animate={{ scale: [1, 1.1, 1] }} transition={{ duration: 1.6, repeat: Infinity, ease: 'easeInOut' }}
+                  >🎉 HOY</motion.span>
+                ) : cumpleProximos[0] && cumpleProximos[0].daysUntil <= 3 && (
+                  <motion.span
+                    className="px-2 py-1 rounded-full text-[9px] font-black"
+                    style={{ background: 'rgba(245,158,11,0.15)', color: '#B45309' }}
+                    animate={{ opacity: [0.6, 1, 0.6] }} transition={{ duration: 1.4, repeat: Infinity }}
+                  >✨ ¡PRONTO!</motion.span>
+                )}
+              </div>
 
-                <motion.div
-                  className="space-y-2"
-                  initial="hidden" animate="show"
-                  variants={{ hidden: {}, show: { transition: { staggerChildren: 0.06 } } }}
-                >
-                  {[...cumpleHoy, ...cumpleProximos].slice(0, 6).map((c) => {
-                    const proximity = c.isToday ? 'today' : c.daysUntil <= 7 ? 'soon' : 'later'
-                    const ring = proximity === 'today' ? '#EC4899' : proximity === 'soon' ? '#F59E0B' : '#94A3B8'
-                    return (
-                      <motion.div
-                        key={c.dni}
-                        className="flex items-center gap-2.5 rounded-xl p-2 border transition-all"
-                        style={{
-                          background: proximity === 'today' ? 'rgba(255,255,255,0.85)' : 'rgba(255,255,255,0.6)',
-                          borderColor: proximity === 'today' ? '#EC489966' : 'rgba(226,232,240,0.8)',
-                          boxShadow: proximity === 'today' ? '0 4px 14px rgba(236,72,153,0.18)' : 'none',
-                        }}
-                        variants={{ hidden: { opacity: 0, x: -10 }, show: { opacity: 1, x: 0 } }}
-                        whileHover={{ x: 2, scale: 1.01 }}
-                      >
-                        <div className="relative shrink-0">
-                          <div className="w-9 h-9 rounded-full overflow-hidden bg-pink-100 flex items-center justify-center text-[10px] font-black text-pink-600"
-                            style={{ boxShadow: `0 0 0 2px white, 0 0 0 3px ${ring}55` }}>
-                            {c.foto ? <img src={c.foto} alt="" className="w-full h-full object-cover" /> : c.nombre.split(' ').slice(0, 2).map(w => w[0]).join('')}
-                          </div>
-                          {proximity === 'today' && (
-                            <motion.span
-                              className="absolute -top-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white"
-                              style={{ background: '#EC4899' }}
-                              animate={{ scale: [1, 1.3, 1] }} transition={{ duration: 1.2, repeat: Infinity }}
+              {/* Scroll list */}
+              <motion.div
+                className="relative z-10 px-3 pb-3 space-y-1.5 overflow-y-auto scrollbar-hide"
+                style={{ maxHeight: 360 }}
+                initial="hidden" animate="show"
+                variants={{ hidden: {}, show: { transition: { staggerChildren: 0.04 } } }}
+              >
+                {[...cumpleHoy, ...cumpleProximos].map((c) => {
+                  const proximity = c.isToday
+                    ? 'today'
+                    : c.daysUntil <= 3 ? 'imminent'
+                    : c.daysUntil <= 7 ? 'soon'
+                    : c.daysUntil <= 30 ? 'month'
+                    : 'later'
+                  const tone = {
+                    today:    { ring: '#EC4899', accent: '#DB2777', bg: 'linear-gradient(135deg, rgba(255,255,255,0.95), rgba(253,242,248,0.85))', bord: '#EC489966' },
+                    imminent: { ring: '#F97316', accent: '#C2410C', bg: 'linear-gradient(135deg, rgba(255,255,255,0.85), rgba(255,247,237,0.75))', bord: '#F9731655' },
+                    soon:     { ring: '#F59E0B', accent: '#B45309', bg: 'rgba(255,255,255,0.75)', bord: 'rgba(245,158,11,0.35)' },
+                    month:    { ring: '#6366F1', accent: '#4338CA', bg: 'rgba(255,255,255,0.65)', bord: 'rgba(99,102,241,0.20)' },
+                    later:    { ring: '#94A3B8', accent: '#64748B', bg: 'rgba(255,255,255,0.55)', bord: 'rgba(148,163,184,0.25)' },
+                  }[proximity]
+                  return (
+                    <motion.div
+                      key={c.dni}
+                      className="relative flex items-center gap-2.5 rounded-2xl p-2 border overflow-hidden"
+                      style={{ background: tone.bg, borderColor: tone.bord, boxShadow: proximity === 'today' || proximity === 'imminent' ? `0 4px 14px ${tone.ring}25` : 'none' }}
+                      variants={{ hidden: { opacity: 0, x: -10 }, show: { opacity: 1, x: 0 } }}
+                      whileHover={{ x: 3, scale: 1.015 }}
+                    >
+                      {/* Avatar con anillo cónico animado según proximidad */}
+                      <div className="relative shrink-0 w-11 h-11">
+                        {(proximity === 'today' || proximity === 'imminent' || proximity === 'soon') && (
+                          <motion.div
+                            className="absolute -inset-1 rounded-full"
+                            style={{ background: `conic-gradient(from 0deg, ${tone.ring}, ${tone.ring}33, ${tone.ring})` }}
+                            animate={{ rotate: 360 }}
+                            transition={{ duration: proximity === 'today' ? 4 : proximity === 'imminent' ? 6 : 9, repeat: Infinity, ease: 'linear' }}
+                          />
+                        )}
+                        <div className="relative w-11 h-11 rounded-full overflow-hidden flex items-center justify-center text-[11px] font-black ring-2 ring-white"
+                          style={{ background: `${tone.ring}1a`, color: tone.accent }}>
+                          {c.foto ? <img src={c.foto} alt="" className="w-full h-full object-cover" /> : c.nombre.split(' ').slice(0, 2).map(w => w[0]).join('')}
+                        </div>
+                        {proximity === 'today' && (
+                          <motion.span
+                            className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full border-2 border-white"
+                            style={{ background: '#EC4899' }}
+                            animate={{ scale: [1, 1.4, 1] }} transition={{ duration: 1.2, repeat: Infinity }}
+                          />
+                        )}
+                      </div>
+
+                      <div className="min-w-0 flex-1">
+                        <p className="text-xs font-black text-slate-800 dark:text-slate-100 truncate leading-tight">{c.nombre}</p>
+                        <p className="text-[10px] font-bold mt-0.5 flex items-center gap-1" style={{ color: tone.accent }}>
+                          <Cake size={9} /> {c.label}{c.turningAge ? ` · ${c.turningAge}` : ''}
+                        </p>
+                        {/* Barra de proximidad: llena = menos días */}
+                        {!c.isToday && c.daysUntil <= 30 && (
+                          <div className="mt-1 h-[3px] w-full rounded-full overflow-hidden" style={{ background: `${tone.ring}1f` }}>
+                            <motion.div
+                              className="h-full rounded-full"
+                              style={{ background: tone.ring }}
+                              initial={{ width: 0 }}
+                              animate={{ width: `${Math.max(6, 100 - (c.daysUntil / 30) * 100)}%` }}
+                              transition={{ duration: 0.6, ease: 'easeOut' }}
                             />
-                          )}
-                        </div>
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs font-black text-slate-800 dark:text-slate-100 truncate leading-tight">{c.nombre}</p>
-                          <p className="text-[10px] font-bold mt-0.5 flex items-center gap-1" style={{ color: ring }}>
-                            <Cake size={9} /> {c.label}{c.turningAge ? ` · ${c.turningAge}` : ''}
-                          </p>
-                        </div>
-                        {proximity === 'today' ? (
-                          <span className="px-2 py-1 rounded-lg text-[9px] font-black text-white shrink-0" style={{ background: 'linear-gradient(135deg, #EC4899, #7C3AED)' }}>HOY</span>
-                        ) : (
-                          <div className="text-right shrink-0">
-                            <p className="text-sm font-black leading-none tabular-nums" style={{ color: ring }}>{c.daysUntil}</p>
-                            <p className="text-[8px] font-black uppercase tracking-wider" style={{ color: ring + 'bb' }}>{c.daysUntil === 1 ? 'día' : 'días'}</p>
                           </div>
                         )}
-                      </motion.div>
-                    )
-                  })}
-                </motion.div>
-              </div>
+                      </div>
+
+                      {/* Counter */}
+                      {proximity === 'today' ? (
+                        <motion.span
+                          className="px-2 py-1 rounded-lg text-[9px] font-black text-white shrink-0 shadow-sm"
+                          style={{ background: 'linear-gradient(135deg, #EC4899, #7C3AED)' }}
+                          animate={{ scale: [1, 1.06, 1] }} transition={{ duration: 1.4, repeat: Infinity }}
+                        >HOY</motion.span>
+                      ) : (
+                        <div className="text-right shrink-0">
+                          <motion.p
+                            className="text-base font-black leading-none tabular-nums"
+                            style={{ color: tone.accent, fontFamily: 'Sora, sans-serif' }}
+                            animate={proximity === 'imminent' ? { scale: [1, 1.12, 1] } : {}}
+                            transition={{ duration: 1.4, repeat: Infinity }}
+                          >{c.daysUntil}</motion.p>
+                          <p className="text-[8px] font-black uppercase tracking-wider" style={{ color: tone.accent, opacity: 0.7 }}>{c.daysUntil === 1 ? 'día' : 'días'}</p>
+                        </div>
+                      )}
+                    </motion.div>
+                  )
+                })}
+              </motion.div>
             </motion.div>
           )}
 
@@ -2358,60 +2437,71 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
   const hasBadge = entroAyer || saleHoy || esOffline || esInasistencia || esDescansoMedico
   const puedeEditarRegistro = modoEdicion && (!esSintetica || esInasistencia || esDescansoMedico)
 
-  const borderClass = esDescansoMedico ? 'border-fuchsia-300 dark:border-fuchsia-500/30 bg-fuchsia-50/70 dark:bg-fuchsia-500/10'
-    : esInasistencia ? 'border-orange-300 dark:border-orange-500/30 bg-orange-50/70 dark:bg-orange-500/10'
-    : entroAyer || saleHoy ? 'border-amber-300 dark:border-amber-500/30 ring-1 ring-amber-100 dark:ring-amber-500/10'
-    : esOffline ? 'border-violet-300 dark:border-violet-500/30 ring-1 ring-violet-100 dark:ring-violet-500/10'
-    : tieneSalida && isToday(new Date(data.hora_ingreso)) ? 'border-emerald-200 dark:border-emerald-500/20'
-    : index === 0 && isToday(new Date(data.hora_ingreso)) ? 'border-blue-200 dark:border-blue-500/20 ring-1 ring-blue-50 dark:ring-blue-500/10'
-    : 'border-slate-200 dark:border-slate-800'
+  // Acentos por estado para gradient + ring del card
+  const accent = esDescansoMedico ? { ring: '#A21CAF', tint: 'rgba(217,70,239,0.06)', border: 'rgba(232,121,249,0.45)' }
+    : esInasistencia ? { ring: '#F97316', tint: 'rgba(249,115,22,0.06)', border: 'rgba(251,146,60,0.45)' }
+    : entroAyer || saleHoy ? { ring: '#D97706', tint: 'rgba(245,158,11,0.05)', border: 'rgba(252,211,77,0.5)' }
+    : esOffline ? { ring: '#7C3AED', tint: 'rgba(124,58,237,0.05)', border: 'rgba(167,139,250,0.45)' }
+    : isPuntual ? { ring: '#059669', tint: 'rgba(16,185,129,0.04)', border: 'rgba(167,243,208,0.7)' }
+    : { ring: '#DC2626', tint: 'rgba(239,68,68,0.05)', border: 'rgba(252,165,165,0.6)' }
 
   return (
     <motion.div
       variants={{ hidden: { opacity: 0, x: -10 }, show: { opacity: 1, x: 0, transition: { type: 'spring', stiffness: 380, damping: 28 } } }}
-      whileHover={{ scale: 1.002 }}
-      className={`relative flex items-center justify-between bg-white dark:bg-slate-900 border rounded-xl transition-all hover:shadow-md
-        ${hasBadge ? 'pt-7 pb-4 px-4 sm:pt-8 sm:pb-5 sm:px-5' : 'p-4 sm:p-5'} ${borderClass}`}
+      whileHover={{ scale: 1.005, y: -2 }}
+      transition={{ duration: 0.2 }}
+      className={`group relative flex items-center justify-between rounded-2xl border bg-white dark:bg-slate-900 shadow-sm hover:shadow-lg hover:shadow-slate-900/5 transition-all
+        ${hasBadge ? 'pt-7 pb-4 px-4 sm:pt-8 sm:pb-5 sm:px-5' : 'p-4 sm:p-5'}`}
+      style={{
+        borderColor: accent.border,
+        backgroundImage: `linear-gradient(135deg, ${accent.tint}, transparent 45%)`,
+      }}
     >
+      {/* Barra acento lateral izquierda */}
+      <span className="absolute left-0 top-1/2 -translate-y-1/2 h-10 w-1 rounded-r-full" style={{ background: accent.ring }} />
+
       {entroAyer && (
-        <div className="absolute -top-2.5 left-3 z-10 flex items-center gap-1 bg-amber-500 text-white text-[8px] font-black px-2 py-0.5 rounded-full shadow-sm">
-          <Moon size={7} /> 🌙 NOCTURNO · Entró {new Date(data.hora_ingreso).toLocaleTimeString('es-PE', { timeZone:'America/Lima', hour:'2-digit', minute:'2-digit', hour12:true })} · Sale mañana
+        <div className="absolute -top-2.5 left-4 z-10 flex items-center gap-1 bg-gradient-to-r from-amber-500 to-orange-500 text-white text-[8px] font-black px-2.5 py-1 rounded-full shadow-md shadow-amber-500/30">
+          <Moon size={8} /> NOCTURNO · Entró {new Date(data.hora_ingreso).toLocaleTimeString('es-PE', { timeZone:'America/Lima', hour:'2-digit', minute:'2-digit', hour12:true })} · Sale mañana
         </div>
       )}
       {saleHoy && (
-        <div className="absolute -top-2.5 left-3 z-10 flex items-center gap-1 bg-indigo-500 text-white text-[8px] font-black px-2 py-0.5 rounded-full shadow-sm">
-          <Moon size={7} /> 🌅 SALIDA HOY · Entró ayer {new Date(data.hora_ingreso).toLocaleTimeString('es-PE', { timeZone:'America/Lima', hour:'2-digit', minute:'2-digit', hour12:true })}
+        <div className="absolute -top-2.5 left-4 z-10 flex items-center gap-1 bg-gradient-to-r from-indigo-500 to-blue-500 text-white text-[8px] font-black px-2.5 py-1 rounded-full shadow-md shadow-indigo-500/30">
+          <Moon size={8} /> SALIDA HOY · Entró ayer {new Date(data.hora_ingreso).toLocaleTimeString('es-PE', { timeZone:'America/Lima', hour:'2-digit', minute:'2-digit', hour12:true })}
           {data.hora_salida && ` · Salió ${new Date(data.hora_salida).toLocaleTimeString('es-PE', { timeZone:'America/Lima', hour:'2-digit', minute:'2-digit', hour12:true })}`}
         </div>
       )}
-
       {esOffline && (
-        <div className="absolute -top-2.5 left-3 z-10 flex items-center gap-1 bg-violet-600 text-white text-[8px] font-black px-2 py-0.5 rounded-full shadow-sm">
+        <div className="absolute -top-2.5 left-4 z-10 flex items-center gap-1 bg-gradient-to-r from-violet-600 to-purple-600 text-white text-[8px] font-black px-2.5 py-1 rounded-full shadow-md shadow-violet-500/30">
           📵 SIN CONEXIÓN · Sincronizado offline
         </div>
       )}
       {esInasistencia && (
-        <div className="absolute -top-2.5 left-3 z-10 flex items-center gap-1 bg-orange-500 text-white text-[8px] font-black px-2 py-0.5 rounded-full shadow-sm">
+        <div className="absolute -top-2.5 left-4 z-10 flex items-center gap-1 bg-gradient-to-r from-orange-500 to-red-500 text-white text-[8px] font-black px-2.5 py-1 rounded-full shadow-md shadow-orange-500/30">
           ✗ INASISTENCIA · Sin registro en el día
         </div>
       )}
-
       {esDescansoMedico && (
-        <div className="absolute -top-2.5 left-3 z-10 flex items-center gap-1 bg-fuchsia-600 text-white text-[8px] font-black px-2 py-0.5 rounded-full shadow-sm">
+        <div className="absolute -top-2.5 left-4 z-10 flex items-center gap-1 bg-gradient-to-r from-fuchsia-600 to-pink-600 text-white text-[8px] font-black px-2.5 py-1 rounded-full shadow-md shadow-fuchsia-500/30">
           <Stethoscope size={8} /> DESCANSO MEDICO · Justificado
         </div>
       )}
 
       {/* Avatar */}
-      <div className="flex items-center gap-3 flex-1 min-w-0 pr-3">
+      <div className="flex items-center gap-3.5 flex-1 min-w-0 pr-3">
         <div className="relative shrink-0">
-          <div className="w-12 h-12 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700">
+          {/* Aro acento */}
+          <div className="absolute -inset-0.5 rounded-full opacity-70" style={{ background: `conic-gradient(from 0deg, ${accent.ring}, ${accent.ring}33, ${accent.ring})` }} />
+          <div className="relative w-14 h-14 rounded-full overflow-hidden bg-slate-100 dark:bg-slate-800 ring-2 ring-white dark:ring-slate-900">
             {data.foto_url ? <img src={data.foto_url} alt="" className="w-full h-full object-cover" /> :
               <div className="w-full h-full flex items-center justify-center font-black text-slate-400 text-sm">{getInitials(data.nombres_completos)}</div>}
           </div>
-          <div className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white dark:border-slate-900 ${esDescansoMedico ? 'bg-fuchsia-500' : esInasistencia ? 'bg-orange-400' : isPuntual ? 'bg-emerald-500' : 'bg-red-500'}`} />
-          {esNocturno && <div className="absolute -top-0.5 -left-0.5 w-3.5 h-3.5 rounded-full bg-amber-400 border-2 border-white dark:border-slate-900 flex items-center justify-center"><Moon size={7} className="text-white" /></div>}
-          {esOffline && !esNocturno && <div className="absolute -top-0.5 -left-0.5 w-3.5 h-3.5 rounded-full bg-violet-500 border-2 border-white dark:border-slate-900 flex items-center justify-center text-white text-[7px] font-black leading-none">📵</div>}
+          {/* Status dot */}
+          <div className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full border-[2.5px] border-white dark:border-slate-900 flex items-center justify-center ${esDescansoMedico ? 'bg-fuchsia-500' : esInasistencia ? 'bg-orange-400' : isPuntual ? 'bg-emerald-500' : 'bg-red-500'}`}>
+            {isPuntual && !esDescansoMedico && !esInasistencia && <CheckCircle2 size={9} className="text-white" strokeWidth={3} />}
+          </div>
+          {esNocturno && <div className="absolute -top-0.5 -left-0.5 w-4 h-4 rounded-full bg-amber-400 border-[2.5px] border-white dark:border-slate-900 flex items-center justify-center shadow-sm"><Moon size={8} className="text-white" /></div>}
+          {esOffline && !esNocturno && <div className="absolute -top-0.5 -left-0.5 w-4 h-4 rounded-full bg-violet-500 border-[2.5px] border-white dark:border-slate-900 flex items-center justify-center text-white text-[7px] font-black leading-none">📵</div>}
         </div>
         <div className="min-w-0 flex-1">
           {puedeEditarRegistro && editandoNombre ? (
@@ -2453,26 +2543,30 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
               {puedeEditarRegistro && <span className="opacity-0 group-hover/name:opacity-100 transition-opacity text-blue-400 shrink-0" title="Editar nombre">✏️</span>}
             </div>
           )}
-          <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-            <span className="text-[9px] font-mono text-slate-400">{data.dni}</span>
-            <span className="hidden sm:inline text-[9px] font-bold text-slate-300 dark:text-slate-700">·</span>
-            <span className="text-[9px] font-bold text-slate-400 uppercase hidden sm:inline">{data.area}</span>
+          <div className="flex items-center gap-2 mt-1 flex-wrap">
+            <span className="px-1.5 py-[1px] rounded-md text-[9px] font-mono text-slate-500 bg-slate-100 dark:bg-slate-800 dark:text-slate-400">{data.dni}</span>
+            <span className="hidden sm:inline-flex items-center gap-1 text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
+              <span className="w-1 h-1 rounded-full bg-slate-300 dark:bg-slate-600" />
+              {data.area}
+            </span>
             {esDescansoMedico ? (
-              <span className="px-1.5 py-0.5 rounded text-[8px] font-black bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-500/10 dark:text-fuchsia-300">
-                DESCANSO MEDICO
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-500/15 dark:text-fuchsia-300">
+                <span className="w-1.5 h-1.5 rounded-full bg-fuchsia-500" /> DESCANSO MEDICO
               </span>
             ) : esInasistencia ? (
-              <span className="px-1.5 py-0.5 rounded text-[8px] font-black bg-orange-100 text-orange-700 dark:bg-orange-500/10 dark:text-orange-300">
-                INASISTENCIA
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black bg-orange-100 text-orange-700 dark:bg-orange-500/15 dark:text-orange-300">
+                <span className="w-1.5 h-1.5 rounded-full bg-orange-500" /> INASISTENCIA
               </span>
             ) : puedeEditarRegistro ? (
               <button onClick={() => onCambiarEstado(data.id, data.estado_ingreso)}
-                className={`px-1.5 py-0.5 rounded text-[8px] font-black border transition-all hover:scale-105 active:scale-95
+                className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black border transition-all hover:scale-105 active:scale-95
                   ${isPuntual ? 'bg-emerald-100 text-emerald-700 border-emerald-300 hover:bg-red-50 hover:text-red-600 hover:border-red-300' : 'bg-red-100 text-red-700 border-red-300 hover:bg-emerald-50 hover:text-emerald-600 hover:border-emerald-300'}`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${isPuntual ? 'bg-emerald-500' : 'bg-red-500'}`} />
                 {data.estado_ingreso} ⇄
               </button>
             ) : (
-              <span className={`px-1.5 py-0.5 rounded text-[8px] font-black ${isPuntual ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-400' : 'bg-red-100 text-red-700 dark:bg-red-500/10 dark:text-red-400'}`}>
+              <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black ${isPuntual ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-400' : 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-400'}`}>
+                <span className={`w-1.5 h-1.5 rounded-full ${isPuntual ? 'bg-emerald-500' : 'bg-red-500'}`} />
                 {data.estado_ingreso}
               </span>
             )}
@@ -2481,49 +2575,49 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
       </div>
 
       {/* Times */}
-      <div className="flex items-center gap-3 sm:gap-5 shrink-0">
-        <div className="flex flex-col items-end">
-          <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Entrada</span>
+      <div className="flex items-center gap-2 sm:gap-2.5 shrink-0">
+        {/* Entrada tile */}
+        <div className="flex flex-col items-center px-2.5 py-1.5 rounded-xl border bg-white/60 dark:bg-slate-950/40 dark:border-slate-800 min-w-[58px]"
+          style={{ borderColor: 'rgba(226,232,240,0.9)' }}>
+          <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Entrada</span>
           {puedeEditarRegistro ? (
             <input type="time" defaultValue={(esInasistencia || esDescansoMedico) ? '' : format(new Date(data.hora_ingreso), 'HH:mm')}
-              className="bg-transparent border-b border-blue-500 text-xs font-black text-blue-600 outline-none w-14 text-right"
+              className="bg-transparent border-b border-blue-500 text-xs font-black text-blue-600 outline-none w-14 text-center"
               onBlur={e => {
                 const current = (esInasistencia || esDescansoMedico) ? '' : format(new Date(data.hora_ingreso), 'HH:mm')
                 if (e.target.value && e.target.value !== current) onActualizar(data.id, 'hora_ingreso', e.target.value, data.hora_ingreso)
               }} />
           ) : (
-            <span className={`font-black text-base tabular-nums ${esDescansoMedico ? 'text-fuchsia-600 dark:text-fuchsia-300' : esInasistencia ? 'text-orange-500 dark:text-orange-300' : isPuntual ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+            <span className={`font-black text-base tabular-nums leading-tight ${esDescansoMedico ? 'text-fuchsia-600 dark:text-fuchsia-300' : esInasistencia ? 'text-orange-500 dark:text-orange-300' : isPuntual ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
               {(esInasistencia || esDescansoMedico) ? '—' : format(new Date(data.hora_ingreso), 'HH:mm')}
             </span>
           )}
         </div>
 
-        <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 hidden sm:block" />
-
-        <div className="flex flex-col items-end">
-          <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Salida</span>
+        {/* Salida tile */}
+        <div className="hidden sm:flex flex-col items-center px-2.5 py-1.5 rounded-xl border bg-white/60 dark:bg-slate-950/40 dark:border-slate-800 min-w-[58px]"
+          style={{ borderColor: 'rgba(226,232,240,0.9)' }}>
+          <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Salida</span>
           {puedeEditarRegistro ? (
             <div className="flex items-center gap-1">
               <input type="time" defaultValue={data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm') : ''}
-                className="bg-transparent border-b border-blue-500 text-xs font-bold text-slate-600 dark:text-slate-300 outline-none w-14 text-right"
+                className="bg-transparent border-b border-blue-500 text-xs font-bold text-slate-600 dark:text-slate-300 outline-none w-14 text-center"
                 onBlur={e => { const c = data.hora_salida ? format(new Date(data.hora_salida), 'HH:mm') : ''; if (e.target.value && e.target.value !== c) onActualizar(data.id, 'hora_salida', e.target.value, data.hora_salida || data.hora_ingreso) }} />
               {data.hora_salida && <button onClick={() => onActualizar(data.id, 'hora_salida', null, data.hora_ingreso)} className="text-red-400 hover:text-red-600"><X size={10} /></button>}
             </div>
           ) : data.hora_salida ? (
-            <span className="font-black text-base text-slate-700 dark:text-slate-300 tabular-nums">{format(new Date(data.hora_salida), 'HH:mm')}</span>
+            <span className="font-black text-base text-slate-700 dark:text-slate-300 tabular-nums leading-tight">{format(new Date(data.hora_salida), 'HH:mm')}</span>
           ) : (
-            <span className="text-[9px] font-bold text-slate-400 border border-dashed border-slate-300 dark:border-slate-700 px-1.5 py-0.5 rounded">--:--</span>
+            <span className="text-[10px] font-bold text-slate-400 tabular-nums">--:--</span>
           )}
         </div>
 
+        {/* Duración tile */}
         {horas !== '—' && (
-          <>
-            <div className="w-px h-5 bg-slate-200 dark:bg-slate-700 hidden md:block" />
-            <div className="hidden md:flex flex-col items-end">
-              <span className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-0.5">Duración</span>
-              <span className="text-sm font-black text-blue-600 dark:text-blue-400 tabular-nums">{horas}</span>
-            </div>
-          </>
+          <div className="hidden md:flex flex-col items-center px-2.5 py-1.5 rounded-xl bg-blue-50 border border-blue-100 dark:bg-blue-500/10 dark:border-blue-500/20 min-w-[58px]">
+            <span className="text-[8px] font-black text-blue-500 uppercase tracking-wider">Total</span>
+            <span className="text-sm font-black text-blue-600 dark:text-blue-300 tabular-nums leading-tight">{horas}</span>
+          </div>
         )}
 
         <div className="flex items-center gap-1">

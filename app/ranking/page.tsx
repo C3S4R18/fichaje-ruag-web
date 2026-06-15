@@ -1,7 +1,8 @@
 'use client'
 
 import Link from 'next/link'
-import { useEffect, useMemo, useState } from 'react'
+import { Suspense, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { AnimatePresence, motion } from 'framer-motion'
 import { format } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -209,7 +210,15 @@ function RunnerRow({ item, index, type }: { item: RankingItem; index: number; ty
   )
 }
 
-export default function RankingPage() {
+export default function RankingPageWrapper() {
+  return (
+    <Suspense fallback={null}>
+      <RankingPage />
+    </Suspense>
+  )
+}
+
+function RankingPage() {
   const [date, setDate] = useState(format(new Date(), 'yyyy-MM-dd'))
   const [backHref, setBackHref] = useState('/escaner')
   const [type, setType] = useState<RankingType>('puntual')
@@ -243,14 +252,14 @@ export default function RankingPage() {
     }
   }
 
+  const searchParams = useSearchParams()
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const dateParam = params.get('date')
-    const typeParam = params.get('type')
+    const dateParam = searchParams.get('date')
+    const typeParam = searchParams.get('type')
     if (dateParam && /^\d{4}-\d{2}-\d{2}$/.test(dateParam)) setDate(dateParam)
-    if (typeParam === 'tardanza') setType('tardanza')
-    if (params.get('from') === 'admin') setBackHref('/')
-  }, [])
+    setType(typeParam === 'tardanza' ? 'tardanza' : 'puntual')
+    if (searchParams.get('from') === 'admin') setBackHref('/')
+  }, [searchParams])
 
   useEffect(() => {
     void loadRanking(date, type)
