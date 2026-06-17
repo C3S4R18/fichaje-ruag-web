@@ -29,7 +29,7 @@ import 'mapbox-gl/dist/mapbox-gl.css'
 type TimeOfDay = 'dawn' | 'day' | 'dusk' | 'night'
 type BirthdayItem = { dni: string; nombre: string; area: string; foto: string; fecha: string; daysUntil: number; turningAge: number | null; isToday: boolean; label: string }
 type TipoMarcacion = 'ninguna' | 'ingreso_obra' | 'salida_obra' | 'externo' | 'nota' | 'nocturno'
-type EstadoAsistencia = 'PUNTUAL' | 'TARDANZA' | 'INASISTENCIA' | 'DESCANSO MEDICO'
+type EstadoAsistencia = 'PUNTUAL' | 'TARDANZA' | 'INASISTENCIA' | 'DESCANSO MEDICO' | 'VACACIONES'
 
 type AsistenciaRecord = {
   id: string
@@ -157,6 +157,42 @@ function buildSyntheticInasistencia(fechaKey: string, perfil: any): AsistenciaRe
     foto_url: perfil.foto_url ?? '',
     notas: 'Marcado automaticamente por el sistema - Sin registro en el dia',
     _syntheticInasistencia: true,
+  }
+}
+
+function buildSyntheticVacaciones(fechaKey: string, perfil: any, comentario?: string | null): AsistenciaRecord {
+  const [year, month, day] = fechaKey.split('-').map(Number)
+  return {
+    id: `synthetic-vacaciones-${fechaKey}-${perfil.dni}`,
+    dni: perfil.dni,
+    fecha: fechaKey,
+    hora_ingreso: new Date(Date.UTC(year, month - 1, day, 28, 0, 0, 0)).toISOString(),
+    hora_salida: null,
+    estado_ingreso: 'VACACIONES',
+    nombres_completos: perfil.nombres_completos,
+    area: getVisibleArea(perfil.area),
+    foto_url: perfil.foto_url ?? '',
+    notas: comentario ? `Vacaciones aprobadas - ${comentario}` : 'Vacaciones aprobadas por RRHH',
+    _syntheticInasistencia: false,
+    _syntheticVacaciones: true,
+  }
+}
+
+function buildSyntheticDescansoMedico(fechaKey: string, perfil: any, comentario?: string | null): AsistenciaRecord {
+  const [year, month, day] = fechaKey.split('-').map(Number)
+  return {
+    id: `synthetic-descanso-${fechaKey}-${perfil.dni}`,
+    dni: perfil.dni,
+    fecha: fechaKey,
+    hora_ingreso: new Date(Date.UTC(year, month - 1, day, 28, 30, 0, 0)).toISOString(),
+    hora_salida: null,
+    estado_ingreso: 'DESCANSO MEDICO',
+    nombres_completos: perfil.nombres_completos,
+    area: getVisibleArea(perfil.area),
+    foto_url: perfil.foto_url ?? '',
+    notas: comentario ? `Descanso médico aprobado - ${comentario}` : 'Descanso médico aprobado',
+    _syntheticInasistencia: false,
+    _syntheticDescanso: true,
   }
 }
 
@@ -604,16 +640,13 @@ export default function AdminDashboard() {
     ])
     const shouldBuildAbsences = fechaStr < todayLima && WORKING_DAYS.has(getWeekday(fechaStr)) && !holidayKeys.has(fechaStr)
 
-    const [q1, q2, q3, perfilesRes, vacacionesRes] = await Promise.all([
+    const [q1, q2, q3, perfilesRes, vacacionesRes, descansosRes] = await Promise.all([
       supabase.from('registro_asistencias').select('*').eq('fecha', fechaStr).order('hora_ingreso', { ascending: false }),
       supabase.from('registro_asistencias').select('*').eq('fecha', nextStr).gte('hora_ingreso', noctIni).lt('hora_ingreso', limaFin).order('hora_ingreso', { ascending: false }),
       supabase.from('registro_asistencias').select('*').eq('fecha', prevStr).gte('hora_ingreso', noctIniPrev).gte('hora_salida', limaIni).lt('hora_salida', limaFin).order('hora_ingreso', { ascending: false }),
-      shouldBuildAbsences
-        ? supabase.from('fotocheck_perfiles').select('dni, nombres_completos, area, foto_url').order('nombres_completos')
-        : Promise.resolve({ data: [], error: null } as any),
-      shouldBuildAbsences
-        ? supabase.from('vacaciones_solicitudes').select('dni').eq('estado', 'aprobada').lte('fecha_inicio', fechaStr).gte('fecha_fin', fechaStr)
-        : Promise.resolve({ data: [], error: null } as any),
+      supabase.from('fotocheck_perfiles').select('dni, nombres_completos, area, foto_url').order('nombres_completos'),
+      supabase.from('vacaciones_solicitudes').select('dni, comentario, fecha_inicio, fecha_fin').eq('estado', 'aprobada').lte('fecha_inicio', fechaStr).gte('fecha_fin', fechaStr),
+      supabase.from('descansos_medicos_solicitudes').select('dni, comentario, fecha_inicio, fecha_fin').eq('estado', 'aprobada').lte('fecha_inicio', fechaStr).gte('fecha_fin', fechaStr),
     ])
 
     const seen = new Set<string>()
@@ -623,21 +656,47 @@ export default function AdminDashboard() {
       ...(q3.data ?? []).map((r: any) => ({ ...r, _saleHoy: true })),
     ].filter((r: any) => { if (seen.has(r.id)) return false; seen.add(r.id); return true })
 
-    const perfiles = perfilesRes?.data ?? []
+    const perfiles = (perfilesRes?.data ?? [])
+      .filter((perfil: any) => !String(perfil.dni).startsWith('EXCEL-'))
+      .filter((perfil: any) => !isInactiveArea(perfil.area))
     const vacaciones = vacacionesRes?.data ?? []
+    const descansos = descansosRes?.data ?? []
     const dnisConRegistro = new Set(todos.map((item: any) => String(item.dni)))
-    const dnisConVacaciones = new Set(vacaciones.map((item: any) => String(item.dni)))
+    const perfilByDni = new Map(perfiles.map((p: any) => [String(p.dni), p]))
 
+    // VACACIONES sintéticas (siempre, no solo en días pasados)
+    const syntheticVacaciones: AsistenciaRecord[] = []
+    const dnisConVacaciones = new Set<string>()
+    for (const v of vacaciones) {
+      const dni = String(v.dni)
+      if (dnisConRegistro.has(dni)) continue
+      const perfil = perfilByDni.get(dni)
+      if (!perfil) continue
+      syntheticVacaciones.push(buildSyntheticVacaciones(fechaStr, perfil, v.comentario))
+      dnisConVacaciones.add(dni)
+    }
+
+    // DESCANSO MÉDICO sintético (siempre)
+    const syntheticDescansos: AsistenciaRecord[] = []
+    const dnisConDescanso = new Set<string>()
+    for (const d of descansos) {
+      const dni = String(d.dni)
+      if (dnisConRegistro.has(dni) || dnisConVacaciones.has(dni)) continue
+      const perfil = perfilByDni.get(dni)
+      if (!perfil) continue
+      syntheticDescansos.push(buildSyntheticDescansoMedico(fechaStr, perfil, d.comentario))
+      dnisConDescanso.add(dni)
+    }
+
+    // INASISTENCIA sintética (solo días laborables pasados)
     const syntheticAbsences = shouldBuildAbsences
       ? perfiles
-          .filter((perfil: any) => !String(perfil.dni).startsWith('EXCEL-'))
-          .filter((perfil: any) => !isInactiveArea(perfil.area))
-          .filter((perfil: any) => !dnisConRegistro.has(String(perfil.dni)) && !dnisConVacaciones.has(String(perfil.dni)))
+          .filter((perfil: any) => !dnisConRegistro.has(String(perfil.dni)) && !dnisConVacaciones.has(String(perfil.dni)) && !dnisConDescanso.has(String(perfil.dni)))
           .filter((perfil: any) => !hiddenAbsenceKeys.has(`${fechaStr}::${perfil.dni}`))
           .map((perfil: any) => buildSyntheticInasistencia(fechaStr, perfil))
       : []
 
-    setAsistencias(sortRecordsByStatus([...todos, ...syntheticAbsences]))
+    setAsistencias(sortRecordsByStatus([...todos, ...syntheticVacaciones, ...syntheticDescansos, ...syntheticAbsences]))
     setLoading(false)
     if (isInitialLoad) setTimeout(() => setIsInitialLoad(false), 400)
   }
@@ -922,7 +981,11 @@ export default function AdminDashboard() {
     const iS = { font: { color: { rgb: 'EA580C' }, bold: true }, alignment: { horizontal: 'center' } }
     const mS = { font: { color: { rgb: '7C3AED' }, bold: true }, alignment: { horizontal: 'center' } }
     const cS = { alignment: { horizontal: 'center' } }
-    const ord = (s: string) => { const p = s?.trim().split(' '); return !p?.length ? '-' : p.length >= 3 ? `${p.slice(-2).join(' ')}, ${p.slice(0,-2).join(' ')}` : p.length === 2 ? `${p[1]}, ${p[0]}` : s }
+    const ord = (s: string) => {
+      const p = s?.trim().split(' ')
+      const formatted = !p?.length ? '-' : p.length >= 3 ? `${p.slice(-2).join(' ')}, ${p.slice(0,-2).join(' ')}` : p.length === 2 ? `${p[1]}, ${p[0]}` : s
+      return String(formatted).toUpperCase()
+    }
     const tt = (ts: string, estado?: string) => estado === 'INASISTENCIA'
       ? '11:59 p. m.'
       : estado === 'DESCANSO MEDICO'
@@ -931,7 +994,7 @@ export default function AdminDashboard() {
     const rows: any[][] = [["FECHA","DNI","APELLIDOS Y NOMBRES","ÁREA","INGRESO","ESTADO","SALIDA","DURACIÓN","NOTA","MAPA"]]
     data.forEach(r => {
       const d = extraerDetalleNota(r.notas)
-      rows.push([r.fecha, r.dni, ord(r.nombres_completos), r.area, tt(r.hora_ingreso, r.estado_ingreso), r.estado_ingreso,
+      rows.push([r.fecha, r.dni, ord(r.nombres_completos), String(r.area || '').toUpperCase(), tt(r.hora_ingreso, r.estado_ingreso), r.estado_ingreso,
         r.hora_salida ? tt(r.hora_salida) : '—', calcHoras(r.hora_ingreso, r.hora_salida),
         d.tieneNota ? d.textoLimpio : '—',
         d.contieneGPS && d.coordenadas ? `http://maps.google.com/?q=${d.coordenadas}` : '—'])
@@ -1325,7 +1388,6 @@ export default function AdminDashboard() {
                 type="button"
                 onClick={() => setShowFechaPicker(true)}
                 className="flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded-lg hover:bg-white dark:hover:bg-slate-800 transition-all"
-                title="Abrir calendario"
               >
                 <CalendarDays size={13} className="text-blue-500" />
                 <span className="font-black text-sm text-slate-700 dark:text-slate-200 capitalize">
@@ -1768,49 +1830,111 @@ export default function AdminDashboard() {
       <AnimatePresence>
         {showExportar && (
           <motion.div className="fixed inset-0 z-[100] flex items-center justify-center p-4"
-            style={{ background: 'rgba(15,23,42,0.6)', backdropFilter: 'blur(10px)' }}
+            style={{ background: 'rgba(15,23,42,0.55)', backdropFilter: 'blur(14px)' }}
             initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
             onClick={() => setShowExportar(false)}>
-            <motion.div className="bg-white dark:bg-slate-900 w-full max-w-sm rounded-2xl shadow-2xl border border-slate-200 dark:border-slate-700 overflow-hidden"
-              initial={{ scale: 0.92, y: 16 }} animate={{ scale: 1, y: 0 }} exit={{ scale: 0.92, y: 16 }}
-              transition={{ type: 'spring', stiffness: 500, damping: 32 }}
+            <motion.div className="relative w-full max-w-md rounded-3xl overflow-hidden shadow-2xl shadow-emerald-500/20"
+              initial={{ scale: 0.9, y: 24, opacity: 0 }} animate={{ scale: 1, y: 0, opacity: 1 }} exit={{ scale: 0.9, y: 24, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 380, damping: 30 }}
               onClick={e => e.stopPropagation()}>
-              <div className="bg-gradient-to-r from-emerald-500 to-teal-500 h-1.5" />
-              <div className="p-5">
-                <div className="flex items-center justify-between mb-5">
-                  <div className="flex items-center gap-3">
-                    <div className="w-9 h-9 rounded-xl bg-emerald-100 dark:bg-emerald-500/20 flex items-center justify-center text-emerald-600"><FileSpreadsheet size={16} /></div>
-                    <h3 className="font-black text-base text-slate-900 dark:text-white">Exportar Excel</h3>
+              {/* Hero header */}
+              <div className="relative px-6 pt-6 pb-7" style={{ background: 'linear-gradient(135deg, #059669 0%, #10B981 50%, #06B6D4 100%)' }}>
+                {/* Decorative blobs */}
+                <motion.div className="pointer-events-none absolute -top-12 -right-10 w-40 h-40 rounded-full bg-white/15 blur-3xl"
+                  animate={{ scale: [1, 1.2, 1], opacity: [0.4, 0.7, 0.4] }} transition={{ duration: 3.4, repeat: Infinity }} />
+                <motion.div className="pointer-events-none absolute -bottom-10 -left-8 w-36 h-36 rounded-full bg-cyan-300/25 blur-3xl"
+                  animate={{ scale: [1.1, 1, 1.1], opacity: [0.5, 0.8, 0.5] }} transition={{ duration: 4, repeat: Infinity }} />
+                <button onClick={() => setShowExportar(false)}
+                  className="absolute top-4 right-4 w-9 h-9 rounded-xl bg-white/20 hover:bg-white/30 backdrop-blur flex items-center justify-center text-white transition">
+                  <X size={16} />
+                </button>
+                <div className="relative flex items-center gap-3.5">
+                  <motion.div className="w-14 h-14 rounded-2xl bg-white/95 flex items-center justify-center shadow-lg text-emerald-600"
+                    animate={{ y: [0, -4, 0], rotate: [0, -5, 5, 0] }} transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}>
+                    <FileSpreadsheet size={26} strokeWidth={2.4} />
+                  </motion.div>
+                  <div>
+                    <p className="text-[10px] font-black text-white/70 uppercase tracking-[0.18em]">Reporte</p>
+                    <h3 className="font-black text-xl text-white tracking-tight" style={{ fontFamily: 'Sora, sans-serif' }}>Exportar Excel</h3>
+                    <p className="text-[11px] font-bold text-white/70 mt-0.5">Descarga asistencia en XLSX</p>
                   </div>
-                  <button onClick={() => setShowExportar(false)} className="p-1.5 rounded-lg text-slate-400 hover:bg-slate-100 dark:hover:bg-slate-800"><X size={16} /></button>
                 </div>
-                <div className="flex bg-slate-100 dark:bg-slate-800 p-1 rounded-xl mb-4">
-                  {[{ v: 'dia', l: 'Día actual' }, { v: 'rango', l: 'Por rango' }].map(t => (
+              </div>
+
+              {/* Body */}
+              <div className="bg-white dark:bg-slate-900 p-5 space-y-4">
+                {/* Tabs */}
+                <div className="relative flex bg-slate-100 dark:bg-slate-800 p-1 rounded-2xl">
+                  {[{ v: 'dia', l: 'Día actual', icon: <CalendarDays size={12} /> }, { v: 'rango', l: 'Por rango', icon: <Activity size={12} /> }].map(t => (
                     <button key={t.v} onClick={() => setTipoExport(t.v as any)}
-                      className={`flex-1 py-1.5 text-xs font-black rounded-lg transition-all ${tipoExport === t.v ? 'bg-white dark:bg-slate-700 text-emerald-600 shadow-sm' : 'text-slate-400'}`}>
-                      {t.l}
+                      className={`relative flex-1 flex items-center justify-center gap-1.5 py-2 text-xs font-black rounded-xl transition-all ${tipoExport === t.v ? 'text-emerald-600' : 'text-slate-400 hover:text-slate-600'}`}>
+                      {tipoExport === t.v && (
+                        <motion.span layoutId="export-tab-pill" className="absolute inset-0 bg-white dark:bg-slate-700 rounded-xl shadow-sm"
+                          transition={{ type: 'spring', stiffness: 400, damping: 30 }} />
+                      )}
+                      <span className="relative flex items-center gap-1.5">{t.icon}{t.l}</span>
                     </button>
                   ))}
                 </div>
-                {tipoExport === 'dia' ? (
-                  <div className="bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 rounded-xl p-4 text-center text-sm text-slate-500">
-                    <strong className="text-emerald-600 text-xl font-black">{filtradas.length}</strong> registros del {format(fechaActual, "d MMM yyyy", { locale: es })}
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 gap-3">
-                    {[{ label: 'Desde', value: exportDesde, onChange: setExportDesde }, { label: 'Hasta', value: exportHasta, onChange: setExportHasta }].map(f => (
-                      <div key={f.label}>
-                        <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1">{f.label}</label>
-                        <input type="date" value={f.value} onChange={e => f.onChange(e.target.value)}
-                          className="w-full bg-slate-50 dark:bg-slate-950/50 border border-slate-200 dark:border-slate-800 px-3 py-2 rounded-xl outline-none focus:border-emerald-500 text-sm" />
+
+                {/* Content por tipo */}
+                <AnimatePresence mode="wait">
+                  {tipoExport === 'dia' ? (
+                    <motion.div key="dia"
+                      initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: 10 }}
+                      transition={{ duration: 0.2 }}
+                      className="relative overflow-hidden rounded-2xl border border-emerald-100 dark:border-emerald-500/20 p-5"
+                      style={{ background: 'linear-gradient(135deg, #ECFDF5, #F0FDFA)' }}>
+                      <div className="flex items-baseline justify-center gap-2">
+                        <motion.span
+                          className="text-5xl font-black text-emerald-600 tabular-nums"
+                          style={{ fontFamily: 'Sora, sans-serif' }}
+                          initial={{ scale: 0.7, opacity: 0 }} animate={{ scale: 1, opacity: 1 }}
+                          transition={{ type: 'spring', stiffness: 320, damping: 20 }}>
+                          {filtradas.length}
+                        </motion.span>
+                        <span className="text-xs font-black text-emerald-700 uppercase tracking-widest">registros</span>
                       </div>
-                    ))}
-                  </div>
-                )}
-                <button onClick={ejecutarExport} disabled={exportando}
-                  className="w-full mt-4 bg-emerald-600 hover:bg-emerald-700 text-white font-black py-3 rounded-xl flex justify-center items-center gap-2 transition-all active:scale-95 disabled:opacity-50 text-sm">
-                  {exportando ? <Loader2 className="animate-spin" size={16} /> : <><Download size={14} /> DESCARGAR</>}
-                </button>
+                      <p className="text-center text-[11px] font-bold text-slate-500 mt-1 capitalize">
+                        {format(fechaActual, "EEEE d 'de' MMMM yyyy", { locale: es })}
+                      </p>
+                    </motion.div>
+                  ) : (
+                    <motion.div key="rango"
+                      initial={{ opacity: 0, x: 10 }} animate={{ opacity: 1, x: 0 }} exit={{ opacity: 0, x: -10 }}
+                      transition={{ duration: 0.2 }}
+                      className="grid grid-cols-2 gap-3">
+                      {[{ label: 'Desde', value: exportDesde, onChange: setExportDesde }, { label: 'Hasta', value: exportHasta, onChange: setExportHasta }].map(f => (
+                        <div key={f.label} className="relative">
+                          <label className="text-[9px] font-black text-slate-400 uppercase tracking-widest block mb-1.5 flex items-center gap-1">
+                            <CalendarDays size={9} /> {f.label}
+                          </label>
+                          <input type="date" value={f.value} onChange={e => f.onChange(e.target.value)}
+                            className="w-full bg-slate-50 dark:bg-slate-950/50 border-2 border-slate-200 dark:border-slate-800 px-3 py-2.5 rounded-xl outline-none focus:border-emerald-500 text-sm font-bold transition" />
+                        </div>
+                      ))}
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {/* Format chips */}
+                <div className="flex flex-wrap items-center gap-1.5 px-1">
+                  <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Incluye</span>
+                  {['Nombres', 'DNI', 'Área', 'Ingreso/Salida', 'Duración', 'Mapa GPS'].map(c => (
+                    <span key={c} className="px-2 py-0.5 rounded-full text-[9px] font-black bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">{c}</span>
+                  ))}
+                </div>
+
+                {/* Action */}
+                <motion.button
+                  onClick={ejecutarExport} disabled={exportando}
+                  whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.97 }}
+                  className="relative w-full overflow-hidden text-white font-black py-3.5 rounded-2xl flex justify-center items-center gap-2 disabled:opacity-60 text-sm shadow-lg shadow-emerald-500/30"
+                  style={{ background: 'linear-gradient(135deg, #059669, #10B981, #06B6D4)', fontFamily: 'Sora, sans-serif' }}>
+                  {exportando
+                    ? <><Loader2 className="animate-spin" size={18} /><span>GENERANDO XLSX...</span></>
+                    : <><Download size={16} /><span className="tracking-wider">DESCARGAR EXCEL</span></>}
+                </motion.button>
               </div>
             </motion.div>
           </motion.div>
@@ -2424,6 +2548,7 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
   const esSintetica = !!data._syntheticInasistencia
   const esInasistencia = data.estado_ingreso === 'INASISTENCIA'
   const esDescansoMedico = data.estado_ingreso === 'DESCANSO MEDICO'
+  const esVacaciones = data.estado_ingreso === 'VACACIONES'
   const isPuntual  = data.estado_ingreso === 'PUNTUAL'
   const entroAyer  = !!data._entroAyer
   const saleHoy    = !!data._saleHoy
@@ -2431,14 +2556,15 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
   const nota   = extraerDetalleNota(data.notas)
   const tone   = getMarkerTone(nota.tipoMarcacion)
   const NIcon  = tone.icon
-  const horas  = esDescansoMedico ? '—' : calcHoras(data.hora_ingreso, data.hora_salida)
+  const horas  = (esDescansoMedico || esVacaciones) ? '—' : calcHoras(data.hora_ingreso, data.hora_salida)
   const esNocturno = data.notas?.startsWith('Turno Nocturno') ?? false
   const esOffline  = (data.notas ?? '').includes('[OFFLINE]')
-  const hasBadge = entroAyer || saleHoy || esOffline || esInasistencia || esDescansoMedico
+  const hasBadge = entroAyer || saleHoy || esOffline || esInasistencia || esDescansoMedico || esVacaciones
   const puedeEditarRegistro = modoEdicion && (!esSintetica || esInasistencia || esDescansoMedico)
 
   // Acentos por estado para gradient + ring del card
-  const accent = esDescansoMedico ? { ring: '#A21CAF', tint: 'rgba(217,70,239,0.06)', border: 'rgba(232,121,249,0.45)' }
+  const accent = esVacaciones ? { ring: '#0891B2', tint: 'rgba(8,145,178,0.06)', border: 'rgba(34,211,238,0.45)' }
+    : esDescansoMedico ? { ring: '#A21CAF', tint: 'rgba(217,70,239,0.06)', border: 'rgba(232,121,249,0.45)' }
     : esInasistencia ? { ring: '#F97316', tint: 'rgba(249,115,22,0.06)', border: 'rgba(251,146,60,0.45)' }
     : entroAyer || saleHoy ? { ring: '#D97706', tint: 'rgba(245,158,11,0.05)', border: 'rgba(252,211,77,0.5)' }
     : esOffline ? { ring: '#7C3AED', tint: 'rgba(124,58,237,0.05)', border: 'rgba(167,139,250,0.45)' }
@@ -2486,6 +2612,11 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
           <Stethoscope size={8} /> DESCANSO MEDICO · Justificado
         </div>
       )}
+      {esVacaciones && (
+        <div className="absolute -top-2.5 left-4 z-10 flex items-center gap-1 bg-gradient-to-r from-cyan-500 to-blue-500 text-white text-[8px] font-black px-2.5 py-1 rounded-full shadow-md shadow-cyan-500/30">
+          🏖️ VACACIONES · Aprobada
+        </div>
+      )}
 
       {/* Avatar */}
       <div className="flex items-center gap-3.5 flex-1 min-w-0 pr-3">
@@ -2497,8 +2628,8 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
               <div className="w-full h-full flex items-center justify-center font-black text-slate-400 text-sm">{getInitials(data.nombres_completos)}</div>}
           </div>
           {/* Status dot */}
-          <div className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full border-[2.5px] border-white dark:border-slate-900 flex items-center justify-center ${esDescansoMedico ? 'bg-fuchsia-500' : esInasistencia ? 'bg-orange-400' : isPuntual ? 'bg-emerald-500' : 'bg-red-500'}`}>
-            {isPuntual && !esDescansoMedico && !esInasistencia && <CheckCircle2 size={9} className="text-white" strokeWidth={3} />}
+          <div className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full border-[2.5px] border-white dark:border-slate-900 flex items-center justify-center ${esVacaciones ? 'bg-cyan-500' : esDescansoMedico ? 'bg-fuchsia-500' : esInasistencia ? 'bg-orange-400' : isPuntual ? 'bg-emerald-500' : 'bg-red-500'}`}>
+            {isPuntual && !esDescansoMedico && !esInasistencia && !esVacaciones && <CheckCircle2 size={9} className="text-white" strokeWidth={3} />}
           </div>
           {esNocturno && <div className="absolute -top-0.5 -left-0.5 w-4 h-4 rounded-full bg-amber-400 border-[2.5px] border-white dark:border-slate-900 flex items-center justify-center shadow-sm"><Moon size={8} className="text-white" /></div>}
           {esOffline && !esNocturno && <div className="absolute -top-0.5 -left-0.5 w-4 h-4 rounded-full bg-violet-500 border-[2.5px] border-white dark:border-slate-900 flex items-center justify-center text-white text-[7px] font-black leading-none">📵</div>}
@@ -2549,7 +2680,11 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
               <span className="w-1 h-1 rounded-full bg-slate-300 dark:bg-slate-600" />
               {data.area}
             </span>
-            {esDescansoMedico ? (
+            {esVacaciones ? (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black bg-cyan-100 text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-300">
+                <span className="w-1.5 h-1.5 rounded-full bg-cyan-500" /> VACACIONES
+              </span>
+            ) : esDescansoMedico ? (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-500/15 dark:text-fuchsia-300">
                 <span className="w-1.5 h-1.5 rounded-full bg-fuchsia-500" /> DESCANSO MEDICO
               </span>
@@ -2581,15 +2716,15 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
           style={{ borderColor: 'rgba(226,232,240,0.9)' }}>
           <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Entrada</span>
           {puedeEditarRegistro ? (
-            <input type="time" defaultValue={(esInasistencia || esDescansoMedico) ? '' : format(new Date(data.hora_ingreso), 'HH:mm')}
+            <input type="time" defaultValue={(esInasistencia || esDescansoMedico || esVacaciones) ? '' : format(new Date(data.hora_ingreso), 'HH:mm')}
               className="bg-transparent border-b border-blue-500 text-xs font-black text-blue-600 outline-none w-14 text-center"
               onBlur={e => {
-                const current = (esInasistencia || esDescansoMedico) ? '' : format(new Date(data.hora_ingreso), 'HH:mm')
+                const current = (esInasistencia || esDescansoMedico || esVacaciones) ? '' : format(new Date(data.hora_ingreso), 'HH:mm')
                 if (e.target.value && e.target.value !== current) onActualizar(data.id, 'hora_ingreso', e.target.value, data.hora_ingreso)
               }} />
           ) : (
-            <span className={`font-black text-base tabular-nums leading-tight ${esDescansoMedico ? 'text-fuchsia-600 dark:text-fuchsia-300' : esInasistencia ? 'text-orange-500 dark:text-orange-300' : isPuntual ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-              {(esInasistencia || esDescansoMedico) ? '—' : format(new Date(data.hora_ingreso), 'HH:mm')}
+            <span className={`font-black text-base tabular-nums leading-tight ${esVacaciones ? 'text-cyan-600 dark:text-cyan-300' : esDescansoMedico ? 'text-fuchsia-600 dark:text-fuchsia-300' : esInasistencia ? 'text-orange-500 dark:text-orange-300' : isPuntual ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+              {(esInasistencia || esDescansoMedico || esVacaciones) ? '—' : format(new Date(data.hora_ingreso), 'HH:mm')}
             </span>
           )}
         </div>
