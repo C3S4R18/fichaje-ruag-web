@@ -156,8 +156,33 @@ export async function loadAttendanceRangeDataset(fromKey: string, toKey: string)
 
   const synthetic: AsistenciaRecord[] = []
   for (const dateKey of dateKeysBetween(fromKey, toKey)) {
-    if (holidayKeys.has(dateKey)) continue
-    if (!(dateKey < todayLima) || !WORKING_DAYS.has(getWeekday(dateKey))) continue
+    const esFeriado = holidayKeys.has(dateKey)
+    const esLaborablePasado = dateKey <= todayLima && WORKING_DAYS.has(getWeekday(dateKey))
+    if (esFeriado) {
+      // FERIADO sintético — workers que SÍ marcaron quedan con su estado real
+      if (dateKey > todayLima) continue
+      perfiles.forEach((perfil: any) => {
+        const key = `${dateKey}::${perfil.dni}`
+        if (existingKeys.has(key) || vacationKeys.has(key) || hiddenAbsenceKeys.has(key)) return
+        const [year, month, day] = dateKey.split('-').map(Number)
+        synthetic.push({
+          id: `synthetic-feriado-${dateKey}-${perfil.dni}`,
+          dni: perfil.dni,
+          fecha: dateKey,
+          hora_ingreso: new Date(Date.UTC(year, month - 1, day, 28, 45, 0, 0)).toISOString(),
+          hora_salida: null,
+          estado_ingreso: 'FERIADO',
+          nombres_completos: perfil.nombres_completos,
+          area: getVisibleArea(perfil.area),
+          foto_url: perfil.foto_url ?? '',
+          notas: 'Día feriado · No laborable',
+          _syntheticInasistencia: false,
+          _syntheticFeriado: true,
+        } as AsistenciaRecord)
+      })
+      continue
+    }
+    if (!esLaborablePasado || dateKey >= todayLima) continue
     perfiles.forEach((perfil: any) => {
       const key = `${dateKey}::${perfil.dni}`
       if (!existingKeys.has(key) && !vacationKeys.has(key) && !hiddenAbsenceKeys.has(key)) {

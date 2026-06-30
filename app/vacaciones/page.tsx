@@ -186,7 +186,7 @@ function areaSortValue(value: string | null) {
   return index === -1 ? preferredAreaOrder.length + 100 : index
 }
 
-const asDate = (value: string) => new Date(value.includes('T') ? value : `${value}T12:00:00`)
+const asDate = (value: string) => new Date(value.includes('T') ? value : `${value}T12:00:00Z`)
 const shortDate = (value: string | null) => (value ? format(asDate(value), 'dd/MM/yy', { locale: es }) : '--')
 const longDate = (value: string) => format(asDate(value), 'dd MMM yyyy', { locale: es })
 const dateTime = (value: string) => format(asDate(value), 'dd MMM yyyy - HH:mm', { locale: es })
@@ -744,11 +744,13 @@ function VacacionesPageContent() {
   const derived = useCallback((row: Balance) => {
     const visibleGozados = months.reduce((sum, col) => sum + getMonthView(row, col).total, 0)
     const renewalCredit = renewalAvailableCredit(row)
-    const pendientesPrev = num(row.saldo_arrastre) - visibleGozados
+    const rawPrev = num(row.saldo_arrastre) - visibleGozados
+    // Si saldo carry no alcanza, el exceso se descuenta del periodo nuevo.
+    const pendientesPrev = Math.max(rawPrev, 0)
     const amount = renewalAmount(row)
     const isDue = renewalDue(row)
     const porVencer = isDue ? 0 : amount
-    const pendientesPeriodo = Math.max(pendientesPrev + renewalCredit, 0)
+    const pendientesPeriodo = Math.max(rawPrev + renewalCredit, 0)
     return { pendientesPrev, pendientesPeriodo, gozados: visibleGozados, porVencer }
   }, [getMonthView])
 
@@ -965,9 +967,15 @@ function VacacionesPageContent() {
     setResolvingId(row.id)
     const { error } = await supabase.from('vacaciones_solicitudes').update({ estado }).eq('id', row.id)
     setResolvingId(null)
-    if (error) toast.error(error.message)
-    else toast.success(estado === 'aprobada' ? `Vacaciones aprobadas para ${row.trabajador_nombre}` : `Vacaciones rechazadas para ${row.trabajador_nombre}`)
-  }, [])
+    if (error) {
+      toast.error(error.message)
+      return
+    }
+    toast.success(estado === 'aprobada' ? `Vacaciones aprobadas para ${row.trabajador_nombre}` : `Vacaciones rechazadas para ${row.trabajador_nombre}`)
+    // Actualización optimista de UI antes de que realtime/fetchAll resuelvan.
+    setRequests((prev) => prev.map((r) => r.id === row.id ? { ...r, estado } : r))
+    void fetchAll()
+  }, [fetchAll])
 
   const confirmDeleteRequest = useCallback(async () => {
     if (!deleteRequestTarget) return

@@ -1103,6 +1103,7 @@ export default function EscanerWeb() {
 
   // Calendar
   const [historialMes, setHistorialMes]   = useState<Asistencia[]>([])
+  const [feriadosMes, setFeriadosMes]     = useState<Set<string>>(new Set())
   const [targetDate, setTargetDate]       = useState(new Date())
   const [selectedDay, setSelectedDay]     = useState<Asistencia | null>(null)
   const [selectedVacationDay, setSelectedVacationDay] = useState<VacationCalendarDay | null>(null)
@@ -1508,13 +1509,17 @@ export default function EscanerWeb() {
       const from = `${y}-${String(m + 1).padStart(2, '0')}-01`
       const to   = `${y}-${String(m + 1).padStart(2, '0')}-${String(ld).padStart(2, '0')}`
 
-      const { data } = await supabase.from('registro_asistencias')
-        .select('id, fecha, hora_ingreso, estado_ingreso, hora_salida, notas')
-        .eq('dni', perfil.dni)
-        .gte('fecha', from).lte('fecha', to)
-        .order('fecha', { ascending: false })
+      const [{ data }, feriadosRes] = await Promise.all([
+        supabase.from('registro_asistencias')
+          .select('id, fecha, hora_ingreso, estado_ingreso, hora_salida, notas')
+          .eq('dni', perfil.dni)
+          .gte('fecha', from).lte('fecha', to)
+          .order('fecha', { ascending: false }),
+        fetch(`/api/feriados?from=${from}&to=${to}`).then(r => r.ok ? r.json() : { feriados: [] }).catch(() => ({ feriados: [] })),
+      ])
 
       setHistorialMes((data || []) as Asistencia[])
+      setFeriadosMes(new Set(((feriadosRes.feriados ?? []) as any[]).map((f: any) => String(f.fecha))))
       setLoadingCal(false)
     }
     fetchMes()
@@ -1808,6 +1813,29 @@ export default function EscanerWeb() {
     if (!perfil) return
     setGuardando(true)
 
+    // Duplicate detector: revisa si YA hay registro hoy antes de pedir GPS
+    try {
+      const hoy = format(new Date(), 'yyyy-MM-dd')
+      const { data: existente } = await supabase
+        .from('registro_asistencias')
+        .select('id, hora_ingreso, estado_ingreso, notas')
+        .eq('dni', perfil.dni)
+        .eq('fecha', hoy)
+        .limit(1)
+        .maybeSingle()
+      if (existente) {
+        const horaExistente = formatTimeLima((existente as any).hora_ingreso)
+        toast.warning(`Ya marcaste tu ingreso hoy a las ${horaExistente}`, {
+          description: `Estado: ${(existente as any).estado_ingreso}. Si necesitas corregir, contacta a RRHH.`,
+          duration: 9000,
+        })
+        setAsistenciaHoy(existente as Asistencia)
+        setShowObra(false); setShowExterno(false); setNotaTexto('')
+        setGuardando(false)
+        return
+      }
+    } catch { /* sin red: seguimos con flow normal */ }
+
     try {
       const pos  = await obtenerUbicacion()
       const lat  = pos.coords.latitude
@@ -1815,8 +1843,12 @@ export default function EscanerWeb() {
       const dist = calcularDistancia(lat, lon, OBRA_LAT, OBRA_LON)
 
       if (tipo === 'obra' && dist <= RADIO_METROS) {
-        toast.info('Estás en la oficina. Por favor escanea el QR.')
-        setGuardando(false); setShowObra(false); return
+        toast.warning('Estás dentro de la oficina', {
+          description: 'Cierra este modal y escanea el QR de la entrada para marcar tu ingreso normal.',
+          duration: 8000,
+        })
+        setGuardando(false)
+        return
       }
 
       const h   = new Date().getHours()
@@ -1846,9 +1878,20 @@ export default function EscanerWeb() {
       toast.success(tipo === 'obra' ? '¡Ingreso en obra registrado!' : '¡Ingreso externo registrado!')
       unlockAndAnimate(await evaluarLogrosIngreso(perfil.dni, h, m))
     } catch (err: any) {
-      if (err.code === 1) toast.error('Activa el GPS para marcar entrada externa.')
-      else if (err.message?.includes('duplicate') || err.message?.includes('unique')) {
-        toast.info('Ingreso ya registrado'); setShowObra(false); setShowExterno(false)
+      const code = err?.code
+      const msg = String(err?.message ?? '')
+      if (code === 1 || msg.toLowerCase().includes('permission') || msg.toLowerCase().includes('denied')) {
+        toast.error('GPS bloqueado', {
+          description: 'Activa permiso de ubicación en Ajustes → Privacidad → Ubicación → permite RUAG.',
+          duration: 10000,
+        })
+      } else if (code === 2 || msg.toLowerCase().includes('unavailable')) {
+        toast.error('GPS no disponible', { description: 'Sal a un lugar abierto y vuelve a intentar.', duration: 8000 })
+      } else if (code === 3 || msg.toLowerCase().includes('timeout')) {
+        toast.error('GPS tardó demasiado', { description: 'Verifica que el GPS esté encendido y vuelve a intentar.', duration: 8000 })
+      } else if (code === '23505' || msg.includes('duplicate') || msg.includes('unique')) {
+        toast.warning('Ya tienes un ingreso registrado hoy', { description: 'Solo se permite uno por día. Contacta a RRHH si necesitas corregir.', duration: 9000 })
+        setShowObra(false); setShowExterno(false)
       } else if (isNetworkError(err) && perfil) {
         const h   = new Date().getHours()
         const m   = new Date().getMinutes()
@@ -1865,8 +1908,11 @@ export default function EscanerWeb() {
           hora_ingreso: new Date().toISOString(),
           notas: `${prefijo}: ${notaTexto.trim()} [GPS pendiente por sincronizacion]`,
         })
+        toast.info('Sin conexión: ingreso guardado y se sincronizará automáticamente.', { duration: 6000 })
         setShowObra(false); setShowExterno(false); setNotaTexto('')
-      } else toast.error(`Error: ${err.message}`)
+      } else {
+        toast.error('No se pudo registrar el ingreso', { description: msg || 'Error desconocido. Intenta de nuevo o contacta a RRHH.', duration: 9000 })
+      }
     } finally { setGuardando(false) }
   }
 
@@ -1877,6 +1923,29 @@ export default function EscanerWeb() {
     if (!notaTexto.trim()) { toast.warning('Indica el lugar de trabajo'); return }
     if (!perfil) return
     setGuardando(true)
+
+    // Duplicate pre-check
+    try {
+      const hoy = format(new Date(), 'yyyy-MM-dd')
+      const { data: existente } = await supabase
+        .from('registro_asistencias')
+        .select('id, hora_ingreso, estado_ingreso')
+        .eq('dni', perfil.dni)
+        .eq('fecha', hoy)
+        .limit(1)
+        .maybeSingle()
+      if (existente) {
+        const horaExistente = formatTimeLima((existente as any).hora_ingreso)
+        toast.warning(`Ya marcaste tu ingreso hoy a las ${horaExistente}`, {
+          description: `Estado: ${(existente as any).estado_ingreso}. Solo se permite uno por día.`,
+          duration: 9000,
+        })
+        setAsistenciaHoy(existente as Asistencia)
+        setShowNocturno(false); setNotaTexto(''); setHoraSeleccionada(null)
+        setGuardando(false)
+        return
+      }
+    } catch { /* sin red: seguimos */ }
 
     try {
       const pos  = await obtenerUbicacion()
@@ -1906,9 +1975,17 @@ export default function EscanerWeb() {
       const h = new Date().getHours(); const m = new Date().getMinutes()
       unlockAndAnimate(await evaluarLogrosIngreso(perfil.dni, h, m))
     } catch (err: any) {
-      if (err.code === 1) toast.error('Activa el GPS para registrar el ingreso.')
-      else if (err.message?.includes('duplicate') || err.message?.includes('unique')) {
-        toast.info('Ingreso ya registrado'); setShowNocturno(false)
+      const code = err?.code
+      const msg = String(err?.message ?? '')
+      if (code === 1 || msg.toLowerCase().includes('permission') || msg.toLowerCase().includes('denied')) {
+        toast.error('GPS bloqueado', { description: 'Activa el permiso de ubicación para registrar tu ingreso.', duration: 10000 })
+      } else if (code === 2 || msg.toLowerCase().includes('unavailable')) {
+        toast.error('GPS no disponible', { description: 'Sal a un lugar abierto e intenta de nuevo.', duration: 8000 })
+      } else if (code === 3 || msg.toLowerCase().includes('timeout')) {
+        toast.error('GPS tardó demasiado', { description: 'Revisa que el GPS esté encendido y reintenta.', duration: 8000 })
+      } else if (code === '23505' || msg.includes('duplicate') || msg.includes('unique')) {
+        toast.warning('Ya tienes un ingreso registrado hoy', { description: 'Solo se permite uno por día. Contacta a RRHH si necesitas corregir.', duration: 9000 })
+        setShowNocturno(false)
       } else if (isNetworkError(err) && perfil) {
         const horaLabel = HORAS_NOCTURNAS.find(x => x.hora === horaSeleccionada)?.label ?? ''
         saveOfflineAttendance({
@@ -1921,8 +1998,11 @@ export default function EscanerWeb() {
           hora_ingreso: new Date().toISOString(),
           notas: `Turno Nocturno (${horaLabel}): ${notaTexto.trim()} [GPS pendiente por sincronizacion]`,
         })
+        toast.info('Sin conexión: turno guardado, se sincronizará automáticamente.', { duration: 6000 })
         setShowNocturno(false); setNotaTexto(''); setHoraSeleccionada(null)
-      } else toast.error(`Error: ${err.message}`)
+      } else {
+        toast.error('No se pudo registrar el turno nocturno', { description: msg || 'Intenta de nuevo o contacta a RRHH.', duration: 9000 })
+      }
     } finally { setGuardando(false) }
   }
 
@@ -2139,10 +2219,11 @@ export default function EscanerWeb() {
               const hasVacation = vacationRequests.length > 0
               const isPuntual  = e?.estado_ingreso === 'PUNTUAL'
               const isTardanza = e?.estado_ingreso === 'TARDANZA'
+              const isFeriado  = feriadosMes.has(dStr) && !e && !hasVacation
               const isInteractive = Boolean(e) || hasVacation
               const isToday = dStr === todayStr
               const isFuture = dStr > todayStr
-              const dotColor = hasVacation ? 'var(--blue)' : isPuntual ? 'var(--green)' : isTardanza ? 'var(--red)' : null
+              const dotColor = hasVacation ? 'var(--blue)' : isPuntual ? 'var(--green)' : isTardanza ? 'var(--red)' : isFeriado ? '#0D9488' : null
 
               return (
                 <motion.button
@@ -2154,11 +2235,11 @@ export default function EscanerWeb() {
                   }}
                   className="relative aspect-square rounded-2xl flex flex-col items-center justify-center text-sm font-black border"
                   style={{
-                    background: hasVacation ? 'var(--blue-light)' : isPuntual ? 'var(--green-light)' : isTardanza ? 'var(--red-light)' : 'var(--surface-2)',
-                    borderColor: isToday ? 'var(--blue)' : hasVacation ? '#93C5FD' : isPuntual ? '#6EE7B7' : isTardanza ? '#FCA5A5' : 'var(--border)',
+                    background: hasVacation ? 'var(--blue-light)' : isPuntual ? 'var(--green-light)' : isTardanza ? 'var(--red-light)' : isFeriado ? '#CCFBF1' : 'var(--surface-2)',
+                    borderColor: isToday ? 'var(--blue)' : hasVacation ? '#93C5FD' : isPuntual ? '#6EE7B7' : isTardanza ? '#FCA5A5' : isFeriado ? '#5EEAD4' : 'var(--border)',
                     borderWidth: isToday ? 2 : 1,
-                    color: hasVacation ? 'var(--blue)' : isPuntual ? 'var(--green)' : isTardanza ? 'var(--red)' : 'var(--text-3)',
-                    opacity: isFuture && !isInteractive ? 0.35 : !isInteractive ? 0.6 : 1,
+                    color: hasVacation ? 'var(--blue)' : isPuntual ? 'var(--green)' : isTardanza ? 'var(--red)' : isFeriado ? '#0F766E' : 'var(--text-3)',
+                    opacity: isFuture && !isInteractive && !isFeriado ? 0.35 : !isInteractive && !isFeriado ? 0.6 : 1,
                     boxShadow: isToday ? '0 6px 18px rgba(79,70,229,0.22)' : 'none',
                   }}
                   initial={{ opacity: 0, scale: 0.5 }}

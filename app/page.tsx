@@ -29,7 +29,7 @@ import 'mapbox-gl/dist/mapbox-gl.css'
 type TimeOfDay = 'dawn' | 'day' | 'dusk' | 'night'
 type BirthdayItem = { dni: string; nombre: string; area: string; foto: string; fecha: string; daysUntil: number; turningAge: number | null; isToday: boolean; label: string }
 type TipoMarcacion = 'ninguna' | 'ingreso_obra' | 'salida_obra' | 'externo' | 'nota' | 'nocturno'
-type EstadoAsistencia = 'PUNTUAL' | 'TARDANZA' | 'INASISTENCIA' | 'DESCANSO MEDICO' | 'VACACIONES'
+type EstadoAsistencia = 'PUNTUAL' | 'TARDANZA' | 'INASISTENCIA' | 'DESCANSO MEDICO' | 'VACACIONES' | 'FERIADO'
 
 type AsistenciaRecord = {
   id: string
@@ -175,6 +175,24 @@ function buildSyntheticVacaciones(fechaKey: string, perfil: any, comentario?: st
     notas: comentario ? `Vacaciones aprobadas - ${comentario}` : 'Vacaciones aprobadas por RRHH',
     _syntheticInasistencia: false,
     _syntheticVacaciones: true,
+  }
+}
+
+function buildSyntheticFeriado(fechaKey: string, perfil: any, motivo?: string | null): AsistenciaRecord {
+  const [year, month, day] = fechaKey.split('-').map(Number)
+  return {
+    id: `synthetic-feriado-${fechaKey}-${perfil.dni}`,
+    dni: perfil.dni,
+    fecha: fechaKey,
+    hora_ingreso: new Date(Date.UTC(year, month - 1, day, 28, 45, 0, 0)).toISOString(),
+    hora_salida: null,
+    estado_ingreso: 'FERIADO',
+    nombres_completos: perfil.nombres_completos,
+    area: getVisibleArea(perfil.area),
+    foto_url: perfil.foto_url ?? '',
+    notas: motivo ? `Feriado: ${motivo}` : 'Día feriado · No laborable',
+    _syntheticInasistencia: false,
+    _syntheticFeriado: true,
   }
 }
 
@@ -638,7 +656,10 @@ export default function AdminDashboard() {
       loadHolidayKeys(fechaStr, fechaStr).catch(() => new Set<string>()),
       loadHiddenAbsenceKeys(fechaStr, fechaStr).catch(() => new Set<string>()),
     ])
-    const shouldBuildAbsences = fechaStr < todayLima && WORKING_DAYS.has(getWeekday(fechaStr)) && !holidayKeys.has(fechaStr)
+    const esFeriado = holidayKeys.has(fechaStr)
+    const shouldBuildAbsences = fechaStr < todayLima && WORKING_DAYS.has(getWeekday(fechaStr)) && !esFeriado
+    // Generar sintéticos FERIADO en cualquier día marcado feriado (laborable o no), pasado o hoy.
+    const shouldBuildFeriado = esFeriado && fechaStr <= todayLima
 
     const [q1, q2, q3, perfilesRes, vacacionesRes, descansosRes] = await Promise.all([
       supabase.from('registro_asistencias').select('*').eq('fecha', fechaStr).order('hora_ingreso', { ascending: false }),
@@ -688,7 +709,18 @@ export default function AdminDashboard() {
       dnisConDescanso.add(dni)
     }
 
-    // INASISTENCIA sintética (solo días laborables pasados)
+    // FERIADO sintético (cuando día está marcado feriado). Workers que SÍ marcaron quedan como están.
+    const syntheticFeriados: AsistenciaRecord[] = []
+    if (shouldBuildFeriado) {
+      for (const perfil of perfiles) {
+        const dni = String(perfil.dni)
+        if (dnisConRegistro.has(dni) || dnisConVacaciones.has(dni) || dnisConDescanso.has(dni)) continue
+        if (hiddenAbsenceKeys.has(`${fechaStr}::${dni}`)) continue
+        syntheticFeriados.push(buildSyntheticFeriado(fechaStr, perfil, null))
+      }
+    }
+
+    // INASISTENCIA sintética (solo días laborables pasados, sin feriado)
     const syntheticAbsences = shouldBuildAbsences
       ? perfiles
           .filter((perfil: any) => !dnisConRegistro.has(String(perfil.dni)) && !dnisConVacaciones.has(String(perfil.dni)) && !dnisConDescanso.has(String(perfil.dni)))
@@ -696,7 +728,7 @@ export default function AdminDashboard() {
           .map((perfil: any) => buildSyntheticInasistencia(fechaStr, perfil))
       : []
 
-    setAsistencias(sortRecordsByStatus([...todos, ...syntheticVacaciones, ...syntheticDescansos, ...syntheticAbsences]))
+    setAsistencias(sortRecordsByStatus([...todos, ...syntheticVacaciones, ...syntheticDescansos, ...syntheticFeriados, ...syntheticAbsences]))
     setLoading(false)
     if (isInitialLoad) setTimeout(() => setIsInitialLoad(false), 400)
   }
@@ -2549,6 +2581,7 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
   const esInasistencia = data.estado_ingreso === 'INASISTENCIA'
   const esDescansoMedico = data.estado_ingreso === 'DESCANSO MEDICO'
   const esVacaciones = data.estado_ingreso === 'VACACIONES'
+  const esFeriado = data.estado_ingreso === 'FERIADO'
   const isPuntual  = data.estado_ingreso === 'PUNTUAL'
   const entroAyer  = !!data._entroAyer
   const saleHoy    = !!data._saleHoy
@@ -2556,14 +2589,15 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
   const nota   = extraerDetalleNota(data.notas)
   const tone   = getMarkerTone(nota.tipoMarcacion)
   const NIcon  = tone.icon
-  const horas  = (esDescansoMedico || esVacaciones) ? '—' : calcHoras(data.hora_ingreso, data.hora_salida)
+  const horas  = (esDescansoMedico || esVacaciones || esFeriado) ? '—' : calcHoras(data.hora_ingreso, data.hora_salida)
   const esNocturno = data.notas?.startsWith('Turno Nocturno') ?? false
   const esOffline  = (data.notas ?? '').includes('[OFFLINE]')
-  const hasBadge = entroAyer || saleHoy || esOffline || esInasistencia || esDescansoMedico || esVacaciones
+  const hasBadge = entroAyer || saleHoy || esOffline || esInasistencia || esDescansoMedico || esVacaciones || esFeriado
   const puedeEditarRegistro = modoEdicion && (!esSintetica || esInasistencia || esDescansoMedico)
 
   // Acentos por estado para gradient + ring del card
-  const accent = esVacaciones ? { ring: '#0891B2', tint: 'rgba(8,145,178,0.06)', border: 'rgba(34,211,238,0.45)' }
+  const accent = esFeriado ? { ring: '#0D9488', tint: 'rgba(13,148,136,0.05)', border: 'rgba(45,212,191,0.5)' }
+    : esVacaciones ? { ring: '#0891B2', tint: 'rgba(8,145,178,0.06)', border: 'rgba(34,211,238,0.45)' }
     : esDescansoMedico ? { ring: '#A21CAF', tint: 'rgba(217,70,239,0.06)', border: 'rgba(232,121,249,0.45)' }
     : esInasistencia ? { ring: '#F97316', tint: 'rgba(249,115,22,0.06)', border: 'rgba(251,146,60,0.45)' }
     : entroAyer || saleHoy ? { ring: '#D97706', tint: 'rgba(245,158,11,0.05)', border: 'rgba(252,211,77,0.5)' }
@@ -2617,6 +2651,11 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
           🏖️ VACACIONES · Aprobada
         </div>
       )}
+      {esFeriado && (
+        <div className="absolute -top-2.5 left-4 z-10 flex items-center gap-1 bg-gradient-to-r from-teal-500 to-emerald-500 text-white text-[8px] font-black px-2.5 py-1 rounded-full shadow-md shadow-teal-500/30">
+          🎌 FERIADO · Día no laborable
+        </div>
+      )}
 
       {/* Avatar */}
       <div className="flex items-center gap-3.5 flex-1 min-w-0 pr-3">
@@ -2628,8 +2667,8 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
               <div className="w-full h-full flex items-center justify-center font-black text-slate-400 text-sm">{getInitials(data.nombres_completos)}</div>}
           </div>
           {/* Status dot */}
-          <div className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full border-[2.5px] border-white dark:border-slate-900 flex items-center justify-center ${esVacaciones ? 'bg-cyan-500' : esDescansoMedico ? 'bg-fuchsia-500' : esInasistencia ? 'bg-orange-400' : isPuntual ? 'bg-emerald-500' : 'bg-red-500'}`}>
-            {isPuntual && !esDescansoMedico && !esInasistencia && !esVacaciones && <CheckCircle2 size={9} className="text-white" strokeWidth={3} />}
+          <div className={`absolute -bottom-0.5 -right-0.5 w-4 h-4 rounded-full border-[2.5px] border-white dark:border-slate-900 flex items-center justify-center ${esFeriado ? 'bg-teal-500' : esVacaciones ? 'bg-cyan-500' : esDescansoMedico ? 'bg-fuchsia-500' : esInasistencia ? 'bg-orange-400' : isPuntual ? 'bg-emerald-500' : 'bg-red-500'}`}>
+            {isPuntual && !esDescansoMedico && !esInasistencia && !esVacaciones && !esFeriado && <CheckCircle2 size={9} className="text-white" strokeWidth={3} />}
           </div>
           {esNocturno && <div className="absolute -top-0.5 -left-0.5 w-4 h-4 rounded-full bg-amber-400 border-[2.5px] border-white dark:border-slate-900 flex items-center justify-center shadow-sm"><Moon size={8} className="text-white" /></div>}
           {esOffline && !esNocturno && <div className="absolute -top-0.5 -left-0.5 w-4 h-4 rounded-full bg-violet-500 border-[2.5px] border-white dark:border-slate-900 flex items-center justify-center text-white text-[7px] font-black leading-none">📵</div>}
@@ -2680,7 +2719,11 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
               <span className="w-1 h-1 rounded-full bg-slate-300 dark:bg-slate-600" />
               {data.area}
             </span>
-            {esVacaciones ? (
+            {esFeriado ? (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black bg-teal-100 text-teal-700 dark:bg-teal-500/15 dark:text-teal-300">
+                <span className="w-1.5 h-1.5 rounded-full bg-teal-500" /> FERIADO
+              </span>
+            ) : esVacaciones ? (
               <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black bg-cyan-100 text-cyan-700 dark:bg-cyan-500/15 dark:text-cyan-300">
                 <span className="w-1.5 h-1.5 rounded-full bg-cyan-500" /> VACACIONES
               </span>
@@ -2716,15 +2759,15 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
           style={{ borderColor: 'rgba(226,232,240,0.9)' }}>
           <span className="text-[8px] font-black text-slate-400 uppercase tracking-wider">Entrada</span>
           {puedeEditarRegistro ? (
-            <input type="time" defaultValue={(esInasistencia || esDescansoMedico || esVacaciones) ? '' : format(new Date(data.hora_ingreso), 'HH:mm')}
+            <input type="time" defaultValue={(esInasistencia || esDescansoMedico || esVacaciones || esFeriado) ? '' : format(new Date(data.hora_ingreso), 'HH:mm')}
               className="bg-transparent border-b border-blue-500 text-xs font-black text-blue-600 outline-none w-14 text-center"
               onBlur={e => {
-                const current = (esInasistencia || esDescansoMedico || esVacaciones) ? '' : format(new Date(data.hora_ingreso), 'HH:mm')
+                const current = (esInasistencia || esDescansoMedico || esVacaciones || esFeriado) ? '' : format(new Date(data.hora_ingreso), 'HH:mm')
                 if (e.target.value && e.target.value !== current) onActualizar(data.id, 'hora_ingreso', e.target.value, data.hora_ingreso)
               }} />
           ) : (
-            <span className={`font-black text-base tabular-nums leading-tight ${esVacaciones ? 'text-cyan-600 dark:text-cyan-300' : esDescansoMedico ? 'text-fuchsia-600 dark:text-fuchsia-300' : esInasistencia ? 'text-orange-500 dark:text-orange-300' : isPuntual ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-              {(esInasistencia || esDescansoMedico || esVacaciones) ? '—' : format(new Date(data.hora_ingreso), 'HH:mm')}
+            <span className={`font-black text-base tabular-nums leading-tight ${esFeriado ? 'text-teal-600 dark:text-teal-300' : esVacaciones ? 'text-cyan-600 dark:text-cyan-300' : esDescansoMedico ? 'text-fuchsia-600 dark:text-fuchsia-300' : esInasistencia ? 'text-orange-500 dark:text-orange-300' : isPuntual ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
+              {(esInasistencia || esDescansoMedico || esVacaciones || esFeriado) ? '—' : format(new Date(data.hora_ingreso), 'HH:mm')}
             </span>
           )}
         </div>
