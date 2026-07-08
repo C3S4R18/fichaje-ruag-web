@@ -1442,7 +1442,9 @@ export default function EscanerWeb() {
           const { data: ast } = await supabase.from('registro_asistencias')
             .select('id, hora_ingreso, estado_ingreso, hora_salida, notas, fecha')
             .eq('dni', p.dni).eq('fecha', hoy).order('hora_ingreso', { ascending: false }).limit(1).single()
-          if (ast) setAsistenciaHoy(ast as Asistencia)
+          // Multi-turno: si ya cerró salida hoy, no bloquear con "ya marcaste".
+          // Permitir reingreso mostrando scanner de nuevo.
+          if (ast && !(ast as Asistencia).hora_salida) setAsistenciaHoy(ast as Asistencia)
 
           const { data: logs } = await supabase.from('logros_usuarios').select('logro_id').eq('dni', p.dni)
           if (logs) setUnlockedLogros(logs.map((l: { logro_id: number }) => l.logro_id))
@@ -1818,12 +1820,15 @@ export default function EscanerWeb() {
       const hoy = format(new Date(), 'yyyy-MM-dd')
       const { data: existente } = await supabase
         .from('registro_asistencias')
-        .select('id, hora_ingreso, estado_ingreso, notas')
+        .select('id, hora_ingreso, estado_ingreso, hora_salida, notas')
         .eq('dni', perfil.dni)
         .eq('fecha', hoy)
+        .order('hora_ingreso', { ascending: false })
         .limit(1)
         .maybeSingle()
-      if (existente) {
+      // Multi-turno: bloquear solo si hay sesión abierta (sin hora_salida).
+      // Si ya cerró salida hoy, permitir reingreso.
+      if (existente && !(existente as any).hora_salida) {
         const horaExistente = formatTimeLima((existente as any).hora_ingreso)
         toast.warning(`Ya marcaste tu ingreso hoy a las ${horaExistente}`, {
           description: `Estado: ${(existente as any).estado_ingreso}. Si necesitas corregir, contacta a RRHH.`,
@@ -1924,17 +1929,18 @@ export default function EscanerWeb() {
     if (!perfil) return
     setGuardando(true)
 
-    // Duplicate pre-check
+    // Duplicate pre-check (multi-turno: solo bloquear sesión abierta)
     try {
       const hoy = format(new Date(), 'yyyy-MM-dd')
       const { data: existente } = await supabase
         .from('registro_asistencias')
-        .select('id, hora_ingreso, estado_ingreso')
+        .select('id, hora_ingreso, estado_ingreso, hora_salida')
         .eq('dni', perfil.dni)
         .eq('fecha', hoy)
+        .order('hora_ingreso', { ascending: false })
         .limit(1)
         .maybeSingle()
-      if (existente) {
+      if (existente && !(existente as any).hora_salida) {
         const horaExistente = formatTimeLima((existente as any).hora_ingreso)
         toast.warning(`Ya marcaste tu ingreso hoy a las ${horaExistente}`, {
           description: `Estado: ${(existente as any).estado_ingreso}. Solo se permite uno por día.`,
