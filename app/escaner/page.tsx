@@ -22,6 +22,7 @@ import { activateDeviceSession, clearWorkerSession, hasDeviceSessionToken, isCur
 import { ensureBirthdayPush, pushSupported } from '@/utils/push'
 import LottiePlayer from '@/components/LottiePlayer'
 import CalendarPicker from '@/components/CalendarPicker'
+import OnboardingTour from '@/components/OnboardingTour'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -125,7 +126,7 @@ type WorkerFeature =
   | 'medical'
   | 'ranking'
   | 'rankingLate'
-  | 'guide'
+  | 'tour'
   | 'updates'
   | 'support'
   | 'rrhh'
@@ -1079,7 +1080,18 @@ export default function EscanerWeb() {
   const [showCalendar, setShowCalendar]     = useState(false)
   const [showVacations, setShowVacations]   = useState(false)
   const [showMedicalLeave, setShowMedicalLeave] = useState(false)
-  const [showGuide, setShowGuide]           = useState(false)
+  const [showTour, setShowTour]             = useState(false)
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    try {
+      if (!localStorage.getItem('TOUR_SEEN')) {
+        const t = setTimeout(() => setShowTour(true), 400)
+        return () => clearTimeout(t)
+      }
+    } catch {}
+  }, [])
+
   const [showUpdates, setShowUpdates]       = useState(false)
   const [showSideMenu, setShowSideMenu]     = useState(false)
   const [showBirthdays, setShowBirthdays]   = useState(false)
@@ -1146,7 +1158,7 @@ export default function EscanerWeb() {
     if (feature === 'medical') setShowMedicalLeave(true)
     if (feature === 'ranking') router.push('/ranking')
     if (feature === 'rankingLate') router.push('/ranking?type=tardanza')
-    if (feature === 'guide') setShowGuide(true)
+    if (feature === 'tour') setShowTour(true)
     if (feature === 'updates') setShowUpdates(true)
     if (feature === 'birthdays') setShowBirthdays(true)
     if (feature === 'support' && perfil) abrirSoporteWhatsApp(perfil)
@@ -2395,7 +2407,7 @@ export default function EscanerWeb() {
         const start = touchStartRef.current
         const t = e.changedTouches[0]
         touchStartRef.current = null
-        if (!start || showSideMenu || showLogros || showCalendar || showVacations || showMedicalLeave || showGuide || showUpdates || showBirthdays || showBirthdayPrompt || showNota || showObra || showExterno || showNocturno) return
+        if (!start || showSideMenu || showLogros || showCalendar || showVacations || showMedicalLeave || showTour || showUpdates || showBirthdays || showBirthdayPrompt || showNota || showObra || showExterno || showNocturno) return
         const dx = t.clientX - start.x
         const dy = Math.abs(t.clientY - start.y)
         const middleBand = start.y > window.innerHeight * 0.22 && start.y < window.innerHeight * 0.78
@@ -2479,7 +2491,7 @@ export default function EscanerWeb() {
                   { key: 'medical', label: 'Descanso medico', desc: 'Certificado para RRHH', gif: '/icons-web/descanso-medico.gif', icon: <Stethoscope size={20} />, colors: ['#7C3AED', '#EC4899'] },
                   { key: 'ranking', label: 'Ranking puntual', desc: 'Top 10 de oficina', gif: '/icons-web/ranking.gif', icon: <Star size={20} />, colors: ['#F59E0B', '#F97316'] },
                   { key: 'rankingLate', label: 'Ranking tardanza', desc: 'Llegadas tarde', gif: '/icons-web/ranking-tardanza.gif', icon: <AlertTriangle size={20} />, colors: ['#DC2626', '#F43F5E'] },
-                  { key: 'guide', label: 'Guia de uso', desc: 'Aprende cada boton', gif: '/icons-web/guia-de-uso.gif', icon: <BookOpen size={20} />, colors: ['#2563EB', '#22C55E'] },
+                  { key: 'tour', label: 'Ver tour de nuevo', desc: 'Aprende cada boton', gif: '/icons-web/guia-de-uso.gif', icon: <BookOpen size={20} />, colors: ['#2563EB', '#22C55E'] },
                   { key: 'updates', label: 'Actualizaciones', desc: 'Libro de novedades', gif: '/icons-web/actualizaciones.gif', icon: <FileText size={20} />, colors: ['#0F766E', '#0EA5E9'] },
                   { key: 'support', label: 'Soporte', desc: 'Ayuda por WhatsApp', gif: '/icons-web/soporte.gif', icon: <Phone size={20} />, colors: ['#128C7E', '#25D366'] },
                   { key: 'rrhh', label: 'RRHH', desc: 'Recursos humanos', gif: '/icons-web/rrhh.gif', icon: <Badge size={20} />, colors: ['#2563EB', '#06B6D4'] },
@@ -2550,7 +2562,7 @@ export default function EscanerWeb() {
             initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, ease: [0.34, 1.2, 0.64, 1] }}
           >
-            {scanState === 'ESCANEO' && isOnline && (
+            {scanState === 'ESCANEO' && isOnline && !showTour && (
               <>
                 <div className="absolute inset-0 z-10">
                   <Scanner
@@ -3698,27 +3710,13 @@ export default function EscanerWeb() {
         )}
       </AnimatePresence>
 
-      <AnimatePresence>
-        {showGuide && (
-          <WorkerInfoScreen
-            title="Guia de uso"
-            subtitle="Aprende para que sirve cada boton del PWA."
-            gif="/icons-web/guia-de-uso.gif"
-            color="#0EA5E9"
-            onClose={() => setShowGuide(false)}
-            items={[
-              ['Escaner QR', 'Marca tu ingreso desde el QR de oficina.'],
-              ['Obra, Externo y Nocturno', 'Usalos cuando no estes en oficina principal. Tambien cuentan como asistencia.'],
-              ['Motivo de salida', 'Agrega una nota si necesitas explicar tu salida.'],
-              ['Vacaciones', 'Consulta saldo, solicita dias y revisa si RRHH aprobo.'],
-              ['Descanso medico', 'Envia certificado, rango de fechas y comentario para revision de RRHH.'],
-              ['Ranking puntual', 'Muestra los primeros 10 trabajadores que llegaron puntuales.'],
-              ['Ranking tardanza', 'Muestra las llegadas tarde separadas del ranking puntual.'],
-              ['Soporte y RRHH', 'Abren WhatsApp para pedir ayuda tecnica o laboral.'],
-            ]}
-          />
-        )}
-      </AnimatePresence>
+      <OnboardingTour
+        open={showTour}
+        onFinish={() => {
+          setShowTour(false)
+          try { localStorage.setItem('TOUR_SEEN', '1') } catch {}
+        }}
+      />
 
       <AnimatePresence>
         {showUpdates && (
