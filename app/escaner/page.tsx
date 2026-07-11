@@ -128,6 +128,7 @@ type WorkerFeature =
   | 'medical'
   | 'ranking'
   | 'rankingLate'
+  | 'profile'
   | 'tour'
   | 'updates'
   | 'support'
@@ -811,18 +812,22 @@ function ProfileEditorModal({
   saving: boolean
   onPickPhoto: () => void
   onClose: () => void
-  onSave: (next: { dni: string; area: string; fecha_cumpleanos: string | null }) => void
+  onSave: (next: { dni: string; nombres: string; area: string; empresa: string | null; fecha_cumpleanos: string | null }) => void
 }) {
   const [dni, setDni] = useState(perfil.dni)
+  const [nombres, setNombres] = useState(perfil.nombres)
   const [area, setArea] = useState(perfil.area)
+  const [empresa, setEmpresa] = useState(perfil.empresa ?? '')
   const [birthday, setBirthday] = useState(perfil.fecha_cumpleanos?.slice(0, 10) ?? '')
 
   useEffect(() => {
     if (!open) return
     setDni(perfil.dni)
+    setNombres(perfil.nombres)
     setArea(perfil.area)
+    setEmpresa(perfil.empresa ?? '')
     setBirthday(perfil.fecha_cumpleanos?.slice(0, 10) ?? '')
-  }, [open, perfil.dni, perfil.area, perfil.fecha_cumpleanos])
+  }, [open, perfil.dni, perfil.nombres, perfil.area, perfil.empresa, perfil.fecha_cumpleanos])
 
   if (!open) return null
   const busy = uploading || saving
@@ -880,7 +885,7 @@ function ProfileEditorModal({
             )}
           </div>
           <p className="text-xl font-black" style={{ color: 'white', fontFamily: 'Sora, sans-serif' }}>Editar fotocheck</p>
-          <p className="text-xs font-semibold mt-1" style={{ color: 'rgba(255,255,255,0.82)' }}>Foto, DNI, área y cumpleaños</p>
+          <p className="text-xs font-semibold mt-1" style={{ color: 'rgba(255,255,255,0.82)' }}>Foto, nombre, DNI, área, empresa y cumpleaños</p>
         </div>
 
         <button
@@ -895,6 +900,17 @@ function ProfileEditorModal({
         </button>
 
         <div className="relative z-10 mt-4 space-y-3">
+          <label className="block rounded-2xl border px-4 py-3" style={{ background: 'var(--surface-2)', borderColor: 'var(--border)' }}>
+            <span className="block text-[10px] font-black uppercase tracking-wider mb-1" style={{ color: 'var(--text-3)' }}>Nombres y apellidos</span>
+            <input
+              value={nombres}
+              onChange={(event) => setNombres(event.target.value.toUpperCase())}
+              disabled={busy}
+              className="w-full bg-transparent outline-none text-sm font-bold"
+              style={{ color: 'var(--text-1)' }}
+            />
+          </label>
+
           <label className="block rounded-2xl border px-4 py-3" style={{ background: 'var(--surface-2)', borderColor: 'var(--border)' }}>
             <span className="block text-[10px] font-black uppercase tracking-wider mb-1" style={{ color: 'var(--text-3)' }}>DNI</span>
             <input
@@ -920,6 +936,25 @@ function ProfileEditorModal({
                 {areaOptions.map(option => (
                   <option key={option} value={option}>{option}</option>
                 ))}
+              </select>
+              <ChevronDown size={17} className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-3)' }} />
+            </div>
+          </label>
+
+          <label className="block rounded-2xl border px-4 py-3" style={{ background: 'var(--surface-2)', borderColor: 'var(--border)' }}>
+            <span className="block text-[10px] font-black uppercase tracking-wider mb-1" style={{ color: 'var(--text-3)' }}>Empresa</span>
+            <div className="relative">
+              <select
+                value={empresa}
+                onChange={(event) => setEmpresa(event.target.value)}
+                disabled={busy}
+                className="w-full appearance-none bg-transparent outline-none pr-9 text-sm font-bold"
+                style={{ color: empresa ? 'var(--text-1)' : 'var(--text-3)' }}
+              >
+                <option value="" disabled>Selecciona tu Empresa</option>
+                <option value="RUAG">RUAG</option>
+                <option value="ARUG">ARUG</option>
+                <option value="CG">CG</option>
               </select>
               <ChevronDown size={17} className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-3)' }} />
             </div>
@@ -952,7 +987,7 @@ function ProfileEditorModal({
           </button>
           <button
             type="button"
-            onClick={() => onSave({ dni, area, fecha_cumpleanos: birthday || null })}
+            onClick={() => onSave({ dni, nombres, area, empresa: empresa || null, fecha_cumpleanos: birthday || null })}
             disabled={busy}
             className="h-12 rounded-2xl text-white font-black flex items-center justify-center gap-2 disabled:opacity-50"
             style={{ background: 'linear-gradient(135deg, #7C3AED, #EC4899)', fontFamily: 'Sora, sans-serif' }}
@@ -1160,6 +1195,7 @@ export default function EscanerWeb() {
     if (feature === 'medical') setShowMedicalLeave(true)
     if (feature === 'ranking') router.push('/ranking')
     if (feature === 'rankingLate') router.push('/ranking?type=tardanza')
+    if (feature === 'profile') setShowProfileEditor(true)
     if (feature === 'tour') setShowTour(true)
     if (feature === 'updates') setShowUpdates(true)
     if (feature === 'birthdays') setShowBirthdays(true)
@@ -2091,7 +2127,7 @@ export default function EscanerWeb() {
   // FIX: Elimina foto anterior del bucket antes de subir la nueva
   const handleFoto = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
-    if (!file || !perfil || !asistenciaHoy) return
+    if (!file || !perfil) return
     setUploadingPhoto(true)
 
     try {
@@ -2113,7 +2149,9 @@ export default function EscanerWeb() {
       const newUrl = urlData.publicUrl
 
       await supabase.from('fotocheck_perfiles').update({ foto_url: newUrl }).eq('dni', perfil.dni)
-      await supabase.from('registro_asistencias').update({ foto_url: newUrl }).eq('id', asistenciaHoy.id)
+      if (asistenciaHoy && !asistenciaHoy.id.startsWith('offline-')) {
+        await supabase.from('registro_asistencias').update({ foto_url: newUrl }).eq('id', asistenciaHoy.id)
+      }
 
       store.set('RUAG_FOTO', newUrl)
       setPerfil({ ...perfil, foto_url: newUrl })
@@ -2129,12 +2167,14 @@ export default function EscanerWeb() {
     } finally { setUploadingPhoto(false) }
   }
 
-  const saveProfileChanges = async (next: { dni: string; area: string; fecha_cumpleanos: string | null }) => {
+  const saveProfileChanges = async (next: { dni: string; nombres: string; area: string; empresa: string | null; fecha_cumpleanos: string | null }) => {
     if (!perfil) return
     const nextDni = next.dni.trim()
+    const nextNombres = next.nombres.trim().toUpperCase()
     const nextArea = next.area.trim()
-    if (!nextDni || !nextArea) {
-      toast.warning('DNI y área son obligatorios.')
+    const nextEmpresa = next.empresa?.trim() || null
+    if (!nextDni || !nextArea || !nextNombres) {
+      toast.warning('Nombre, DNI y área son obligatorios.')
       return
     }
 
@@ -2142,24 +2182,26 @@ export default function EscanerWeb() {
     try {
       const { error } = await supabase
         .from('fotocheck_perfiles')
-        .update({ dni: nextDni, area: nextArea, fecha_cumpleanos: next.fecha_cumpleanos })
+        .update({ dni: nextDni, nombres_completos: nextNombres, area: nextArea, empresa: nextEmpresa, fecha_cumpleanos: next.fecha_cumpleanos })
         .eq('dni', perfil.dni)
       if (error) throw error
 
       if (asistenciaHoy && !asistenciaHoy.id.startsWith('offline-')) {
         await supabase
           .from('registro_asistencias')
-          .update({ dni: nextDni, area: nextArea })
+          .update({ dni: nextDni, nombres_completos: nextNombres, area: nextArea })
           .eq('id', asistenciaHoy.id)
       }
 
       if (nextDni !== perfil.dni) {
-        await activateDeviceSession(nextDni, perfil.nombres, 'web-pwa')
+        await activateDeviceSession(nextDni, nextNombres, 'web-pwa')
       }
 
-      const updated = { ...perfil, dni: nextDni, area: nextArea, fecha_cumpleanos: next.fecha_cumpleanos }
+      const updated = { ...perfil, dni: nextDni, nombres: nextNombres, area: nextArea, empresa: nextEmpresa, fecha_cumpleanos: next.fecha_cumpleanos }
       store.set('RUAG_DNI', updated.dni)
+      store.set('RUAG_NOMBRE', updated.nombres)
       store.set('RUAG_AREA', updated.area)
+      if (nextEmpresa) store.set('RUAG_EMPRESA', nextEmpresa)
       if (updated.fecha_cumpleanos) {
         store.remove(BIRTHDAY_PROMPT_SNOOZE_KEY)
         store.remove(BIRTHDAY_PROMPT_LEGACY_SKIP_KEY)
@@ -2487,6 +2529,7 @@ export default function EscanerWeb() {
 
               <div className="mt-6 flex-1 space-y-3 overflow-y-auto pr-1 pb-[calc(env(safe-area-inset-bottom)+18px)]">
                 {[
+                  { key: 'profile', label: 'Editar perfil', desc: 'Foto, nombre, área y empresa', gif: '/icons-web/edit-profile.gif', icon: <Edit2 size={20} />, colors: ['#2563EB', '#7C3AED'] },
                   { key: 'calendar', label: 'Calendario', desc: 'Historial mensual', gif: '/icons-web/calendario.gif', icon: <Calendar size={20} />, colors: ['#2563EB', '#06B6D4'] },
                   { key: 'logros', label: 'Logros', desc: 'Insignias y progreso', gif: '/icons-web/logros.gif', icon: <Trophy size={20} />, colors: ['#F59E0B', '#FBBF24'] },
                   { key: 'birthdays', label: 'Cumpleaños', desc: 'Próximos y del día', gif: '/icons-web/cumpleanos.gif', icon: <Cake size={20} />, colors: ['#EC4899', '#7C3AED'] },
@@ -2514,6 +2557,8 @@ export default function EscanerWeb() {
                       style={{ background: `linear-gradient(135deg, ${item.colors[0]}18, ${item.colors[1]}24)`, borderColor: `${item.colors[0]}24` }}>
                       {item.key === 'birthdays'
                         ? <LottiePlayer src="/lottie/birthday-cake.json" style={{ width: 46, height: 46 }} />
+                        : item.key === 'profile'
+                        ? <span style={{ color: item.colors[0] }}>{item.icon}</span>
                         : <img src={item.gif} alt="" className="h-11 w-11 object-contain" />}
                     </span>
                     <span className="min-w-0 flex-1">
