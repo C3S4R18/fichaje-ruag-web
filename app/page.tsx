@@ -86,6 +86,14 @@ const WORKING_DAYS = new Set([1, 2, 3, 4, 5])
 const INACTIVE_AREA_PREFIX = '__INACTIVO__|'
 const STATUS_PRIORITY: Record<string, number> = { PUNTUAL: 0, TARDANZA: 1, 'DESCANSO MEDICO': 2, INASISTENCIA: 3 }
 
+const EMPRESA_TABS: { id: string; label: string; colors: [string, string]; border: string }[] = [
+  { id: 'TODAS', label: 'Todas',  colors: ['#0F172A', '#334155'], border: 'rgba(100,116,139,0.35)' },
+  { id: 'RUAG',  label: 'RUAG',   colors: ['#047857', '#22C55E'], border: 'rgba(5,150,105,0.35)' },
+  { id: 'ARUG',  label: 'ARUG',   colors: ['#1D4ED8', '#38BDF8'], border: 'rgba(37,99,235,0.35)' },
+  { id: 'CG',    label: 'CG',     colors: ['#B45309', '#FBBF24'], border: 'rgba(245,158,11,0.35)' },
+  { id: 'SIN',   label: 'Sin empresa', colors: ['#64748B', '#94A3B8'], border: 'rgba(100,116,139,0.3)' },
+]
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function getLimaHour() {
@@ -513,6 +521,7 @@ export default function AdminDashboard() {
   const [busqueda, setBusqueda]           = useState('')
   const [filtroArea, setFiltroArea]       = useState('TODAS')
   const [filtroEstado, setFiltroEstado]   = useState('TODOS')
+  const [filtroEmpresa, setFiltroEmpresa] = useState('TODAS')
   const [exportDesde, setExportDesde]     = useState(format(new Date(), 'yyyy-MM-dd'))
   const [exportHasta, setExportHasta]     = useState(format(new Date(), 'yyyy-MM-dd'))
   const [exportando, setExportando]       = useState(false)
@@ -665,7 +674,7 @@ export default function AdminDashboard() {
       supabase.from('registro_asistencias').select('*').eq('fecha', fechaStr).order('hora_ingreso', { ascending: false }),
       supabase.from('registro_asistencias').select('*').eq('fecha', nextStr).gte('hora_ingreso', noctIni).lt('hora_ingreso', limaFin).order('hora_ingreso', { ascending: false }),
       supabase.from('registro_asistencias').select('*').eq('fecha', prevStr).gte('hora_ingreso', noctIniPrev).gte('hora_salida', limaIni).lt('hora_salida', limaFin).order('hora_ingreso', { ascending: false }),
-      supabase.from('fotocheck_perfiles').select('dni, nombres_completos, area, foto_url').order('nombres_completos'),
+      supabase.from('fotocheck_perfiles').select('dni, nombres_completos, area, foto_url, empresa').order('nombres_completos'),
       supabase.from('vacaciones_solicitudes').select('dni, comentario, fecha_inicio, fecha_fin').eq('estado', 'aprobada').lte('fecha_inicio', fechaStr).gte('fecha_fin', fechaStr),
       supabase.from('descansos_medicos_solicitudes').select('dni, comentario, fecha_inicio, fecha_fin').eq('estado', 'aprobada').lte('fecha_inicio', fechaStr).gte('fecha_fin', fechaStr),
     ])
@@ -728,7 +737,9 @@ export default function AdminDashboard() {
           .map((perfil: any) => buildSyntheticInasistencia(fechaStr, perfil))
       : []
 
-    setAsistencias(sortRecordsByStatus([...todos, ...syntheticVacaciones, ...syntheticDescansos, ...syntheticFeriados, ...syntheticAbsences]))
+    const conEmpresa = [...todos, ...syntheticVacaciones, ...syntheticDescansos, ...syntheticFeriados, ...syntheticAbsences]
+      .map((r: any) => ({ ...r, empresa: (perfilByDni.get(String(r.dni)) as any)?.empresa ?? r.empresa ?? null }))
+    setAsistencias(sortRecordsByStatus(conEmpresa))
     setLoading(false)
     if (isInitialLoad) setTimeout(() => setIsInitialLoad(false), 400)
   }
@@ -928,8 +939,27 @@ export default function AdminDashboard() {
       .filter(a =>
         (!q || a.nombres_completos?.toLowerCase().includes(q) || a.dni?.includes(q)) &&
         (filtroArea === 'TODAS' || a.area === filtroArea) &&
-        (filtroEstado === 'TODOS' || a.estado_ingreso === filtroEstado)
+        (filtroEstado === 'TODOS' || a.estado_ingreso === filtroEstado) &&
+        (filtroEmpresa === 'TODAS' ||
+          (filtroEmpresa === 'SIN' ? !a.empresa : a.empresa === filtroEmpresa))
       ))
+  }, [asistencias, busqueda, filtroArea, filtroEstado, filtroEmpresa])
+
+  // Conteo por empresa para las pastillas de pestañas
+  const empresaCounts = useMemo(() => {
+    const base = asistencias.filter(a => {
+      const q = busqueda.toLowerCase()
+      return (!q || a.nombres_completos?.toLowerCase().includes(q) || a.dni?.includes(q)) &&
+        (filtroArea === 'TODAS' || a.area === filtroArea) &&
+        (filtroEstado === 'TODOS' || a.estado_ingreso === filtroEstado)
+    })
+    const counts: Record<string, number> = { TODAS: base.length, RUAG: 0, ARUG: 0, CG: 0, SIN: 0 }
+    for (const a of base) {
+      const e = a.empresa
+      if (e === 'RUAG' || e === 'ARUG' || e === 'CG') counts[e]++
+      else counts.SIN++
+    }
+    return counts
   }, [asistencias, busqueda, filtroArea, filtroEstado])
 
   const previewAreas = useMemo(() => ['TODAS', ...Array.from(new Set([previewArea, ...previewData.map(a => a.area)].filter(Boolean))).filter(a => a !== 'TODAS').sort()], [previewData, previewArea])
@@ -1753,6 +1783,46 @@ export default function AdminDashboard() {
                     {v.icon} {v.label}
                   </button>
                 ))}
+              </div>
+            </div>
+
+            {/* ── Pestañas por empresa ─────────────────────────────────────── */}
+            <div className="border-b border-slate-100 dark:border-slate-800 px-3 py-2.5 bg-white dark:bg-slate-900">
+              <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide">
+                {EMPRESA_TABS.map(tab => {
+                  const active = filtroEmpresa === tab.id
+                  const count = empresaCounts[tab.id] ?? 0
+                  return (
+                    <button
+                      key={tab.id}
+                      onClick={() => setFiltroEmpresa(tab.id)}
+                      className="relative shrink-0 flex items-center gap-2 rounded-full px-3.5 py-1.5 text-[11px] font-black uppercase tracking-[0.08em] transition-all"
+                      style={{
+                        background: active
+                          ? `linear-gradient(90deg, ${tab.colors[0]}, ${tab.colors[1]})`
+                          : 'transparent',
+                        color: active ? '#fff' : 'var(--tab-fg, #64748b)',
+                        border: `1.5px solid ${active ? 'transparent' : tab.border}`,
+                        boxShadow: active ? `0 6px 16px ${tab.colors[0]}44` : 'none',
+                      }}
+                    >
+                      <span
+                        className="inline-block h-2 w-2 rounded-full"
+                        style={{ background: active ? '#fff' : tab.colors[0] }}
+                      />
+                      {tab.label}
+                      <span
+                        className="ml-0.5 rounded-full px-1.5 py-[1px] text-[10px] tabular-nums"
+                        style={{
+                          background: active ? 'rgba(255,255,255,0.25)' : `${tab.colors[0]}1A`,
+                          color: active ? '#fff' : tab.colors[0],
+                        }}
+                      >
+                        {count}
+                      </span>
+                    </button>
+                  )
+                })}
               </div>
             </div>
 
@@ -2715,6 +2785,21 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
           )}
           <div className="flex items-center gap-2 mt-1 flex-wrap">
             <span className="px-1.5 py-[1px] rounded-md text-[9px] font-mono text-slate-500 bg-slate-100 dark:bg-slate-800 dark:text-slate-400">{data.dni}</span>
+            {data.empresa && (
+              <span
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black text-white uppercase tracking-wider"
+                style={{
+                  background: data.empresa === 'RUAG'
+                    ? 'linear-gradient(90deg, #047857, #22C55E)'
+                    : data.empresa === 'ARUG'
+                    ? 'linear-gradient(90deg, #1D4ED8, #38BDF8)'
+                    : 'linear-gradient(90deg, #B45309, #FBBF24)',
+                }}
+              >
+                <span className="w-1.5 h-1.5 rounded-full bg-white/90" />
+                {data.empresa}
+              </span>
+            )}
             <span className="hidden sm:inline-flex items-center gap-1 text-[9px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
               <span className="w-1 h-1 rounded-full bg-slate-300 dark:bg-slate-600" />
               {data.area}

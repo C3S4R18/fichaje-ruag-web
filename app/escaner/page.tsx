@@ -23,10 +23,12 @@ import { ensureBirthdayPush, pushSupported } from '@/utils/push'
 import LottiePlayer from '@/components/LottiePlayer'
 import CalendarPicker from '@/components/CalendarPicker'
 import OnboardingTour from '@/components/OnboardingTour'
+import PatriaFotocheckOverlay, { isFiestasPatriasMonth } from '@/components/PatriaFotocheckOverlay'
+import CompanyPickerModal, { type CompanyCode } from '@/components/CompanyPickerModal'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface Perfil      { dni: string; nombres: string; area: string; foto_url: string; fecha_cumpleanos?: string | null }
+interface Perfil      { dni: string; nombres: string; area: string; foto_url: string; fecha_cumpleanos?: string | null; empresa?: string | null }
 interface BirthdayPerson { dni: string; nombres: string; area: string; foto_url: string; fecha: string }
 interface Asistencia  { id: string; fecha?: string; hora_ingreso: string; estado_ingreso: string; hora_salida: string | null; notas: string | null }
 interface PendingAttendance {
@@ -1430,8 +1432,9 @@ export default function EscanerWeb() {
         const visibleArea = getVisibleArea(data.area)
         store.set('RUAG_AREA', visibleArea)
         store.set('RUAG_FOTO', data.foto_url || '')
+        if (data.empresa) store.set('RUAG_EMPRESA', data.empresa)
         void cacheProfilePhoto(data.foto_url)
-        p = { dni: data.dni, nombres: data.nombres_completos, area: visibleArea, foto_url: data.foto_url || '', fecha_cumpleanos: data.fecha_cumpleanos ?? null }
+        p = { dni: data.dni, nombres: data.nombres_completos, area: visibleArea, foto_url: data.foto_url || '', fecha_cumpleanos: data.fecha_cumpleanos ?? null, empresa: data.empresa ?? null }
         // Nueva función: si ya tiene cuenta pero no registró su cumpleaños, ofrecer agregarlo.
         if (shouldShowBirthdayPrompt(data.fecha_cumpleanos)) {
           setShowBirthdayPrompt(true)
@@ -2759,6 +2762,7 @@ export default function EscanerWeb() {
 
             <div className="relative rounded-[26px] p-7 overflow-hidden"
               style={{ background: 'linear-gradient(160deg, rgba(255,255,255,0.98), rgba(248,250,252,0.96))', boxShadow: 'var(--shadow-lg)' }}>
+              {isFiestasPatriasMonth() && <PatriaFotocheckOverlay />}
               <motion.div
                 className="absolute inset-y-0 -left-24 w-20 pointer-events-none"
                 style={{ background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.75), transparent)', transform: 'skewX(-18deg)' }}
@@ -2847,6 +2851,26 @@ export default function EscanerWeb() {
                   <CheckCircle2 size={10} strokeWidth={3} /> VERIFICADO
                 </span>
               </div>
+
+              {perfil.empresa && (
+                <div className="flex justify-center mt-2">
+                  <span
+                    className="anime-fotocheck-chip inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[10px] font-black tracking-[0.14em] uppercase text-white border border-white/40"
+                    style={{
+                      background: perfil.empresa === 'RUAG'
+                        ? 'linear-gradient(90deg, #047857, #059669, #22C55E)'
+                        : perfil.empresa === 'ARUG'
+                        ? 'linear-gradient(90deg, #1D4ED8, #2563EB, #38BDF8)'
+                        : 'linear-gradient(90deg, #B45309, #F59E0B, #FBBF24)',
+                      fontFamily: 'Sora, sans-serif',
+                      boxShadow: '0 6px 14px rgba(15,23,42,0.14)',
+                    }}
+                  >
+                    <Badge size={11} strokeWidth={2.8} />
+                    EMPRESA · {perfil.empresa}
+                  </span>
+                </div>
+              )}
 
               {perfil.fecha_cumpleanos && (
                 <div className="flex justify-center mt-2">
@@ -3715,6 +3739,26 @@ export default function EscanerWeb() {
         onFinish={() => {
           setShowTour(false)
           try { localStorage.setItem('TOUR_SEEN', '1') } catch {}
+        }}
+      />
+
+      <CompanyPickerModal
+        open={Boolean(perfil && !perfil.empresa)}
+        onSelected={async (code) => {
+          if (!perfil) return
+          const dni = perfil.dni
+          setPerfil({ ...perfil, empresa: code })
+          try { localStorage.setItem('RUAG_EMPRESA', code) } catch {}
+          try {
+            const { error } = await supabase
+              .from('fotocheck_perfiles')
+              .update({ empresa: code })
+              .eq('dni', dni)
+            if (error) throw error
+            toast.success(`Empresa guardada: ${code}`)
+          } catch (e: any) {
+            toast.error(`No se pudo guardar: ${e?.message ?? 'error'}`)
+          }
         }}
       />
 

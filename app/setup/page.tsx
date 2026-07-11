@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { Camera, Edit2, ChevronDown, Loader2, RotateCcw, X, CheckCircle, Cake } from 'lucide-react'
+import { Edit2, ChevronDown, Loader2, RotateCcw, X, CheckCircle, Cake, User, IdCard, Building, Building2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { supabase } from '@/utils/supabase/client'
 import { motion, AnimatePresence } from 'framer-motion'
@@ -44,6 +44,7 @@ export default function SetupProfileWeb() {
   const [nombres, setNombres]         = useState('')
   const [dni, setDni]                 = useState('')
   const [selectedArea, setSelectedArea] = useState('')
+  const [selectedEmpresa, setSelectedEmpresa] = useState('')
   const [fechaCumple, setFechaCumple] = useState('')
   const [showCalPicker, setShowCalPicker] = useState(false)
   const [imageFile, setImageFile]     = useState<File | null>(null)
@@ -77,7 +78,7 @@ export default function SetupProfileWeb() {
   }
 
   const handleSave = async () => {
-    if (!nombres.trim() || dni.length !== 8 || !selectedArea || !fechaCumple || !imageFile) {
+    if (!nombres.trim() || dni.length !== 8 || !selectedArea || !selectedEmpresa || !fechaCumple || !imageFile) {
       toast.error('Completa todos los campos y sube tu foto')
       return
     }
@@ -101,13 +102,14 @@ export default function SetupProfileWeb() {
       setUploadProgress(80)
       const { error: dbError } = await supabase
         .from('fotocheck_perfiles')
-        .upsert({ dni, nombres_completos: nombres.trim(), area: selectedArea, foto_url: fotoUrl, fecha_cumpleanos: fechaCumple }, { onConflict: 'dni' })
+        .upsert({ dni, nombres_completos: nombres.trim(), area: selectedArea, foto_url: fotoUrl, fecha_cumpleanos: fechaCumple, empresa: selectedEmpresa }, { onConflict: 'dni' })
       if (dbError) throw dbError
 
       setUploadProgress(100)
       store.set('RUAG_DNI', dni)
       store.set('RUAG_NOMBRE', nombres.trim())
       store.set('RUAG_AREA', selectedArea)
+      store.set('RUAG_EMPRESA', selectedEmpresa)
       store.set('RUAG_FOTO', fotoUrl)
       await activateDeviceSession(dni, nombres.trim(), 'web-pwa')
 
@@ -171,7 +173,29 @@ export default function SetupProfileWeb() {
   }
 
   return (
-    <div className="min-h-screen flex flex-col items-center py-12 px-5 overflow-y-auto" style={{ background: 'var(--bg)' }}>
+    <div className="relative min-h-screen flex flex-col items-center py-12 px-5 overflow-y-auto overflow-x-hidden" style={{ background: 'var(--bg)' }}>
+
+      {/* ── Fondo animado (blobs) ───────────────────────────────────────── */}
+      <div className="pointer-events-none fixed inset-0 z-0 overflow-hidden">
+        <motion.div
+          className="absolute -top-24 -left-20 h-72 w-72 rounded-full blur-3xl"
+          style={{ background: 'radial-gradient(circle, rgba(37,99,235,0.28), transparent 70%)' }}
+          animate={{ x: [0, 30, 0], y: [0, 20, 0], scale: [1, 1.12, 1] }}
+          transition={{ duration: 9, repeat: Infinity, ease: 'easeInOut' }}
+        />
+        <motion.div
+          className="absolute top-1/3 -right-24 h-80 w-80 rounded-full blur-3xl"
+          style={{ background: 'radial-gradient(circle, rgba(34,197,94,0.22), transparent 70%)' }}
+          animate={{ x: [0, -26, 0], y: [0, 26, 0], scale: [1, 1.16, 1] }}
+          transition={{ duration: 11, repeat: Infinity, ease: 'easeInOut' }}
+        />
+        <motion.div
+          className="absolute -bottom-24 left-1/4 h-72 w-72 rounded-full blur-3xl"
+          style={{ background: 'radial-gradient(circle, rgba(14,165,233,0.20), transparent 70%)' }}
+          animate={{ x: [0, 24, 0], y: [0, -20, 0], scale: [1, 1.1, 1] }}
+          transition={{ duration: 10, repeat: Infinity, ease: 'easeInOut' }}
+        />
+      </div>
 
       {/* ── Modal Recuperar ─────────────────────────────────────────────── */}
       <AnimatePresence>
@@ -237,91 +261,99 @@ export default function SetupProfileWeb() {
 
       {/* ── Contenido ───────────────────────────────────────────────────── */}
       <motion.div
-        className="w-full max-w-md flex flex-col items-center"
+        className="relative z-10 w-full max-w-md flex flex-col items-center"
         initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.5, ease: [0.34, 1.2, 0.64, 1] }}
       >
         {/* Logo */}
-        <div className="w-12 h-12 rounded-2xl flex items-center justify-center mb-8"
-          style={{ background: 'var(--surface)', boxShadow: 'var(--shadow-glow)', overflow: 'hidden' }}>
+        <motion.div
+          className="w-14 h-14 rounded-2xl flex items-center justify-center mb-6"
+          style={{ background: 'var(--surface)', boxShadow: 'var(--shadow-glow)', overflow: 'hidden' }}
+          initial={{ scale: 0, rotate: -12 }} animate={{ scale: 1, rotate: 0 }}
+          transition={{ type: 'spring', stiffness: 320, damping: 18, delay: 0.1 }}
+        >
           <img src="/ruag-logo.png" alt="RUAG" className="h-full w-full object-cover" />
-        </div>
+        </motion.div>
 
-        <h1 className="text-3xl font-black text-center tracking-tight mb-2"
-          style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>
+        {/* Pill de paso */}
+        <motion.div
+          className="mb-4 inline-flex items-center gap-2 rounded-full px-3.5 py-1.5"
+          style={{ background: 'var(--blue-light)', border: '1px solid var(--border-2)' }}
+          initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}
+        >
+          <span className="h-2 w-2 rounded-full" style={{ background: 'var(--blue)' }} />
+          <span className="text-[10px] font-black uppercase tracking-[0.18em]" style={{ color: 'var(--blue)' }}>
+            Registro · Modo iPhone
+          </span>
+        </motion.div>
+
+        <h1 className="text-[32px] font-black text-center leading-tight tracking-tight mb-2"
+          style={{
+            fontFamily: 'Sora, sans-serif',
+            backgroundImage: 'linear-gradient(120deg, #2563EB, #06B6D4, #22C55E)',
+            WebkitBackgroundClip: 'text', backgroundClip: 'text', color: 'transparent',
+          }}>
           Crea tu Fotocheck
         </h1>
-        <p className="text-sm text-center mb-10" style={{ color: 'var(--text-3)' }}>
+        <p className="text-sm text-center mb-8 max-w-xs" style={{ color: 'var(--text-3)' }}>
           Sube una foto clara de tu rostro para el registro.
         </p>
-
-        <div
-          className="w-full mb-8 rounded-3xl p-5"
-          style={{ background: 'var(--surface)', border: '1.5px solid var(--border)', boxShadow: 'var(--shadow-sm)' }}
-        >
-          <p className="text-[10px] font-black uppercase tracking-[0.18em] mb-3" style={{ color: 'var(--blue)' }}>
-            Modo iPhone
-          </p>
-          <p className="text-sm font-semibold leading-relaxed" style={{ color: 'var(--text-2)' }}>
-            Despues del registro tendras el mismo flujo web del trabajador: escaneo, historial, logros, vacaciones y soporte.
-          </p>
-          <div className="flex flex-wrap gap-2 mt-4">
-            {['Escaner', 'Historial', 'Logros', 'Vacaciones', 'Soporte'].map((item) => (
-              <span
-                key={item}
-                className="rounded-full px-3 py-1.5 text-[11px] font-black"
-                style={{ background: 'var(--blue-light)', color: 'var(--blue)', border: '1px solid var(--border-2)' }}
-              >
-                {item}
-              </span>
-            ))}
-          </div>
-        </div>
 
         {/* Avatar */}
         <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageChange} className="hidden" />
 
-        <div className="relative mb-10">
-          {/* Aro animado */}
+        <div className="relative mb-9">
+          {/* Halo pulsante */}
+          <motion.div
+            className="absolute -inset-4 rounded-full blur-2xl"
+            style={{ background: imagePreview
+              ? 'radial-gradient(circle, rgba(34,197,94,0.35), transparent 70%)'
+              : 'radial-gradient(circle, rgba(37,99,235,0.30), transparent 70%)' }}
+            animate={{ opacity: [0.4, 0.75, 0.4], scale: [0.95, 1.08, 0.95] }}
+            transition={{ duration: 2.6, repeat: Infinity, ease: 'easeInOut' }}
+          />
+          {/* Aro cónico animado */}
           <div
-            className="absolute -inset-2 rounded-full opacity-70"
+            className="absolute -inset-2 rounded-full opacity-80"
             style={{
               background: imagePreview
-                ? 'conic-gradient(from 0deg, var(--blue), var(--green), var(--blue))'
-                : 'conic-gradient(from 0deg, var(--blue), var(--border-2), var(--blue))',
-              animation: 'spin-slow 4s linear infinite',
+                ? 'conic-gradient(from 0deg, #2563EB, #22C55E, #06B6D4, #2563EB)'
+                : 'conic-gradient(from 0deg, #2563EB, #06B6D4, #22C55E, #2563EB)',
+              animation: 'spin-slow 5s linear infinite',
             }}
           />
           <motion.div
             onClick={() => fileInputRef.current?.click()}
-            className="relative w-36 h-36 rounded-full cursor-pointer flex items-center justify-center overflow-hidden border-4 group"
-            style={{ background: 'var(--surface-2)', borderColor: 'var(--surface)', boxShadow: 'var(--shadow-lg)' }}
-            whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.97 }}
+            className="relative w-40 h-40 rounded-full cursor-pointer flex items-center justify-center overflow-hidden border-4 group"
+            style={{ background: 'var(--surface)', borderColor: 'var(--surface)', boxShadow: 'var(--shadow-lg)' }}
+            whileHover={{ scale: 1.04 }} whileTap={{ scale: 0.96 }}
+            animate={imagePreview ? {} : { y: [0, -4, 0] }}
+            transition={imagePreview ? {} : { duration: 2.4, repeat: Infinity, ease: 'easeInOut' }}
           >
             {imagePreview ? (
               <img src={imagePreview} alt="Preview" className="w-full h-full object-cover" />
             ) : (
-              <div className="flex flex-col items-center" style={{ color: 'var(--blue)' }}>
-                <Camera size={32} strokeWidth={1.5} />
-                <span className="text-xs font-bold mt-2">Subir Foto</span>
+              <div className="flex flex-col items-center justify-center">
+                <img src="/icons-web/subir-foto.gif" alt="Subir foto" className="w-24 h-24 object-contain" />
+                <span className="text-[13px] font-black -mt-1" style={{ color: 'var(--blue)' }}>Subir Foto</span>
               </div>
             )}
             <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity rounded-full"
-              style={{ background: 'rgba(79,70,229,0.25)' }}>
-              <Edit2 size={24} className="text-white" />
+              style={{ background: 'rgba(37,99,235,0.28)' }}>
+              <Edit2 size={26} className="text-white" />
             </div>
           </motion.div>
 
           {imagePreview && (
             <motion.button
               onClick={() => fileInputRef.current?.click()}
-              className="absolute bottom-0 right-0 w-10 h-10 rounded-full flex items-center justify-center text-white border-4"
+              className="absolute bottom-1 right-1 w-11 h-11 rounded-full flex items-center justify-center text-white border-4"
               style={{ background: 'var(--blue)', borderColor: 'var(--bg)', boxShadow: 'var(--shadow-md)' }}
               initial={{ scale: 0 }} animate={{ scale: 1 }}
               transition={{ type: 'spring', stiffness: 500, damping: 20 }}
-              whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}
+              whileHover={{ scale: 1.12 }} whileTap={{ scale: 0.9 }}
             >
-              <Edit2 size={15} />
+              <Edit2 size={16} />
             </motion.button>
           )}
         </div>
@@ -347,72 +379,122 @@ export default function SetupProfileWeb() {
         </AnimatePresence>
 
         {/* Campos */}
-        <div className="w-full space-y-4">
+        <motion.div
+          className="w-full space-y-3.5"
+          initial="hidden" animate="show"
+          variants={{ hidden: {}, show: { transition: { staggerChildren: 0.06, delayChildren: 0.2 } } }}
+        >
           {[
             {
-              type: 'text', value: nombres, placeholder: 'Nombres y Apellidos Completos',
+              type: 'text', value: nombres, placeholder: 'Nombres y Apellidos Completos', icon: <User size={18} />,
               onChange: (e: any) => setNombres(e.target.value.toUpperCase()),
             },
             {
-              type: 'number', value: dni, placeholder: 'Número de DNI',
+              type: 'number', value: dni, placeholder: 'Número de DNI', icon: <IdCard size={18} />,
               onChange: (e: any) => { if (e.target.value.length <= 8) setDni(e.target.value) },
             },
           ].map((field, i) => (
-            <motion.input
+            <motion.div
               key={i}
-              type={field.type}
-              value={field.value}
-              onChange={field.onChange}
-              placeholder={field.placeholder}
-              className="w-full px-5 py-4 rounded-2xl outline-none transition-all font-medium"
-              style={{
-                background: 'var(--surface)', border: '1.5px solid var(--border)',
-                color: 'var(--text-1)',
-              }}
-              whileFocus={{ scale: 1.01 }}
-            />
+              variants={{ hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } }}
+              className="group relative rounded-2xl transition-all focus-within:ring-2"
+              style={{ background: 'var(--surface)', border: '1.5px solid var(--border)', ['--tw-ring-color' as any]: 'rgba(37,99,235,0.35)' }}
+            >
+              <span className="pointer-events-none absolute inset-y-0 left-4 flex items-center" style={{ color: 'var(--text-3)' }}>
+                {field.icon}
+              </span>
+              <input
+                type={field.type}
+                value={field.value}
+                onChange={field.onChange}
+                placeholder={field.placeholder}
+                className="w-full bg-transparent pl-12 pr-5 py-4 rounded-2xl outline-none font-medium"
+                style={{ color: 'var(--text-1)' }}
+              />
+            </motion.div>
           ))}
 
           {/* Área select */}
-          <div className="relative">
+          <motion.div className="relative rounded-2xl focus-within:ring-2"
+            variants={{ hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } }}
+            style={{ background: 'var(--surface)', border: '1.5px solid var(--border)', ['--tw-ring-color' as any]: 'rgba(37,99,235,0.35)' }}>
+            <span className="pointer-events-none absolute inset-y-0 left-4 flex items-center" style={{ color: 'var(--text-3)' }}>
+              <Building size={18} />
+            </span>
             <select
               value={selectedArea}
               onChange={e => setSelectedArea(e.target.value)}
-              className="w-full px-5 py-4 rounded-2xl appearance-none cursor-pointer outline-none font-medium transition-all"
-              style={{
-                background: 'var(--surface)', border: '1.5px solid var(--border)',
-                color: selectedArea ? 'var(--text-1)' : 'var(--text-3)',
-              }}
+              className="w-full bg-transparent pl-12 pr-11 py-4 rounded-2xl appearance-none cursor-pointer outline-none font-medium"
+              style={{ color: selectedArea ? 'var(--text-1)' : 'var(--text-3)' }}
             >
               <option value="" disabled>Selecciona tu Área</option>
               {AREAS_LIST.map(area => (
                 <option key={area} value={area}>{area}</option>
               ))}
             </select>
-            <div className="absolute inset-y-0 right-5 flex items-center pointer-events-none" style={{ color: 'var(--text-3)' }}>
+            <div className="absolute inset-y-0 right-4 flex items-center pointer-events-none" style={{ color: 'var(--text-3)' }}>
               <ChevronDown size={20} />
             </div>
-          </div>
+          </motion.div>
+
+          {/* Empresa select */}
+          <motion.div className="relative rounded-2xl focus-within:ring-2"
+            variants={{ hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } }}
+            style={{ background: 'var(--surface)', border: '1.5px solid var(--border)', ['--tw-ring-color' as any]: 'rgba(37,99,235,0.35)' }}>
+            <span className="pointer-events-none absolute inset-y-0 left-4 flex items-center" style={{ color: 'var(--text-3)' }}>
+              <Building2 size={18} />
+            </span>
+            <select
+              value={selectedEmpresa}
+              onChange={e => setSelectedEmpresa(e.target.value)}
+              className="w-full bg-transparent pl-12 pr-11 py-4 rounded-2xl appearance-none cursor-pointer outline-none font-medium"
+              style={{ color: selectedEmpresa ? 'var(--text-1)' : 'var(--text-3)' }}
+            >
+              <option value="" disabled>Selecciona tu Empresa</option>
+              <option value="RUAG">RUAG</option>
+              <option value="ARUG">ARUG</option>
+              <option value="CG">CG</option>
+            </select>
+            {selectedEmpresa && (
+              <span
+                className="absolute inset-y-0 right-11 flex items-center text-[10px] font-black uppercase tracking-wider px-2 my-2.5 rounded-full text-white"
+                style={{
+                  background: selectedEmpresa === 'RUAG'
+                    ? 'linear-gradient(90deg,#047857,#22C55E)'
+                    : selectedEmpresa === 'ARUG'
+                    ? 'linear-gradient(90deg,#1D4ED8,#38BDF8)'
+                    : 'linear-gradient(90deg,#B45309,#FBBF24)',
+                }}
+              >
+                {selectedEmpresa}
+              </span>
+            )}
+            <div className="absolute inset-y-0 right-4 flex items-center pointer-events-none" style={{ color: 'var(--text-3)' }}>
+              <ChevronDown size={20} />
+            </div>
+          </motion.div>
 
           {/* Fecha de cumpleaños */}
-          <div>
+          <motion.div variants={{ hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } }}>
             <label className="mb-2 block text-[11px] font-black uppercase tracking-[0.16em]" style={{ color: 'var(--text-3)' }}>
               Fecha de cumpleaños
             </label>
             <button
               type="button"
               onClick={() => setShowCalPicker(true)}
-              className="w-full flex items-center gap-3 px-5 py-4 rounded-2xl outline-none transition-all font-medium text-left"
-              style={{ background: 'var(--surface)', border: '1.5px solid var(--border)', color: fechaCumple ? 'var(--text-1)' : 'var(--text-3)' }}
+              className="w-full flex items-center gap-3 px-4 py-4 rounded-2xl outline-none transition-all font-medium text-left focus:ring-2"
+              style={{ background: 'var(--surface)', border: '1.5px solid var(--border)', color: fechaCumple ? 'var(--text-1)' : 'var(--text-3)', ['--tw-ring-color' as any]: 'rgba(236,72,153,0.35)' }}
             >
-              <Cake size={20} style={{ color: '#EC4899' }} />
+              <span className="flex h-8 w-8 items-center justify-center rounded-full" style={{ background: 'rgba(236,72,153,0.12)' }}>
+                <Cake size={17} style={{ color: '#EC4899' }} />
+              </span>
               {fechaCumple ? formatBirthdayLabel(fechaCumple) : 'Selecciona tu fecha'}
             </button>
             <p className="mt-2 text-xs font-semibold" style={{ color: 'var(--text-3)' }}>
               La usaremos para avisar a tu equipo cuando se acerque tu cumpleaños 🎂
             </p>
-          </div>
-        </div>
+          </motion.div>
+        </motion.div>
 
         {showCalPicker && (
           <CalendarPicker value={fechaCumple} onClose={() => setShowCalPicker(false)} onSelect={setFechaCumple} />
@@ -422,11 +504,18 @@ export default function SetupProfileWeb() {
         <motion.button
           onClick={handleSave}
           disabled={isUploading}
-          className="w-full mt-8 py-4 rounded-2xl font-bold text-white text-base flex items-center justify-center gap-2 disabled:opacity-50"
-          style={{ background: 'var(--blue)', boxShadow: 'var(--shadow-lg), var(--shadow-glow)', fontFamily: 'Sora, sans-serif' }}
-          whileHover={{ scale: 1.02, boxShadow: '0 20px 50px rgba(79,70,229,0.35)' }}
+          className="relative w-full mt-8 py-4 rounded-2xl font-black text-white text-base flex items-center justify-center gap-2 overflow-hidden disabled:opacity-50"
+          style={{ background: 'linear-gradient(120deg, #2563EB, #06B6D4, #22C55E)', boxShadow: '0 18px 44px rgba(37,99,235,0.32)', fontFamily: 'Sora, sans-serif' }}
+          whileHover={{ scale: 1.02, boxShadow: '0 22px 54px rgba(37,99,235,0.4)' }}
           whileTap={{ scale: 0.98 }}
         >
+          {/* Shimmer */}
+          <motion.span
+            className="pointer-events-none absolute inset-y-0 w-24 -skew-x-12"
+            style={{ background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.4), transparent)' }}
+            animate={{ x: ['-140%', '260%'] }}
+            transition={{ duration: 2.6, repeat: Infinity, ease: 'linear', repeatDelay: 1 }}
+          />
           {isUploading
             ? <Loader2 className="animate-spin" size={22} />
             : <><CheckCircle size={20} />GUARDAR Y CONTINUAR</>
@@ -435,10 +524,11 @@ export default function SetupProfileWeb() {
 
         <motion.button
           onClick={() => setShowRecuperar(true)}
-          className="mt-5 font-semibold text-sm transition-colors"
+          className="mt-5 inline-flex items-center gap-2 font-bold text-sm transition-colors"
           style={{ color: 'var(--blue)' }}
-          whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
+          whileHover={{ scale: 1.03 }} whileTap={{ scale: 0.97 }}
         >
+          <RotateCcw size={15} />
           ¿Ya tienes cuenta? Recuperar datos
         </motion.button>
       </motion.div>
