@@ -176,7 +176,8 @@ const HORAS_NOCTURNAS = [
 ]
 
 const LIMA_TZ = 'America/Lima'
-const SOPORTE_WHATSAPP_NUMBER = '51947327420'
+const SUPPORTDEV_PACKAGE = 'com.ruag.supportdev'
+const SUPPORTDEV_PLAY_URL = `https://play.google.com/store/apps/details?id=${SUPPORTDEV_PACKAGE}`
 const PENDING_ATTENDANCE_KEY = 'RUAG_PENDING_ATTENDANCE'
 const PROFILE_PHOTO_DATA_KEY = 'RUAG_PROFILE_PHOTO_DATA'
 const BIRTHDAY_PROMPT_SNOOZE_KEY = 'RUAG_BIRTHDAY_PROMPT_SNOOZE_UNTIL'
@@ -388,29 +389,24 @@ const formatVacationRangeLabel = (start: string, end: string) => {
   }
 }
 
-const abrirSoporteWhatsApp = (perfil: Perfil, problemaDetectado?: string | null) => {
-  const fecha = new Intl.DateTimeFormat('es-PE', {
-    timeZone: LIMA_TZ,
-    day: '2-digit',
-    month: '2-digit',
-    year: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false,
-  }).format(new Date())
+/**
+ * Soporte → app SupportDev.
+ * En Android: intent:// abre la app si está instalada; si no, el propio navegador
+ * redirige al Play Store vía browser_fallback_url.
+ * En iPhone/escritorio no existe la app (SupportDev es solo Android): se abre la
+ * ficha del Play Store, que es lo único disponible.
+ */
+const abrirSupportDev = () => {
+  const isAndroid = typeof navigator !== 'undefined' && /Android/i.test(navigator.userAgent)
 
-  const mensaje = [
-    '*SOPORTE RUAG JORNADA*',
-    '',
-    `Trabajador: ${perfil.nombres}`,
-    `DNI: ${perfil.dni}`,
-    `Area: ${perfil.area}`,
-    `Fecha: ${fecha}`,
-    'Canal: Web iPhone',
-    problemaDetectado ? `Problema: ${problemaDetectado}` : 'Problema: Necesito ayuda con mi registro.',
-  ].join('\n')
+  if (isAndroid) {
+    const fallback = encodeURIComponent(SUPPORTDEV_PLAY_URL)
+    window.location.href =
+      `intent://#Intent;package=${SUPPORTDEV_PACKAGE};S.browser_fallback_url=${fallback};end`
+    return
+  }
 
-  window.open(`https://wa.me/${SOPORTE_WHATSAPP_NUMBER}?text=${encodeURIComponent(mensaje)}`, '_blank', 'noopener,noreferrer')
+  window.open(SUPPORTDEV_PLAY_URL, '_blank', 'noopener,noreferrer')
 }
 
 // ─── Logros helpers ───────────────────────────────────────────────────────────
@@ -1199,7 +1195,7 @@ export default function EscanerWeb() {
     if (feature === 'tour') setShowTour(true)
     if (feature === 'updates') setShowUpdates(true)
     if (feature === 'birthdays') setShowBirthdays(true)
-    if (feature === 'support' && perfil) abrirSoporteWhatsApp(perfil)
+    if (feature === 'support') abrirSupportDev()
     if (feature === 'rrhh') {
       const phone = '51987834538'
       const text = encodeURIComponent(`Hola RRHH, soy ${perfil?.nombres ?? ''} DNI ${perfil?.dni ?? ''}. Necesito ayuda.`)
@@ -2539,7 +2535,7 @@ export default function EscanerWeb() {
                   { key: 'rankingLate', label: 'Ranking tardanza', desc: 'Llegadas tarde', gif: '/icons-web/ranking-tardanza.gif', icon: <AlertTriangle size={20} />, colors: ['#DC2626', '#F43F5E'] },
                   { key: 'tour', label: 'Ver tour de nuevo', desc: 'Aprende cada boton', gif: '/icons-web/guia-de-uso.gif', icon: <BookOpen size={20} />, colors: ['#2563EB', '#22C55E'] },
                   { key: 'updates', label: 'Actualizaciones', desc: 'Libro de novedades', gif: '/icons-web/actualizaciones.gif', icon: <FileText size={20} />, colors: ['#0F766E', '#0EA5E9'] },
-                  { key: 'support', label: 'Soporte', desc: 'Ayuda por WhatsApp', gif: '/icons-web/soporte.gif', icon: <Phone size={20} />, colors: ['#128C7E', '#25D366'] },
+                  { key: 'support', label: 'Soporte', desc: 'Abre la app SupportDev', gif: '/icons-web/soporte.gif', icon: <Phone size={20} />, colors: ['#2563EB', '#06B6D4'] },
                   { key: 'rrhh', label: 'RRHH', desc: 'Recursos humanos', gif: '/icons-web/rrhh.gif', icon: <Badge size={20} />, colors: ['#2563EB', '#06B6D4'] },
                 ].map((item) => (
                   <motion.button key={item.key} onClick={() => openFeature(item.key as WorkerFeature)}
