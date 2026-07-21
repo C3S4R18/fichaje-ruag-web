@@ -8,6 +8,7 @@ import { supabase } from '@/utils/supabase/client'
 import { motion, AnimatePresence } from 'framer-motion'
 import { activateDeviceSession } from '@/utils/device-session'
 import CalendarPicker from '@/components/CalendarPicker'
+import { COUNTRIES, DEFAULT_COUNTRY, countryOf, detectCountryFromDevice, localHourMinute } from '@/utils/countries'
 
 const MESES_LABEL = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
 const formatBirthdayLabel = (v: string) => {
@@ -45,6 +46,8 @@ export default function SetupProfileWeb() {
   const [dni, setDni]                 = useState('')
   const [selectedArea, setSelectedArea] = useState('')
   const [selectedEmpresa, setSelectedEmpresa] = useState('')
+  // País: autodetectado por zona horaria del navegador; Perú si no se reconoce.
+  const [selectedPais, setSelectedPais] = useState<string>(() => detectCountryFromDevice() ?? DEFAULT_COUNTRY)
   const [fechaCumple, setFechaCumple] = useState('')
   const [showCalPicker, setShowCalPicker] = useState(false)
   const [imageFile, setImageFile]     = useState<File | null>(null)
@@ -102,7 +105,7 @@ export default function SetupProfileWeb() {
       setUploadProgress(80)
       const { error: dbError } = await supabase
         .from('fotocheck_perfiles')
-        .upsert({ dni, nombres_completos: nombres.trim(), area: selectedArea, foto_url: fotoUrl, fecha_cumpleanos: fechaCumple, empresa: selectedEmpresa }, { onConflict: 'dni' })
+        .upsert({ dni, nombres_completos: nombres.trim(), area: selectedArea, foto_url: fotoUrl, fecha_cumpleanos: fechaCumple, empresa: selectedEmpresa, pais: selectedPais }, { onConflict: 'dni' })
       if (dbError) throw dbError
 
       setUploadProgress(100)
@@ -110,6 +113,7 @@ export default function SetupProfileWeb() {
       store.set('RUAG_NOMBRE', nombres.trim())
       store.set('RUAG_AREA', selectedArea)
       store.set('RUAG_EMPRESA', selectedEmpresa)
+      store.set('RUAG_PAIS', selectedPais)
       store.set('RUAG_FOTO', fotoUrl)
       await activateDeviceSession(dni, nombres.trim(), 'web-pwa')
 
@@ -473,6 +477,34 @@ export default function SetupProfileWeb() {
               <ChevronDown size={20} />
             </div>
           </motion.div>
+
+          {/* País select — define el reloj de tu horario */}
+          <motion.div className="relative rounded-2xl focus-within:ring-2"
+            variants={{ hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } }}
+            style={{ background: 'var(--surface)', border: '1.5px solid var(--border)', ['--tw-ring-color' as any]: 'rgba(37,99,235,0.35)' }}>
+            <span className="pointer-events-none absolute inset-y-0 left-4 flex items-center text-[18px]">
+              {countryOf(selectedPais).flag}
+            </span>
+            <select
+              value={selectedPais}
+              onChange={e => setSelectedPais(e.target.value)}
+              className="w-full bg-transparent pl-12 pr-11 py-4 rounded-2xl appearance-none cursor-pointer outline-none font-medium"
+              style={{ color: 'var(--text-1)' }}
+            >
+              {COUNTRIES.map(c => (
+                <option key={c.code} value={c.code}>{c.name} · {c.hint}</option>
+              ))}
+            </select>
+            <div className="absolute inset-y-0 right-4 flex items-center pointer-events-none" style={{ color: 'var(--text-3)' }}>
+              <ChevronDown size={20} />
+            </div>
+          </motion.div>
+          <p className="-mt-1 px-1 text-xs font-semibold" style={{ color: 'var(--text-3)' }}>
+            Tu puntualidad se calcula con la hora de este país
+            {' · '}
+            {String(localHourMinute(selectedPais).hour).padStart(2, '0')}:
+            {String(localHourMinute(selectedPais).minute).padStart(2, '0')} ahora
+          </p>
 
           {/* Fecha de cumpleaños */}
           <motion.div variants={{ hidden: { opacity: 0, y: 12 }, show: { opacity: 1, y: 0 } }}>

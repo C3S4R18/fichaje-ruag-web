@@ -25,10 +25,12 @@ import CalendarPicker from '@/components/CalendarPicker'
 import OnboardingTour from '@/components/OnboardingTour'
 import PatriaFotocheckOverlay, { isFiestasPatriasMonth } from '@/components/PatriaFotocheckOverlay'
 import CompanyPickerModal, { type CompanyCode } from '@/components/CompanyPickerModal'
+import CountryPickerModal from '@/components/CountryPickerModal'
+import { COUNTRIES, countryOf, localHourMinute, localDateKey as countryDateKey, officeStatusForCountry, DEFAULT_COUNTRY } from '@/utils/countries'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface Perfil      { dni: string; nombres: string; area: string; foto_url: string; fecha_cumpleanos?: string | null; empresa?: string | null }
+interface Perfil      { dni: string; nombres: string; area: string; foto_url: string; fecha_cumpleanos?: string | null; empresa?: string | null; pais?: string | null }
 interface BirthdayPerson { dni: string; nombres: string; area: string; foto_url: string; fecha: string }
 interface Asistencia  { id: string; fecha?: string; hora_ingreso: string; estado_ingreso: string; hora_salida: string | null; notas: string | null }
 interface PendingAttendance {
@@ -462,10 +464,10 @@ const evaluarLogrosIngreso = async (dni: string, h: number, m: number): Promise<
   return nuevos
 }
 
-const evaluarLogrosSalida = async (dni: string): Promise<number[]> => {
+const evaluarLogrosSalida = async (dni: string, pais?: string | null): Promise<number[]> => {
   const nuevos: number[] = []
   try {
-    if (new Date().getHours() >= 19 && await desbloquearLogro(dni, 6)) nuevos.push(6)
+    if (localHourMinute(pais).hour >= 19 && await desbloquearLogro(dni, 6)) nuevos.push(6)
     const { count } = await supabase.from('registro_asistencias')
       .select('*', { count: 'exact', head: true }).eq('dni', dni).not('notas', 'is', null)
     if ((count || 0) >= 3 && await desbloquearLogro(dni, 5)) nuevos.push(5)
@@ -808,12 +810,13 @@ function ProfileEditorModal({
   saving: boolean
   onPickPhoto: () => void
   onClose: () => void
-  onSave: (next: { dni: string; nombres: string; area: string; empresa: string | null; fecha_cumpleanos: string | null }) => void
+  onSave: (next: { dni: string; nombres: string; area: string; empresa: string | null; pais: string | null; fecha_cumpleanos: string | null }) => void
 }) {
   const [dni, setDni] = useState(perfil.dni)
   const [nombres, setNombres] = useState(perfil.nombres)
   const [area, setArea] = useState(perfil.area)
   const [empresa, setEmpresa] = useState(perfil.empresa ?? '')
+  const [pais, setPais] = useState(perfil.pais ?? DEFAULT_COUNTRY)
   const [birthday, setBirthday] = useState(perfil.fecha_cumpleanos?.slice(0, 10) ?? '')
 
   useEffect(() => {
@@ -822,8 +825,9 @@ function ProfileEditorModal({
     setNombres(perfil.nombres)
     setArea(perfil.area)
     setEmpresa(perfil.empresa ?? '')
+    setPais(perfil.pais ?? DEFAULT_COUNTRY)
     setBirthday(perfil.fecha_cumpleanos?.slice(0, 10) ?? '')
-  }, [open, perfil.dni, perfil.nombres, perfil.area, perfil.empresa, perfil.fecha_cumpleanos])
+  }, [open, perfil.dni, perfil.nombres, perfil.area, perfil.empresa, perfil.pais, perfil.fecha_cumpleanos])
 
   if (!open) return null
   const busy = uploading || saving
@@ -956,6 +960,26 @@ function ProfileEditorModal({
             </div>
           </label>
 
+          <label className="block rounded-2xl border px-4 py-3" style={{ background: 'var(--surface-2)', borderColor: 'var(--border)' }}>
+            <span className="block text-[10px] font-black uppercase tracking-wider mb-1" style={{ color: 'var(--text-3)' }}>
+              País (define tu horario)
+            </span>
+            <div className="relative">
+              <select
+                value={pais}
+                onChange={(event) => setPais(event.target.value)}
+                disabled={busy}
+                className="w-full appearance-none bg-transparent outline-none pr-9 text-sm font-bold"
+                style={{ color: 'var(--text-1)' }}
+              >
+                {COUNTRIES.map(c => (
+                  <option key={c.code} value={c.code}>{c.flag}  {c.name} · {c.hint}</option>
+                ))}
+              </select>
+              <ChevronDown size={17} className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2" style={{ color: 'var(--text-3)' }} />
+            </div>
+          </label>
+
           <label className="block rounded-2xl border px-4 py-3" style={{ background: 'var(--surface-2)', borderColor: birthday ? 'rgba(236,72,153,0.32)' : 'var(--border)' }}>
             <span className="block text-[10px] font-black uppercase tracking-wider mb-1" style={{ color: 'var(--text-3)' }}>Cumpleaños</span>
             <div className="flex items-center gap-2">
@@ -983,7 +1007,7 @@ function ProfileEditorModal({
           </button>
           <button
             type="button"
-            onClick={() => onSave({ dni, nombres, area, empresa: empresa || null, fecha_cumpleanos: birthday || null })}
+            onClick={() => onSave({ dni, nombres, area, empresa: empresa || null, pais: pais || null, fecha_cumpleanos: birthday || null })}
             disabled={busy}
             className="h-12 rounded-2xl text-white font-black flex items-center justify-center gap-2 disabled:opacity-50"
             style={{ background: 'linear-gradient(135deg, #7C3AED, #EC4899)', fontFamily: 'Sora, sans-serif' }}
@@ -1465,8 +1489,9 @@ export default function EscanerWeb() {
         store.set('RUAG_AREA', visibleArea)
         store.set('RUAG_FOTO', data.foto_url || '')
         if (data.empresa) store.set('RUAG_EMPRESA', data.empresa)
+        if (data.pais) store.set('RUAG_PAIS', data.pais)
         void cacheProfilePhoto(data.foto_url)
-        p = { dni: data.dni, nombres: data.nombres_completos, area: visibleArea, foto_url: data.foto_url || '', fecha_cumpleanos: data.fecha_cumpleanos ?? null, empresa: data.empresa ?? null }
+        p = { dni: data.dni, nombres: data.nombres_completos, area: visibleArea, foto_url: data.foto_url || '', fecha_cumpleanos: data.fecha_cumpleanos ?? null, empresa: data.empresa ?? null, pais: data.pais ?? null }
         // Nueva función: si ya tiene cuenta pero no registró su cumpleaños, ofrecer agregarlo.
         if (shouldShowBirthdayPrompt(data.fecha_cumpleanos)) {
           setShowBirthdayPrompt(true)
@@ -1757,16 +1782,14 @@ export default function EscanerWeb() {
 
   const handleOfflineEntry = () => {
     if (!perfil) return
-    const h = new Date().getHours()
-    const m = new Date().getMinutes()
-    const est = (h < 9 || (h === 9 && m <= 5)) ? 'PUNTUAL' : 'TARDANZA'
+    const est = officeStatusForCountry(perfil.pais)
     saveOfflineAttendance({
       dni: perfil.dni,
       nombres_completos: perfil.nombres,
       area: perfil.area,
       foto_url: perfil.foto_url,
       estado_ingreso: est,
-      fecha: format(new Date(), 'yyyy-MM-dd'),
+      fecha: countryDateKey(perfil?.pais),
       hora_ingreso: new Date().toISOString(),
       notas: 'Entrada offline PWA',
     })
@@ -1807,10 +1830,9 @@ export default function EscanerWeb() {
         mostrarError(`Estás a ${Math.round(dist)} m de la oficina.\n¡Acércate para marcar!`); return
       }
 
-      const h   = new Date().getHours()
-      const m   = new Date().getMinutes()
-      const est = (h < 9 || (h === 9 && m <= 5)) ? 'PUNTUAL' : 'TARDANZA'
-      const hoy = format(new Date(), 'yyyy-MM-dd')
+      const { hour: h, minute: m } = localHourMinute(perfil?.pais)
+      const est = officeStatusForCountry(perfil?.pais)
+      const hoy = countryDateKey(perfil?.pais)
       const nowIso = new Date().toISOString()
       const payload = {
         dni: perfil.dni,
@@ -1821,6 +1843,7 @@ export default function EscanerWeb() {
         fecha: hoy,
         hora_ingreso: nowIso,
         notas: 'Escaner Oficina',
+        pais: perfil.pais ?? DEFAULT_COUNTRY,
       }
 
       const { data, error } = await supabase.from('registro_asistencias').insert(payload).select().single()
@@ -1837,9 +1860,7 @@ export default function EscanerWeb() {
       if (err.code === 1) mostrarError('Activa el GPS para registrar asistencia.')
       else if (err.message?.includes('duplicate') || err.message?.includes('unique')) mostrarExito('¡INGRESO YA REGISTRADO!')
       else if (isNetworkError(err) && perfil) {
-        const h   = new Date().getHours()
-        const m   = new Date().getMinutes()
-        const est = (h < 9 || (h === 9 && m <= 5)) ? 'PUNTUAL' : 'TARDANZA'
+        const est = officeStatusForCountry(perfil.pais)
         const nowIso = new Date().toISOString()
         saveOfflineAttendance({
           dni: perfil.dni,
@@ -1847,7 +1868,7 @@ export default function EscanerWeb() {
           area: perfil.area,
           foto_url: perfil.foto_url,
           estado_ingreso: est,
-          fecha: format(new Date(), 'yyyy-MM-dd'),
+          fecha: countryDateKey(perfil?.pais),
           hora_ingreso: nowIso,
           notas: 'Escaner Oficina',
         })
@@ -1903,13 +1924,12 @@ export default function EscanerWeb() {
         return
       }
 
-      const h   = new Date().getHours()
-      const m   = new Date().getMinutes()
+      const { hour: h, minute: m } = localHourMinute(perfil?.pais)
       const ok  = tipo === 'obra'
         ? (h < 7 || (h === 7 && m <= 35))
         : (h < 9 || (h === 9 && m <= 5))
       const est = ok ? 'PUNTUAL' : 'TARDANZA'
-      const hoy = format(new Date(), 'yyyy-MM-dd')
+      const hoy = countryDateKey(perfil?.pais)
       const nota = `${prefijo}: ${notaTexto.trim()} [GPS: ${lat.toFixed(6)}, ${lon.toFixed(6)}]`
       const payload = {
         dni: perfil.dni,
@@ -1920,6 +1940,7 @@ export default function EscanerWeb() {
         fecha: hoy,
         hora_ingreso: new Date().toISOString(),
         notas: nota,
+        pais: perfil.pais ?? DEFAULT_COUNTRY,
       }
 
       const { data, error } = await supabase.from('registro_asistencias').insert(payload).select().single()
@@ -1945,8 +1966,7 @@ export default function EscanerWeb() {
         toast.warning('Ya tienes un ingreso registrado hoy', { description: 'Solo se permite uno por día. Contacta a RRHH si necesitas corregir.', duration: 9000 })
         setShowObra(false); setShowExterno(false)
       } else if (isNetworkError(err) && perfil) {
-        const h   = new Date().getHours()
-        const m   = new Date().getMinutes()
+        const { hour: h, minute: m } = localHourMinute(perfil.pais)
         const ok  = tipo === 'obra'
           ? (h < 7 || (h === 7 && m <= 35))
           : (h < 9 || (h === 9 && m <= 5))
@@ -1956,7 +1976,7 @@ export default function EscanerWeb() {
           area: perfil.area,
           foto_url: perfil.foto_url,
           estado_ingreso: ok ? 'PUNTUAL' : 'TARDANZA',
-          fecha: format(new Date(), 'yyyy-MM-dd'),
+          fecha: countryDateKey(perfil?.pais),
           hora_ingreso: new Date().toISOString(),
           notas: `${prefijo}: ${notaTexto.trim()} [GPS pendiente por sincronizacion]`,
         })
@@ -2005,7 +2025,7 @@ export default function EscanerWeb() {
       const lat  = pos.coords.latitude
       const lon  = pos.coords.longitude
       const horaLabel = HORAS_NOCTURNAS.find(x => x.hora === horaSeleccionada)?.label ?? ''
-      const hoy = format(new Date(), 'yyyy-MM-dd')
+      const hoy = countryDateKey(perfil?.pais)
       // Turno nocturno: SIEMPRE puntual sin importar la hora real
       const nota = `Turno Nocturno (${horaLabel}): ${notaTexto.trim()} [GPS: ${lat.toFixed(6)}, ${lon.toFixed(6)}]`
       const payload = {
@@ -2017,6 +2037,7 @@ export default function EscanerWeb() {
         fecha: hoy,
         hora_ingreso: new Date().toISOString(),
         notas: nota,
+        pais: perfil.pais ?? DEFAULT_COUNTRY,
       }
 
       const { data, error } = await supabase.from('registro_asistencias').insert(payload).select().single()
@@ -2025,7 +2046,7 @@ export default function EscanerWeb() {
       setAsistenciaHoy(data as Asistencia)
       setShowNocturno(false); setNotaTexto(''); setHoraSeleccionada(null)
       toast.success('¡Turno nocturno registrado!')
-      const h = new Date().getHours(); const m = new Date().getMinutes()
+      const { hour: h, minute: m } = localHourMinute(perfil.pais)
       unlockAndAnimate(await evaluarLogrosIngreso(perfil.dni, h, m))
     } catch (err: any) {
       const code = err?.code
@@ -2047,7 +2068,7 @@ export default function EscanerWeb() {
           area: perfil.area,
           foto_url: perfil.foto_url,
           estado_ingreso: 'PUNTUAL',
-          fecha: format(new Date(), 'yyyy-MM-dd'),
+          fecha: countryDateKey(perfil?.pais),
           hora_ingreso: new Date().toISOString(),
           notas: `Turno Nocturno (${horaLabel}): ${notaTexto.trim()} [GPS pendiente por sincronizacion]`,
         })
@@ -2085,7 +2106,7 @@ export default function EscanerWeb() {
 
       setAsistenciaHoy({ ...asistenciaHoy, hora_salida: now })
       toast.success('¡Salida registrada exitosamente!')
-      unlockAndAnimate(await evaluarLogrosSalida(perfil.dni))
+      unlockAndAnimate(await evaluarLogrosSalida(perfil.dni, perfil.pais))
     } catch (err: any) {
       if (err.code === 1) toast.error('Activa el GPS para marcar salida.')
       else toast.error(`Error: ${err.message}`)
@@ -2107,7 +2128,7 @@ export default function EscanerWeb() {
         await supabase.from('registro_asistencias').update({ notas: final, hora_salida: ahora }).eq('id', asistenciaHoy.id)
         setAsistenciaHoy({ ...asistenciaHoy, hora_salida: ahora, notas: final })
         toast.success('¡Salida remota registrada!')
-        unlockAndAnimate(await evaluarLogrosSalida(perfil.dni))
+        unlockAndAnimate(await evaluarLogrosSalida(perfil.dni, perfil.pais))
       } else {
         const final = asistenciaHoy.notas ? `${asistenciaHoy.notas}\n${notaTexto.trim()}` : notaTexto.trim()
         await supabase.from('registro_asistencias').update({ notas: final }).eq('id', asistenciaHoy.id)
@@ -2163,12 +2184,13 @@ export default function EscanerWeb() {
     } finally { setUploadingPhoto(false) }
   }
 
-  const saveProfileChanges = async (next: { dni: string; nombres: string; area: string; empresa: string | null; fecha_cumpleanos: string | null }) => {
+  const saveProfileChanges = async (next: { dni: string; nombres: string; area: string; empresa: string | null; pais: string | null; fecha_cumpleanos: string | null }) => {
     if (!perfil) return
     const nextDni = next.dni.trim()
     const nextNombres = next.nombres.trim().toUpperCase()
     const nextArea = next.area.trim()
     const nextEmpresa = next.empresa?.trim() || null
+    const nextPais = next.pais?.trim() || DEFAULT_COUNTRY
     if (!nextDni || !nextArea || !nextNombres) {
       toast.warning('Nombre, DNI y área son obligatorios.')
       return
@@ -2178,7 +2200,7 @@ export default function EscanerWeb() {
     try {
       const { error } = await supabase
         .from('fotocheck_perfiles')
-        .update({ dni: nextDni, nombres_completos: nextNombres, area: nextArea, empresa: nextEmpresa, fecha_cumpleanos: next.fecha_cumpleanos })
+        .update({ dni: nextDni, nombres_completos: nextNombres, area: nextArea, empresa: nextEmpresa, pais: nextPais, fecha_cumpleanos: next.fecha_cumpleanos })
         .eq('dni', perfil.dni)
       if (error) throw error
 
@@ -2193,11 +2215,12 @@ export default function EscanerWeb() {
         await activateDeviceSession(nextDni, nextNombres, 'web-pwa')
       }
 
-      const updated = { ...perfil, dni: nextDni, nombres: nextNombres, area: nextArea, empresa: nextEmpresa, fecha_cumpleanos: next.fecha_cumpleanos }
+      const updated = { ...perfil, dni: nextDni, nombres: nextNombres, area: nextArea, empresa: nextEmpresa, pais: nextPais, fecha_cumpleanos: next.fecha_cumpleanos }
       store.set('RUAG_DNI', updated.dni)
       store.set('RUAG_NOMBRE', updated.nombres)
       store.set('RUAG_AREA', updated.area)
       if (nextEmpresa) store.set('RUAG_EMPRESA', nextEmpresa)
+      store.set('RUAG_PAIS', nextPais)
       if (updated.fecha_cumpleanos) {
         store.remove(BIRTHDAY_PROMPT_SNOOZE_KEY)
         store.remove(BIRTHDAY_PROMPT_LEGACY_SKIP_KEY)
@@ -2892,6 +2915,28 @@ export default function EscanerWeb() {
                   <CheckCircle2 size={10} strokeWidth={3} /> VERIFICADO
                 </span>
               </div>
+
+              {perfil.pais && (
+                <div className="flex justify-center mt-2">
+                  <span
+                    className="anime-fotocheck-chip inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.12em]"
+                    style={{
+                      background: 'rgba(15,23,42,0.06)',
+                      border: '1px solid rgba(15,23,42,0.14)',
+                      color: 'var(--text-1)',
+                      fontFamily: 'Sora, sans-serif',
+                    }}
+                  >
+                    <span className="text-[13px] leading-none">{countryOf(perfil.pais).flag}</span>
+                    {countryOf(perfil.pais).name}
+                    <span className="h-[3px] w-[3px] rounded-full" style={{ background: 'var(--text-3)' }} />
+                    <span style={{ color: 'var(--text-2)' }}>
+                      {String(localHourMinute(perfil.pais).hour).padStart(2, '0')}:
+                      {String(localHourMinute(perfil.pais).minute).padStart(2, '0')}
+                    </span>
+                  </span>
+                </div>
+              )}
 
               {perfil.empresa && (
                 <div className="flex justify-center mt-2">
@@ -3780,6 +3825,25 @@ export default function EscanerWeb() {
         onFinish={() => {
           setShowTour(false)
           try { localStorage.setItem('TOUR_SEEN', '1') } catch {}
+        }}
+      />
+
+      {/* País: se pide una vez (después de empresa) y define el reloj de puntualidad */}
+      <CountryPickerModal
+        open={Boolean(perfil && perfil.empresa && !perfil.pais)}
+        currentCode={null}
+        onSelected={async (code) => {
+          if (!perfil) return
+          const dni = perfil.dni
+          setPerfil({ ...perfil, pais: code })
+          try { localStorage.setItem('RUAG_PAIS', code) } catch {}
+          try {
+            const { error } = await supabase.from('fotocheck_perfiles').update({ pais: code }).eq('dni', dni)
+            if (error) throw error
+            toast.success(`País guardado: ${countryOf(code).flag} ${countryOf(code).name}`)
+          } catch (e: any) {
+            toast.error(`No se pudo guardar el país: ${e?.message ?? 'error'}`)
+          }
         }}
       />
 

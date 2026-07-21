@@ -19,6 +19,8 @@ import {
 import { Toaster, toast } from 'sonner'
 import LottiePlayer from '@/components/LottiePlayer'
 import CalendarPicker from '@/components/CalendarPicker'
+import { countryOf, timezoneOf, DEFAULT_COUNTRY } from '@/utils/countries'
+import CountryFlag from '@/components/CountryFlag'
 import MapGL, {
   Marker, NavigationControl, FullscreenControl, GeolocateControl, type MapRef
 } from 'react-map-gl/mapbox'
@@ -85,6 +87,21 @@ const LIMA_TZ = 'America/Lima'
 const WORKING_DAYS = new Set([1, 2, 3, 4, 5])
 const INACTIVE_AREA_PREFIX = '__INACTIVO__|'
 const STATUS_PRIORITY: Record<string, number> = { PUNTUAL: 0, TARDANZA: 1, 'DESCANSO MEDICO': 2, INASISTENCIA: 3 }
+
+/**
+ * Hora de un instante ISO renderizada en el reloj del país del trabajador.
+ * Por defecto Perú, así que los registros de Perú se ven exactamente igual que antes.
+ */
+function horaEnPais(iso: string, pais?: string | null): string {
+  try {
+    return new Intl.DateTimeFormat('es-PE', {
+      timeZone: timezoneOf(pais),
+      hour: '2-digit', minute: '2-digit', hour12: false,
+    }).format(new Date(iso))
+  } catch {
+    return '--:--'
+  }
+}
 
 const EMPRESA_TABS: { id: string; label: string; colors: [string, string]; border: string }[] = [
   { id: 'TODAS', label: 'Todas',  colors: ['#0F172A', '#334155'], border: 'rgba(100,116,139,0.35)' },
@@ -674,7 +691,7 @@ export default function AdminDashboard() {
       supabase.from('registro_asistencias').select('*').eq('fecha', fechaStr).order('hora_ingreso', { ascending: false }),
       supabase.from('registro_asistencias').select('*').eq('fecha', nextStr).gte('hora_ingreso', noctIni).lt('hora_ingreso', limaFin).order('hora_ingreso', { ascending: false }),
       supabase.from('registro_asistencias').select('*').eq('fecha', prevStr).gte('hora_ingreso', noctIniPrev).gte('hora_salida', limaIni).lt('hora_salida', limaFin).order('hora_ingreso', { ascending: false }),
-      supabase.from('fotocheck_perfiles').select('dni, nombres_completos, area, foto_url, empresa').order('nombres_completos'),
+      supabase.from('fotocheck_perfiles').select('dni, nombres_completos, area, foto_url, empresa, pais').order('nombres_completos'),
       supabase.from('vacaciones_solicitudes').select('dni, comentario, fecha_inicio, fecha_fin').eq('estado', 'aprobada').lte('fecha_inicio', fechaStr).gte('fecha_fin', fechaStr),
       supabase.from('descansos_medicos_solicitudes').select('dni, comentario, fecha_inicio, fecha_fin').eq('estado', 'aprobada').lte('fecha_inicio', fechaStr).gte('fecha_fin', fechaStr),
     ])
@@ -738,7 +755,13 @@ export default function AdminDashboard() {
       : []
 
     const conEmpresa = [...todos, ...syntheticVacaciones, ...syntheticDescansos, ...syntheticFeriados, ...syntheticAbsences]
-      .map((r: any) => ({ ...r, empresa: (perfilByDni.get(String(r.dni)) as any)?.empresa ?? r.empresa ?? null }))
+      .map((r: any) => ({
+        ...r,
+        empresa: (perfilByDni.get(String(r.dni)) as any)?.empresa ?? r.empresa ?? null,
+        // El país guardado en el registro manda (es donde realmente se marcó);
+        // si es antiguo y no lo tiene, se usa el país actual del perfil.
+        pais: r.pais ?? (perfilByDni.get(String(r.dni)) as any)?.pais ?? DEFAULT_COUNTRY,
+      }))
     setAsistencias(sortRecordsByStatus(conEmpresa))
     setLoading(false)
     if (isInitialLoad) setTimeout(() => setIsInitialLoad(false), 400)
@@ -2661,6 +2684,8 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
   const NIcon  = tone.icon
   const horas  = (esDescansoMedico || esVacaciones || esFeriado) ? '—' : calcHoras(data.hora_ingreso, data.hora_salida)
   const esNocturno = data.notas?.startsWith('Turno Nocturno') ?? false
+  // Trabajador fuera de Perú: se muestra su hora local + bandera para evitar confusión
+  const esOtroPais = Boolean(data.pais) && data.pais !== DEFAULT_COUNTRY
   const esOffline  = (data.notas ?? '').includes('[OFFLINE]')
   const hasBadge = entroAyer || saleHoy || esOffline || esInasistencia || esDescansoMedico || esVacaciones || esFeriado
   const puedeEditarRegistro = modoEdicion && (!esSintetica || esInasistencia || esDescansoMedico)
@@ -2785,6 +2810,15 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
           )}
           <div className="flex items-center gap-2 mt-1 flex-wrap">
             <span className="px-1.5 py-[1px] rounded-md text-[9px] font-mono text-slate-500 bg-slate-100 dark:bg-slate-800 dark:text-slate-400">{data.dni}</span>
+            {esOtroPais && (
+              <span
+                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300"
+                title={`Marca en horario de ${countryOf(data.pais).name}`}
+              >
+                <CountryFlag code={data.pais} size={13} />
+                {countryOf(data.pais).name}
+              </span>
+            )}
             {data.empresa && (
               <span
                 className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black text-white uppercase tracking-wider"
@@ -2852,7 +2886,18 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
               }} />
           ) : (
             <span className={`font-black text-base tabular-nums leading-tight ${esFeriado ? 'text-teal-600 dark:text-teal-300' : esVacaciones ? 'text-cyan-600 dark:text-cyan-300' : esDescansoMedico ? 'text-fuchsia-600 dark:text-fuchsia-300' : esInasistencia ? 'text-orange-500 dark:text-orange-300' : isPuntual ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
-              {(esInasistencia || esDescansoMedico || esVacaciones || esFeriado) ? '—' : format(new Date(data.hora_ingreso), 'HH:mm')}
+              {(esInasistencia || esDescansoMedico || esVacaciones || esFeriado) ? '—' : horaEnPais(data.hora_ingreso, data.pais)}
+            </span>
+          )}
+          {esOtroPais && !esInasistencia && !esDescansoMedico && !esVacaciones && !esFeriado && (
+            <span className="mt-0.5 flex flex-col items-center gap-[1px] leading-none">
+              <span className="flex items-center gap-1 text-[8px] font-black text-slate-400">
+                <CountryFlag code={data.pais} size={10} /> local
+              </span>
+              {/* Equivalencia en hora de Perú para ver la diferencia de un vistazo */}
+              <span className="flex items-center gap-1 text-[8px] font-black text-slate-400 tabular-nums">
+                <CountryFlag code={DEFAULT_COUNTRY} size={10} /> {horaEnPais(data.hora_ingreso, DEFAULT_COUNTRY)}
+              </span>
             </span>
           )}
         </div>
@@ -2869,9 +2914,19 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
               {data.hora_salida && <button onClick={() => onActualizar(data.id, 'hora_salida', null, data.hora_ingreso)} className="text-red-400 hover:text-red-600"><X size={10} /></button>}
             </div>
           ) : data.hora_salida ? (
-            <span className="font-black text-base text-slate-700 dark:text-slate-300 tabular-nums leading-tight">{format(new Date(data.hora_salida), 'HH:mm')}</span>
+            <span className="font-black text-base text-slate-700 dark:text-slate-300 tabular-nums leading-tight">{horaEnPais(data.hora_salida, data.pais)}</span>
           ) : (
             <span className="text-[10px] font-bold text-slate-400 tabular-nums">--:--</span>
+          )}
+          {esOtroPais && data.hora_salida && (
+            <span className="mt-0.5 flex flex-col items-center gap-[1px] leading-none">
+              <span className="flex items-center gap-1 text-[8px] font-black text-slate-400">
+                <CountryFlag code={data.pais} size={10} /> local
+              </span>
+              <span className="flex items-center gap-1 text-[8px] font-black text-slate-400 tabular-nums">
+                <CountryFlag code={DEFAULT_COUNTRY} size={10} /> {horaEnPais(data.hora_salida, DEFAULT_COUNTRY)}
+              </span>
+            </span>
           )}
         </div>
 
