@@ -9,7 +9,7 @@ import {
   ChevronRight, ChevronDown, CheckCircle2, HardHat, Store, Moon, Star,
   PlaneTakeoff, Phone, RefreshCw, Wallet, Menu, Badge, Cloud, CloudOff,
   BookOpen, Camera, FileText, Image as ImageIcon, Send, Stethoscope, Upload,
-  Cake, Gift, PartyPopper,
+  Cake, Gift, PartyPopper, Laptop,
 } from 'lucide-react'
 import { format, parseISO, differenceInDays } from 'date-fns'
 import { es } from 'date-fns/locale'
@@ -26,6 +26,7 @@ import OnboardingTour from '@/components/OnboardingTour'
 import PatriaFotocheckOverlay, { isFiestasPatriasMonth } from '@/components/PatriaFotocheckOverlay'
 import CompanyPickerModal, { type CompanyCode } from '@/components/CompanyPickerModal'
 import CountryPickerModal from '@/components/CountryPickerModal'
+import WhatsNewModal, { shouldShowWhatsNew, markWhatsNewSeen } from '@/components/WhatsNewModal'
 import { COUNTRIES, countryOf, localHourMinute, localDateKey as countryDateKey, officeStatusForCountry, DEFAULT_COUNTRY } from '@/utils/countries'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -1138,6 +1139,11 @@ export default function EscanerWeb() {
   const [showVacations, setShowVacations]   = useState(false)
   const [showMedicalLeave, setShowMedicalLeave] = useState(false)
   const [showTour, setShowTour]             = useState(false)
+  const [showWhatsNew, setShowWhatsNew]     = useState(false)
+
+  useEffect(() => {
+    if (shouldShowWhatsNew()) setShowWhatsNew(true)
+  }, [])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -1877,6 +1883,87 @@ export default function EscanerWeb() {
   }
 
   // ── Asistencia Remota (Obra / Externo) ────────────────────────────────────
+
+  /**
+   * Trabajo remoto: SIEMPRE PUNTUAL (nunca genera tardanza).
+   * El GPS es opcional — quien trabaja desde casa puede tener el permiso denegado
+   * y no debe impedirle marcar.
+   */
+  const procesarTrabajoRemoto = async () => {
+    if (!perfil || guardando) return
+    setGuardando(true)
+
+    try {
+      const hoy = countryDateKey(perfil.pais)
+      const { data: existente } = await supabase
+        .from('registro_asistencias')
+        .select('id, hora_ingreso, estado_ingreso, hora_salida, notas')
+        .eq('dni', perfil.dni)
+        .eq('fecha', hoy)
+        .order('hora_ingreso', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (existente && !(existente as any).hora_salida) {
+        const horaExistente = formatTimeLima((existente as any).hora_ingreso)
+        toast.warning(`Ya marcaste tu ingreso hoy a las ${horaExistente}`, {
+          description: `Estado: ${(existente as any).estado_ingreso}.`,
+          duration: 9000,
+        })
+        setAsistenciaHoy(existente as Asistencia)
+        setGuardando(false)
+        return
+      }
+    } catch { /* sin red: seguimos */ }
+
+    // GPS best-effort: si falla, se registra igual
+    let gpsTag = ''
+    try {
+      const pos = await obtenerUbicacion()
+      gpsTag = ` [GPS: ${pos.coords.latitude.toFixed(6)}, ${pos.coords.longitude.toFixed(6)}]`
+    } catch { gpsTag = '' }
+
+    const nota = `Trabajo Remoto${gpsTag}`
+    const { hour: h, minute: m } = localHourMinute(perfil.pais)
+
+    try {
+      const payload = {
+        dni: perfil.dni,
+        nombres_completos: perfil.nombres,
+        area: perfil.area,
+        foto_url: perfil.foto_url,
+        estado_ingreso: 'PUNTUAL',   // remoto nunca es tardanza
+        fecha: countryDateKey(perfil.pais),
+        hora_ingreso: new Date().toISOString(),
+        notas: nota,
+        pais: perfil.pais ?? DEFAULT_COUNTRY,
+      }
+      const { data, error } = await supabase.from('registro_asistencias').insert(payload).select().single()
+      if (error) throw error
+
+      setAsistenciaHoy(data as Asistencia)
+      toast.success('¡Trabajo remoto registrado!', { description: 'Sin tardanza. Que rinda el día 💻' })
+      unlockAndAnimate(await evaluarLogrosIngreso(perfil.dni, h, m))
+    } catch (err: any) {
+      const msg = String(err?.message ?? '')
+      if (err?.code === '23505' || msg.includes('duplicate') || msg.includes('unique')) {
+        toast.warning('Ya tienes un ingreso registrado hoy')
+      } else if (isNetworkError(err)) {
+        saveOfflineAttendance({
+          dni: perfil.dni,
+          nombres_completos: perfil.nombres,
+          area: perfil.area,
+          foto_url: perfil.foto_url,
+          estado_ingreso: 'PUNTUAL',
+          fecha: countryDateKey(perfil.pais),
+          hora_ingreso: new Date().toISOString(),
+          notas: nota,
+        })
+        toast.info('Sin conexión: se guardó y se sincronizará solo.', { duration: 6000 })
+      } else {
+        toast.error('No se pudo registrar el trabajo remoto', { description: msg || 'Intenta de nuevo.', duration: 9000 })
+      }
+    } finally { setGuardando(false) }
+  }
 
   const procesarRemoto = async (tipo: 'obra' | 'externo', prefijo: string) => {
     if (!notaTexto.trim()) { toast.warning('Por favor, ingresa el nombre del lugar.'); return }
@@ -2764,6 +2851,30 @@ export default function EscanerWeb() {
                   </motion.button>
                 ))}
               </div>
+
+              {/* Trabajo remoto — destacado porque nunca genera tardanza */}
+              <motion.button
+                onClick={() => void procesarTrabajoRemoto()}
+                disabled={guardando}
+                className="anime-scanner-action relative mt-2 w-full overflow-hidden rounded-2xl py-3.5 flex items-center justify-center gap-2.5 font-black text-white text-sm border border-white/30"
+                style={{ background: 'linear-gradient(120deg,#0F766E,#0EA5E9,#6366F1)', boxShadow: '0 12px 28px rgba(14,165,233,0.28)' }}
+                whileHover={{ scale: 1.02, y: -2 }} whileTap={{ scale: 0.97 }}
+              >
+                <motion.span
+                  className="pointer-events-none absolute inset-y-0 w-20 -skew-x-12"
+                  style={{ background: 'linear-gradient(90deg,transparent,rgba(255,255,255,0.38),transparent)' }}
+                  animate={{ x: ['-140%', '320%'] }}
+                  transition={{ duration: 2.6, repeat: Infinity, ease: 'linear', repeatDelay: 1.2 }}
+                />
+                <motion.span
+                  animate={{ y: [-1.5, 1.5, -1.5] }}
+                  transition={{ duration: 2.2, repeat: Infinity, ease: 'easeInOut' }}
+                  className="flex items-center"
+                >
+                  <Laptop size={19} />
+                </motion.span>
+                {guardando ? 'Registrando...' : 'Trabajo remoto'}
+              </motion.button>
             </motion.div>
           )}
         </div>
@@ -3127,6 +3238,7 @@ export default function EscanerWeb() {
           </motion.div>
         )}
       </AnimatePresence>
+
 
       {/* ── Externo ───────────────────────────────────────────────────────── */}
       <AnimatePresence>
@@ -3826,6 +3938,11 @@ export default function EscanerWeb() {
           setShowTour(false)
           try { localStorage.setItem('TOUR_SEEN', '1') } catch {}
         }}
+      />
+
+      <WhatsNewModal
+        open={showWhatsNew && !showTour && Boolean(perfil?.empresa) && Boolean(perfil?.pais)}
+        onDismiss={() => { setShowWhatsNew(false); markWhatsNewSeen() }}
       />
 
       {/* País: se pide una vez (después de empresa) y define el reloj de puntualidad */}

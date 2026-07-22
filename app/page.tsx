@@ -14,7 +14,7 @@ import {
   Users, ShieldCheck, AlignLeft, MapPin, Map as MapIcon, Download,
   HardHat, Trash2, MessageSquareText, X, Sunrise, Sun, Sunset, MoonStar,
   Store, Moon, RefreshCw, Activity, BarChart3, TrendingUp, Trophy, Stethoscope,
-  Cake, Gift, PartyPopper
+  Cake, Gift, PartyPopper, Laptop
 } from 'lucide-react'
 import { Toaster, toast } from 'sonner'
 import LottiePlayer from '@/components/LottiePlayer'
@@ -30,7 +30,7 @@ import 'mapbox-gl/dist/mapbox-gl.css'
 
 type TimeOfDay = 'dawn' | 'day' | 'dusk' | 'night'
 type BirthdayItem = { dni: string; nombre: string; area: string; foto: string; fecha: string; daysUntil: number; turningAge: number | null; isToday: boolean; label: string }
-type TipoMarcacion = 'ninguna' | 'ingreso_obra' | 'salida_obra' | 'externo' | 'nota' | 'nocturno'
+type TipoMarcacion = 'ninguna' | 'ingreso_obra' | 'salida_obra' | 'externo' | 'nota' | 'nocturno' | 'remoto'
 type EstadoAsistencia = 'PUNTUAL' | 'TARDANZA' | 'INASISTENCIA' | 'DESCANSO MEDICO' | 'VACACIONES' | 'FERIADO'
 
 type AsistenciaRecord = {
@@ -81,6 +81,11 @@ type MetricasData = {
   worstDay: TrendPoint | null
   rangeLabel: string
 }
+
+// Oficina principal (mismas coordenadas que valida la app del trabajador antes de
+// permitir el escaneo del QR, radio 50 m).
+const OFICINA_LAT = -12.114859
+const OFICINA_LON = -77.026540
 
 const HIDDEN_ABSENCE_TYPE = 'INASISTENCIA_OCULTA'
 const LIMA_TZ = 'America/Lima'
@@ -388,13 +393,14 @@ function extraerDetalleNota(notas?: string | null) {
   else if (raw.startsWith('Salida de obra:') || raw.startsWith('Salida en:')) tipoMarcacion = 'salida_obra'
   else if (raw.startsWith('Marcación Externa:') || raw.startsWith('Salida Externa:')) tipoMarcacion = 'externo'
   else if (raw.startsWith('Turno Nocturno')) tipoMarcacion = 'nocturno'
+  else if (raw.startsWith('Trabajo Remoto')) tipoMarcacion = 'remoto'
   let textoLimpio = raw, coordenadas = '', lat: number | null = null, lng: number | null = null
   if (contieneGPS) {
     const s = raw.indexOf('[GPS:'), e = raw.indexOf(']', s)
     if (s !== -1 && e !== -1) {
       coordenadas = raw.substring(s + 5, e).trim()
       textoLimpio = raw.substring(0, s).trim()
-        .replace(/^(Ingreso en:|Salida de obra:|Salida en:|Marcación Externa:|Salida Externa:)\s*/, '')
+        .replace(/^(Ingreso en:|Salida de obra:|Salida en:|Marcación Externa:|Salida Externa:|Trabajo Remoto:)\s*/, '')
         .replace(/^Turno Nocturno \([^)]+\):\s*/, '').trim()
       if (!textoLimpio) textoLimpio = tipoMarcacion === 'nocturno' ? 'Turno Nocturno' : 'Marcación GPS'
       const [ls, lo] = coordenadas.split(',')
@@ -402,7 +408,7 @@ function extraerDetalleNota(notas?: string | null) {
       lng = isNaN(parseFloat(lo?.trim())) ? null : parseFloat(lo.trim())
     }
   } else {
-    textoLimpio = raw.replace(/^Turno Nocturno \([^)]+\):\s*/, '').trim()
+    textoLimpio = raw.replace(/^Turno Nocturno \([^)]+\):\s*/, '').replace(/^Trabajo Remoto:\s*/, '').trim()
   }
   // Quitar el marcador [OFFLINE] del texto visible (solo se usa para detectar el tipo)
   textoLimpio = textoLimpio.replace(/\s*\[OFFLINE\]\s*/g, '').trim()
@@ -429,6 +435,7 @@ function getMarkerTone(tipo: TipoMarcacion) {
     case 'salida_obra':  return { bg: 'bg-red-500',    label: 'Salida Obra',    icon: MapPin,            gradient: 'from-red-500 to-rose-400' }
     case 'externo':      return { bg: 'bg-purple-500', label: 'Externo',        icon: Store,             gradient: 'from-purple-500 to-fuchsia-400' }
     case 'nocturno':     return { bg: 'bg-amber-500',  label: 'Turno Nocturno', icon: Moon,              gradient: 'from-amber-500 to-orange-400' }
+    case 'remoto':       return { bg: 'bg-sky-500',    label: 'Trabajo Remoto', icon: Laptop,            gradient: 'from-teal-600 to-indigo-500' }
     default:             return { bg: 'bg-slate-500',  label: 'Nota GPS',       icon: MessageSquareText, gradient: 'from-slate-500 to-slate-400' }
   }
 }
@@ -997,24 +1004,67 @@ export default function AdminDashboard() {
   const previewTotalMinutos = useMemo(() => previewFiltradas.reduce((sum, item) => sum + calcMinutos(item.hora_ingreso, item.hora_salida), 0), [previewFiltradas])
   const previewTrabajadores = useMemo(() => new Set(previewFiltradas.map(a => a.dni)).size, [previewFiltradas])
 
-  const conGPS = useMemo(() => filtradas.map(a => {
-    const d = extraerDetalleNota(a.notas)
-    return (!d.contieneGPS || d.lat === null || d.lng === null) ? null : { ...a, ...d }
-  }).filter(Boolean) as any[], [filtradas])
+  /**
+   * Datos del mapa en 3 grupos:
+   *  - campo:        marcaciones con GPS real (obra, externo, nocturno, remoto)
+   *  - oficina:      ingresos por QR de oficina. No traen GPS en la nota, pero la app
+   *                  valida que estés dentro de 50 m antes de permitir el escaneo,
+   *                  así que ubicarlos en la oficina es fiel a la realidad.
+   *  - sinUbicacion: marcaciones reales sin forma de ubicarlas (remoto sin GPS, offline).
+   *                  NO se inventan coordenadas: se muestran como contador aparte.
+   * Los estados sintéticos (inasistencia, vacaciones, feriado, descanso) se excluyen.
+   */
+  const mapData = useMemo(() => {
+    const campo: any[] = []
+    const oficina: any[] = []
+    const sinUbicacion: any[] = []
+    const NO_PRESENCIALES = new Set(['INASISTENCIA', 'VACACIONES', 'FERIADO', 'DESCANSO MEDICO'])
 
-  const centroMapa = useMemo(() => conGPS.length
-    ? { longitude: conGPS.reduce((s, m) => s + m.lng, 0) / conGPS.length, latitude: conGPS.reduce((s, m) => s + m.lat, 0) / conGPS.length }
-    : { longitude: -77.0428, latitude: -12.0464 }, [conGPS])
+    filtradas.forEach(a => {
+      if (NO_PRESENCIALES.has(String(a.estado_ingreso))) return
+      const d = extraerDetalleNota(a.notas)
+      if (d.contieneGPS && d.lat !== null && d.lng !== null) campo.push({ ...a, ...d })
+      else if ((a.notas ?? '').startsWith('Escaner Oficina')) oficina.push({ ...a, ...d })
+      else sinUbicacion.push({ ...a, ...d })
+    })
+    return { campo, oficina, sinUbicacion }
+  }, [filtradas])
+
+  const conGPS = mapData.campo
+
+  const centroMapa = useMemo(() => {
+    const pts = [...mapData.campo.map(m => ({ lng: m.lng, lat: m.lat }))]
+    if (mapData.oficina.length) pts.push({ lng: OFICINA_LON, lat: OFICINA_LAT })
+    if (!pts.length) return { longitude: OFICINA_LON, latitude: OFICINA_LAT }
+    return {
+      longitude: pts.reduce((s, p) => s + p.lng, 0) / pts.length,
+      latitude: pts.reduce((s, p) => s + p.lat, 0) / pts.length,
+    }
+  }, [mapData])
 
   useEffect(() => {
-    if (vistaActual !== 'mapa' || !mapRef.current || !conGPS.length) return
+    if (vistaActual !== 'mapa' || !mapRef.current) return
     const map = mapRef.current.getMap()
     if (!map?.isStyleLoaded()) return
-    if (conGPS.length === 1) { map.flyTo({ center: [conGPS[0].lng, conGPS[0].lat], zoom: 16, pitch: 65, duration: 1200 }); return }
-    let [minLng, maxLng, minLat, maxLat] = [conGPS[0].lng, conGPS[0].lng, conGPS[0].lat, conGPS[0].lat]
-    conGPS.forEach(m => { minLng = Math.min(minLng, m.lng); maxLng = Math.max(maxLng, m.lng); minLat = Math.min(minLat, m.lat); maxLat = Math.max(maxLat, m.lat) })
-    map.fitBounds([[minLng, minLat], [maxLng, maxLat]], { padding: 80, duration: 1200, pitch: 60 })
-  }, [vistaActual, conGPS])
+
+    const pts = mapData.campo.map(m => ({ lng: m.lng, lat: m.lat }))
+    if (mapData.oficina.length) pts.push({ lng: OFICINA_LON, lat: OFICINA_LAT })
+    if (!pts.length) return
+
+    if (pts.length === 1) {
+      map.flyTo({ center: [pts[0].lng, pts[0].lat], zoom: 16.5, pitch: 55, bearing: -18, duration: 1300 })
+      return
+    }
+    let [minLng, maxLng, minLat, maxLat] = [pts[0].lng, pts[0].lng, pts[0].lat, pts[0].lat]
+    pts.forEach(p => {
+      minLng = Math.min(minLng, p.lng); maxLng = Math.max(maxLng, p.lng)
+      minLat = Math.min(minLat, p.lat); maxLat = Math.max(maxLat, p.lat)
+    })
+    map.fitBounds([[minLng, minLat], [maxLng, maxLat]], {
+      padding: { top: 90, bottom: 70, left: 70, right: 70 },
+      maxZoom: 16.5, duration: 1300, pitch: 50, bearing: -15,
+    })
+  }, [vistaActual, mapData])
 
   // FIX MÓVIL: mapbox-gl no repinta cuando el contenedor cambia de tamaño después del mount.
   // Forzamos resize al entrar a 'mapa', al rotar la pantalla y cuando el contenedor cambia.
@@ -1924,6 +1974,46 @@ export default function AdminDashboard() {
                           </Marker>
                         )
                       })}
+                      {/* Oficina principal: agrupa los ingresos por QR (sin GPS en la nota) */}
+                      {mapData.oficina.length > 0 && (
+                        <Marker latitude={OFICINA_LAT} longitude={OFICINA_LON} anchor="bottom">
+                          <div className="relative flex flex-col items-center group cursor-pointer">
+                            <div className="pointer-events-none absolute left-1/2 bottom-full mb-3 -translate-x-1/2 opacity-0 group-hover:opacity-100 translate-y-1 group-hover:translate-y-0 transition-all duration-200 z-40 w-72">
+                              <div className="rounded-2xl border border-white/60 bg-white/95 backdrop-blur-xl shadow-2xl overflow-hidden">
+                                <div className="h-1 w-full bg-gradient-to-r from-emerald-500 to-teal-400" />
+                                <div className="p-3">
+                                  <p className="font-black text-xs text-slate-900 uppercase">Oficina principal</p>
+                                  <p className="text-[9px] text-slate-400 mb-2">
+                                    {mapData.oficina.length} ingreso{mapData.oficina.length === 1 ? '' : 's'} por QR · GPS validado a 50 m
+                                  </p>
+                                  <div className="max-h-40 overflow-y-auto space-y-1">
+                                    {mapData.oficina.slice(0, 12).map((o: any) => (
+                                      <div key={o.id} className="flex items-center gap-2">
+                                        <span className={`w-1.5 h-1.5 rounded-full ${o.estado_ingreso === 'PUNTUAL' ? 'bg-emerald-500' : 'bg-red-500'}`} />
+                                        <span className="text-[10px] font-bold text-slate-700 truncate flex-1">{o.nombres_completos}</span>
+                                        <span className="text-[9px] tabular-nums text-slate-400">{horaEnPais(o.hora_ingreso, o.pais)}</span>
+                                      </div>
+                                    ))}
+                                    {mapData.oficina.length > 12 && (
+                                      <p className="text-[9px] text-slate-400 pt-1">+{mapData.oficina.length - 12} más…</p>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                            <div className="relative">
+                              <span className="absolute inset-0 rounded-2xl bg-emerald-400/40 animate-ping" />
+                              <div className="relative w-12 h-12 rounded-2xl bg-gradient-to-br from-emerald-600 to-teal-500 border-2 border-white shadow-xl flex items-center justify-center">
+                                <ShieldCheck size={20} className="text-white" />
+                              </div>
+                              <span className="absolute -top-1.5 -right-1.5 min-w-[20px] h-5 px-1 rounded-full bg-slate-900 text-white text-[10px] font-black flex items-center justify-center border-2 border-white tabular-nums">
+                                {mapData.oficina.length}
+                              </span>
+                            </div>
+                          </div>
+                        </Marker>
+                      )}
+
                       <FullscreenControl position="top-right" />
                       <NavigationControl position="top-right" visualizePitch />
                       <GeolocateControl position="top-right" />
@@ -1936,11 +2026,33 @@ export default function AdminDashboard() {
                   )}
                   <div className="absolute top-3 left-3 bg-white/90 dark:bg-slate-900/90 backdrop-blur-md p-3 rounded-xl border border-slate-200 dark:border-slate-800 shadow-lg">
                     <p className="text-[8px] font-black text-slate-400 uppercase tracking-widest mb-2">Leyenda</p>
-                    {[{ color: 'bg-blue-500', label: 'Obra' }, { color: 'bg-purple-500', label: 'Externo' }, { color: 'bg-amber-500', label: 'Nocturno' }, { color: 'bg-slate-500', label: 'Nota GPS' }].map(l => (
+                    {[
+                      { color: 'bg-gradient-to-br from-emerald-600 to-teal-500', label: `Oficina (${mapData.oficina.length})` },
+                      { color: 'bg-blue-500', label: 'Obra' },
+                      { color: 'bg-purple-500', label: 'Externo' },
+                      { color: 'bg-amber-500', label: 'Nocturno' },
+                      { color: 'bg-sky-500', label: 'Remoto' },
+                      { color: 'bg-slate-500', label: 'Nota GPS' },
+                    ].map(l => (
                       <div key={l.label} className="flex items-center gap-1.5 text-[9px] font-semibold text-slate-600 dark:text-slate-300 mb-1">
                         <div className={`w-2 h-2 rounded-full ${l.color}`} />{l.label}
                       </div>
                     ))}
+                  </div>
+
+                  {/* Resumen de cobertura: deja claro qué se ve y qué no */}
+                  <div className="absolute bottom-3 left-3 flex flex-wrap gap-2">
+                    <span className="rounded-lg bg-white/90 dark:bg-slate-900/90 backdrop-blur-md px-2.5 py-1.5 text-[9px] font-black text-slate-600 dark:text-slate-300 border border-slate-200 dark:border-slate-800 shadow-lg">
+                      📍 {mapData.campo.length} en campo · 🏢 {mapData.oficina.length} en oficina
+                    </span>
+                    {mapData.sinUbicacion.length > 0 && (
+                      <span
+                        className="rounded-lg bg-amber-50/95 dark:bg-amber-500/15 backdrop-blur-md px-2.5 py-1.5 text-[9px] font-black text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-500/30 shadow-lg"
+                        title="Marcaciones reales sin coordenadas (remoto sin GPS o sincronizadas offline). No se ubican en el mapa para no inventar posiciones."
+                      >
+                        ⚠️ {mapData.sinUbicacion.length} sin ubicación
+                      </span>
+                    )}
                   </div>
                 </div>
               )}
@@ -2442,9 +2554,9 @@ export default function AdminDashboard() {
               transition={{ type: 'spring', stiffness: 500, damping: 32 }}
               onClick={e => e.stopPropagation()}>
               {(() => {
-                const grads: Record<TipoMarcacion, string> = { ingreso_obra: 'from-blue-500 to-cyan-400', salida_obra: 'from-red-500 to-rose-400', externo: 'from-purple-500 to-fuchsia-400', nocturno: 'from-amber-500 to-orange-400', nota: 'from-slate-400 to-slate-500', ninguna: 'from-slate-300 to-slate-400' }
-                const icons: Record<TipoMarcacion, React.ReactNode> = { ingreso_obra: <HardHat size={20} className="text-blue-500" />, salida_obra: <MapPin size={20} className="text-red-500" />, externo: <Store size={20} className="text-purple-500" />, nocturno: <Moon size={20} className="text-amber-500" />, nota: <MessageSquareText size={20} className="text-slate-500" />, ninguna: <MessageSquareText size={20} className="text-slate-400" /> }
-                const lbls: Record<TipoMarcacion, string> = { ingreso_obra: 'Ingreso en Obra', salida_obra: 'Salida de Obra', externo: 'Marcación Externa', nocturno: 'Turno Nocturno', nota: 'Nota', ninguna: 'Sin tipo' }
+                const grads: Record<TipoMarcacion, string> = { ingreso_obra: 'from-blue-500 to-cyan-400', salida_obra: 'from-red-500 to-rose-400', externo: 'from-purple-500 to-fuchsia-400', nocturno: 'from-amber-500 to-orange-400', remoto: 'from-teal-600 to-indigo-500', nota: 'from-slate-400 to-slate-500', ninguna: 'from-slate-300 to-slate-400' }
+                const icons: Record<TipoMarcacion, React.ReactNode> = { ingreso_obra: <HardHat size={20} className="text-blue-500" />, salida_obra: <MapPin size={20} className="text-red-500" />, externo: <Store size={20} className="text-purple-500" />, nocturno: <Moon size={20} className="text-amber-500" />, remoto: <Laptop size={20} className="text-sky-500" />, nota: <MessageSquareText size={20} className="text-slate-500" />, ninguna: <MessageSquareText size={20} className="text-slate-400" /> }
+                const lbls: Record<TipoMarcacion, string> = { ingreso_obra: 'Ingreso en Obra', salida_obra: 'Salida de Obra', externo: 'Marcación Externa', nocturno: 'Turno Nocturno', remoto: 'Trabajo Remoto', nota: 'Nota', ninguna: 'Sin tipo' }
                 const tipo = notaModal.tipoObra as TipoMarcacion
                 return (
                   <>
@@ -2684,10 +2796,11 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
   const NIcon  = tone.icon
   const horas  = (esDescansoMedico || esVacaciones || esFeriado) ? '—' : calcHoras(data.hora_ingreso, data.hora_salida)
   const esNocturno = data.notas?.startsWith('Turno Nocturno') ?? false
+  const esRemoto   = data.notas?.startsWith('Trabajo Remoto') ?? false
   // Trabajador fuera de Perú: se muestra su hora local + bandera para evitar confusión
   const esOtroPais = Boolean(data.pais) && data.pais !== DEFAULT_COUNTRY
   const esOffline  = (data.notas ?? '').includes('[OFFLINE]')
-  const hasBadge = entroAyer || saleHoy || esOffline || esInasistencia || esDescansoMedico || esVacaciones || esFeriado
+  const hasBadge = entroAyer || saleHoy || esOffline || esInasistencia || esDescansoMedico || esVacaciones || esFeriado || esRemoto
   const puedeEditarRegistro = modoEdicion && (!esSintetica || esInasistencia || esDescansoMedico)
 
   // Acentos por estado para gradient + ring del card
@@ -2729,6 +2842,11 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
       {esOffline && (
         <div className="absolute -top-2.5 left-4 z-10 flex items-center gap-1 bg-gradient-to-r from-violet-600 to-purple-600 text-white text-[8px] font-black px-2.5 py-1 rounded-full shadow-md shadow-violet-500/30">
           📵 SIN CONEXIÓN · Sincronizado offline
+        </div>
+      )}
+      {esRemoto && (
+        <div className="absolute -top-2.5 left-4 z-10 flex items-center gap-1 bg-gradient-to-r from-teal-600 via-sky-500 to-indigo-500 text-white text-[8px] font-black px-2.5 py-1 rounded-full shadow-md shadow-sky-500/30">
+          <Laptop size={8} /> TRABAJO REMOTO · Sin tardanza
         </div>
       )}
       {esInasistencia && (
@@ -2817,6 +2935,11 @@ function FotocheckRow({ data, index, modoEdicion, onActualizar, onCambiarEstado,
               >
                 <CountryFlag code={data.pais} size={13} />
                 {countryOf(data.pais).name}
+              </span>
+            )}
+            {esRemoto && (
+              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[9px] font-black text-white uppercase tracking-wider bg-gradient-to-r from-teal-600 to-indigo-500">
+                <Laptop size={9} strokeWidth={3} /> REMOTO
               </span>
             )}
             {data.empresa && (
