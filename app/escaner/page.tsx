@@ -170,7 +170,19 @@ const TODOS_LOS_LOGROS: LogroItem[] = [
 
 const OBRA_LAT = -12.114859
 const OBRA_LON = -77.026540
-const RADIO_METROS = 50
+// Mismo radio que la app Android (RADIO_PERMITIDO_METROS). Antes eran 50 m y la PWA
+// rechazaba a gente que la app sí aceptaba.
+const RADIO_METROS = 150
+/**
+ * Colchón máximo que se descuenta por imprecisión del GPS. En iPhone dentro del
+ * edificio Safari suele resolver por WiFi/celular con 50-150 m de error, y esa
+ * lectura imprecisa marcaba "fuera de la oficina" a quien sí estaba dentro.
+ */
+const MAX_PRECISION_SLACK_METROS = 100
+/** Precisión con la que ya no vale la pena seguir muestreando. */
+const PRECISION_OBJETIVO_METROS = 30
+/** Ventana de muestreo del GPS antes de quedarnos con la mejor lectura. */
+const GPS_MUESTREO_MS = 10000
 
 const HORAS_NOCTURNAS = [
   { hora: 19, label: '7 PM' }, { hora: 20, label: '8 PM' },
@@ -255,11 +267,81 @@ const calcularDistancia = (lat1: number, lon1: number, lat2: number, lon2: numbe
   return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a))
 }
 
-const obtenerUbicacion = (): Promise<GeolocationPosition> =>
+/**
+ * Toma la MEJOR lectura del GPS, no la primera.
+ *
+ * getCurrentPosition en iOS devuelve de inmediato una posición aproximada por
+ * WiFi/celular (60-150 m de error) y solo despues afina con GPS. Con watchPosition
+ * nos quedamos con la lectura mas precisa de la ventana, y cortamos antes si ya
+ * es buena o si el trabajador ya está claramente dentro de la oficina.
+ *
+ * Con `precisa: false` resuelve con la primera lectura: sirve para los flujos que
+ * solo adjuntan las coordenadas en la nota y no deben hacer esperar al trabajador.
+ */
+const obtenerUbicacion = ({ precisa = true }: { precisa?: boolean } = {}): Promise<GeolocationPosition> =>
   new Promise((resolve, reject) => {
-    if (!navigator.geolocation) reject(new Error('GPS no disponible en este dispositivo.'))
-    else navigator.geolocation.getCurrentPosition(resolve, reject, { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 })
+    if (!navigator.geolocation) {
+      reject(new Error('GPS no disponible en este dispositivo.'))
+      return
+    }
+
+    let mejor: GeolocationPosition | null = null
+    let watchId: number | null = null
+    let timer: ReturnType<typeof setTimeout> | null = null
+
+    const cerrar = () => {
+      if (watchId !== null) navigator.geolocation.clearWatch(watchId)
+      if (timer !== null) clearTimeout(timer)
+      watchId = null
+      timer = null
+    }
+
+    const terminar = () => {
+      cerrar()
+      if (mejor) resolve(mejor)
+      else reject(Object.assign(new Error('GPS tardó demasiado'), { code: 3 }))
+    }
+
+    watchId = navigator.geolocation.watchPosition(
+      (pos) => {
+        if (!mejor || pos.coords.accuracy < mejor.coords.accuracy) mejor = pos
+        if (!precisa) { terminar(); return }
+        const dist = calcularDistancia(pos.coords.latitude, pos.coords.longitude, OBRA_LAT, OBRA_LON)
+        const yaSabemosSuficiente =
+          pos.coords.accuracy <= PRECISION_OBJETIVO_METROS ||
+          dist + pos.coords.accuracy <= RADIO_METROS
+        if (yaSabemosSuficiente) terminar()
+      },
+      (err) => {
+        // Permiso denegado o GPS apagado: no hay nada que esperar.
+        if (!mejor) {
+          cerrar()
+          reject(err)
+        }
+      },
+      { enableHighAccuracy: true, timeout: GPS_MUESTREO_MS, maximumAge: 0 },
+    )
+
+    timer = setTimeout(terminar, GPS_MUESTREO_MS)
   })
+
+type ChequeoUbicacion = { dist: number; accuracy: number; dentro: boolean }
+
+/**
+ * Decide si la lectura cae dentro de la oficina descontando el error del propio GPS:
+ * a 64 m con ±80 m de precisión el trabajador puede perfectamente estar dentro.
+ * El colchón se limita a MAX_PRECISION_SLACK_METROS para que una lectura basura
+ * (±2 km) no valide a alguien que está al otro lado de la ciudad.
+ */
+const chequearUbicacionOficina = (pos: GeolocationPosition): ChequeoUbicacion => {
+  const dist = calcularDistancia(pos.coords.latitude, pos.coords.longitude, OBRA_LAT, OBRA_LON)
+  const accuracy = Number.isFinite(pos.coords.accuracy) ? pos.coords.accuracy : 0
+  const slack = Math.min(Math.max(accuracy, 0), MAX_PRECISION_SLACK_METROS)
+  return { dist, accuracy, dentro: dist - slack <= RADIO_METROS }
+}
+
+const textoFueraDeOficina = ({ dist, accuracy }: ChequeoUbicacion) =>
+  `Estás a ${Math.round(dist)} m de la oficina (precisión ±${Math.round(accuracy)} m).\n¡Acércate para marcar!`
 
 const getInitials = (name: string) => {
   const words = name.trim().split(' ').filter(Boolean)
@@ -1830,10 +1912,10 @@ export default function EscanerWeb() {
 
     try {
       const pos = await obtenerUbicacion()
-      const dist = calcularDistancia(pos.coords.latitude, pos.coords.longitude, OBRA_LAT, OBRA_LON)
+      const ubicacion = chequearUbicacionOficina(pos)
 
-      if (dist > RADIO_METROS) {
-        mostrarError(`Estás a ${Math.round(dist)} m de la oficina.\n¡Acércate para marcar!`); return
+      if (!ubicacion.dentro) {
+        mostrarError(textoFueraDeOficina(ubicacion)); return
       }
 
       const { hour: h, minute: m } = localHourMinute(perfil?.pais)
@@ -1918,7 +2000,7 @@ export default function EscanerWeb() {
     // GPS best-effort: si falla, se registra igual
     let gpsTag = ''
     try {
-      const pos = await obtenerUbicacion()
+      const pos = await obtenerUbicacion({ precisa: false })
       gpsTag = ` [GPS: ${pos.coords.latitude.toFixed(6)}, ${pos.coords.longitude.toFixed(6)}]`
     } catch { gpsTag = '' }
 
@@ -2002,6 +2084,8 @@ export default function EscanerWeb() {
       const lon  = pos.coords.longitude
       const dist = calcularDistancia(lat, lon, OBRA_LAT, OBRA_LON)
 
+      // Guard inverso: aquí NO se descuenta la imprecisión. Solo redirigimos al QR
+      // cuando la lectura cae dentro sin ayuda, para no bloquear una obra cercana.
       if (tipo === 'obra' && dist <= RADIO_METROS) {
         toast.warning('Estás dentro de la oficina', {
           description: 'Cierra este modal y escanea el QR de la entrada para marcar tu ingreso normal.',
@@ -2108,7 +2192,7 @@ export default function EscanerWeb() {
     } catch { /* sin red: seguimos */ }
 
     try {
-      const pos  = await obtenerUbicacion()
+      const pos  = await obtenerUbicacion({ precisa: false })
       const lat  = pos.coords.latitude
       const lon  = pos.coords.longitude
       const horaLabel = HORAS_NOCTURNAS.find(x => x.hora === horaSeleccionada)?.label ?? ''
@@ -2179,9 +2263,9 @@ export default function EscanerWeb() {
 
     try {
       const pos  = await obtenerUbicacion()
-      const dist = calcularDistancia(pos.coords.latitude, pos.coords.longitude, OBRA_LAT, OBRA_LON)
+      const ubicacion = chequearUbicacionOficina(pos)
 
-      if (dist > RADIO_METROS) {
+      if (!ubicacion.dentro) {
         setCurrentLatLon(`${pos.coords.latitude.toFixed(6)}, ${pos.coords.longitude.toFixed(6)}`)
         setIsRemoteExit(true); setNotaTexto(''); setShowNota(true)
         setIsMarkingExit(false); return
