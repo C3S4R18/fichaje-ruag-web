@@ -31,6 +31,67 @@
 }
 
 
+/* ── Tema Halloween (oct 1 – nov 2, ver utils/halloween.ts) ─────────────────
+   Se activa con data-theme="halloween" en <html>. Solo cambia tokens: el resto
+   del CSS y los componentes que usan var(--x) heredan el tema sin tocarlos. */
+:root[data-theme="halloween"] {
+  --bg:          #0B0614;
+  --surface:     #1A0F2E;
+  --surface-2:   #24143D;
+  --border:      #3B2460;
+  --border-2:    #5B3A8C;
+  --text-1:      #F7EEFF;
+  --text-2:      #D9C7F5;
+  --text-3:      #B39CDD;
+  --blue:        #FF7A1A;
+  --blue-light:  #2B1638;
+  --blue-glow:   rgba(255,122,26,0.28);
+  --green:       #B4FF3A;
+  --green-light: #1B2A14;
+  --red:         #FF5D73;
+  --red-light:   #33121C;
+  --amber:       #FFB703;
+  --amber-light: #2E1F0A;
+  --purple:      #A78BFA;
+  --purple-light:#241543;
+  --gold:        #FFB703;
+  --gold-light:  #2E1F0A;
+  --shadow-sm:   0 1px 3px rgba(0,0,0,0.5), 0 0 12px rgba(255,122,26,0.06);
+  --shadow-md:   0 6px 20px rgba(0,0,0,0.55), 0 0 22px rgba(255,122,26,0.10);
+  --shadow-lg:   0 18px 44px rgba(0,0,0,0.65), 0 0 40px rgba(255,122,26,0.14);
+  --shadow-glow: 0 0 44px rgba(255,122,26,0.30);
+  color-scheme: dark;
+}
+
+/* Luna: latido suave del halo */
+@keyframes hw-moon {
+  0%, 100% { box-shadow: 0 0 40px 12px rgba(255,214,150,0.22), 0 0 120px 40px rgba(255,160,60,0.10); }
+  50%       { box-shadow: 0 0 60px 18px rgba(255,214,150,0.32), 0 0 160px 60px rgba(255,160,60,0.16); }
+}
+/* Niebla que se arrastra por el suelo */
+@keyframes hw-fog {
+  0%   { transform: translateX(-12%) scaleX(1); }
+  50%  { transform: translateX(8%)  scaleX(1.12); }
+  100% { transform: translateX(-12%) scaleX(1); }
+}
+/* Estrellas parpadeando (cada una con delay distinto) */
+@keyframes hw-twinkle {
+  0%, 100% { opacity: 0.25; transform: scale(0.8); }
+  50%       { opacity: 1;    transform: scale(1.15); }
+}
+/* Fantasma / calabaza flotando */
+@keyframes hw-float {
+  0%, 100% { transform: translateY(0) rotate(-2deg); }
+  50%       { transform: translateY(-10px) rotate(2deg); }
+}
+/* Línea de escaneo naranja */
+@keyframes hw-scan {
+  0%   { top: 8%;  opacity: 0.2; }
+  50%  { opacity: 1; }
+  100% { top: 86%; opacity: 0.2; }
+}
+
+
 
 *, *::before, *::after { box-sizing: border-box; }
 
