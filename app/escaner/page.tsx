@@ -26,9 +26,6 @@ import OnboardingTour from '@/components/OnboardingTour'
 import PatriaFotocheckOverlay, { isFiestasPatriasMonth } from '@/components/PatriaFotocheckOverlay'
 import CompanyPickerModal, { type CompanyCode } from '@/components/CompanyPickerModal'
 import CountryPickerModal from '@/components/CountryPickerModal'
-import HalloweenBackdrop from '@/components/HalloweenBackdrop'
-import HalloweenSplash, { shouldShowHalloweenSplash } from '@/components/HalloweenSplash'
-import { isHalloweenSeason, HW } from '@/utils/halloween'
 import { COUNTRIES, countryOf, localHourMinute, localDateKey as countryDateKey, officeStatusForCountry, DEFAULT_COUNTRY } from '@/utils/countries'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -1223,17 +1220,6 @@ export default function EscanerWeb() {
   const [showVacations, setShowVacations]   = useState(false)
   const [showMedicalLeave, setShowMedicalLeave] = useState(false)
   const [showTour, setShowTour]             = useState(false)
-  const [hw, setHw]                         = useState(false)
-  const [showHwSplash, setShowHwSplash]     = useState(false)
-
-  // Tema de Halloween: enciende los tokens CSS en <html> mientras esta pantalla viva.
-  useEffect(() => {
-    const on = isHalloweenSeason()
-    setHw(on)
-    setShowHwSplash(on && shouldShowHalloweenSplash())
-    if (on) document.documentElement.dataset.theme = 'halloween'
-    return () => { delete document.documentElement.dataset.theme }
-  }, [])
 
   useEffect(() => {
     if (typeof window === 'undefined') return
@@ -2510,16 +2496,12 @@ export default function EscanerWeb() {
       }}
     >
       {/* Background decoration */}
-      {hw ? <HalloweenBackdrop /> : (
-        <div className="absolute inset-0 pointer-events-none overflow-hidden">
-          <div className="absolute -top-20 -right-20 w-72 h-72 rounded-full opacity-30"
-            style={{ background: 'radial-gradient(circle, rgba(79,70,229,0.15) 0%, transparent 70%)' }} />
-          <div className="absolute bottom-0 -left-20 w-80 h-80 rounded-full opacity-20"
-            style={{ background: 'radial-gradient(circle, rgba(124,58,237,0.12) 0%, transparent 70%)' }} />
-        </div>
-      )}
-
-      {showHwSplash && <HalloweenSplash onDone={() => setShowHwSplash(false)} />}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute -top-20 -right-20 w-72 h-72 rounded-full opacity-30"
+          style={{ background: 'radial-gradient(circle, rgba(79,70,229,0.15) 0%, transparent 70%)' }} />
+        <div className="absolute bottom-0 -left-20 w-80 h-80 rounded-full opacity-20"
+          style={{ background: 'radial-gradient(circle, rgba(124,58,237,0.12) 0%, transparent 70%)' }} />
+      </div>
 
       <AnimatePresence>
         {showSideMenu && (
@@ -2531,31 +2513,22 @@ export default function EscanerWeb() {
           >
             <motion.aside
               className="h-full w-[82vw] max-w-[330px] rounded-l-[34px] p-5 flex flex-col"
-              style={hw
-                ? { background: 'linear-gradient(180deg, rgba(26,15,46,0.98), rgba(20,10,38,0.98), rgba(11,6,20,0.99))', borderLeft: `1px solid ${HW.border2}`, boxShadow: '-24px 0 60px rgba(0,0,0,0.6), -4px 0 30px rgba(255,122,26,0.12)' }
-                : { background: 'linear-gradient(180deg, rgba(255,255,255,0.97), rgba(239,248,244,0.97), rgba(239,246,255,0.97))', borderLeft: '1px solid rgba(255,255,255,0.9)', boxShadow: '-24px 0 60px rgba(15,23,42,0.18)' }}
+              style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.97), rgba(239,248,244,0.97), rgba(239,246,255,0.97))', borderLeft: '1px solid rgba(255,255,255,0.9)', boxShadow: '-24px 0 60px rgba(15,23,42,0.18)' }}
               initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
               transition={{ type: 'spring', stiffness: 380, damping: 34 }}
               onClick={(e) => e.stopPropagation()}
             >
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  {hw && (
-                    <div className="w-12 h-14 -ml-1 shrink-0" style={{ animation: 'hw-float 4.8s ease-in-out infinite' }}>
-                      <LottiePlayer src="/lottie/halloween-ghost.json" style={{ width: '100%', height: '100%' }} />
-                    </div>
-                  )}
-                  <div>
-                    <p className="text-[11px] font-black uppercase tracking-[0.18em]" style={{ color: hw ? HW.orange : 'var(--text-3)' }}>{hw ? 'Panel embrujado' : 'Panel rapido'}</p>
-                    <h3 className="text-xl font-black" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>{hw ? 'Opciones 🎃' : 'Opciones'}</h3>
-                  </div>
+                <div>
+                  <p className="text-[11px] font-black uppercase tracking-[0.18em]" style={{ color: 'var(--text-3)' }}>Panel rapido</p>
+                  <h3 className="text-xl font-black" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Opciones</h3>
                 </div>
-                <button onClick={() => setShowSideMenu(false)} className="w-10 h-10 rounded-2xl border flex items-center justify-center" style={{ background: hw ? HW.surface2 : 'white', borderColor: 'var(--border)', color: 'var(--text-2)' }}>
+                <button onClick={() => setShowSideMenu(false)} className="w-10 h-10 rounded-2xl border flex items-center justify-center" style={{ background: 'white', borderColor: 'var(--border)', color: 'var(--text-2)' }}>
                   <X size={18} />
                 </button>
               </div>
 
-              <div className="mt-5 rounded-3xl p-4 border flex items-center gap-3" style={hw ? { background: 'rgba(36,20,61,0.85)', borderColor: HW.border2, boxShadow: '0 0 28px rgba(255,122,26,0.10)' } : { background: 'rgba(255,255,255,0.72)', borderColor: 'rgba(203,213,225,0.75)' }}>
+              <div className="mt-5 rounded-3xl p-4 border flex items-center gap-3" style={{ background: 'rgba(255,255,255,0.72)', borderColor: 'rgba(203,213,225,0.75)' }}>
                 <div className="w-14 h-14 rounded-full overflow-hidden" style={{ background: 'var(--blue-light)' }}>
                   {profilePhotoSrc ? (
                     <img src={profilePhotoSrc} alt="" className="w-full h-full object-cover" />
@@ -2575,9 +2548,7 @@ export default function EscanerWeb() {
               <div
                 className="mt-4 w-fit rounded-full px-4 py-2 border flex items-center gap-2 text-xs font-black"
                 style={{
-                  background: hw
-                    ? (isOnline && !hasPendingOfflineEntry ? 'rgba(27,42,20,0.95)' : 'rgba(46,31,10,0.95)')
-                    : (isOnline && !hasPendingOfflineEntry ? 'rgba(220,252,231,0.9)' : 'rgba(255,247,237,0.94)'),
+                  background: isOnline && !hasPendingOfflineEntry ? 'rgba(220,252,231,0.9)' : 'rgba(255,247,237,0.94)',
                   color: isOnline && !hasPendingOfflineEntry ? 'var(--green)' : 'var(--amber)',
                   borderColor: isOnline && !hasPendingOfflineEntry ? 'rgba(16,185,129,0.22)' : 'rgba(245,158,11,0.28)',
                 }}
@@ -2603,9 +2574,7 @@ export default function EscanerWeb() {
                 ].map((item) => (
                   <motion.button key={item.key} onClick={() => openFeature(item.key as WorkerFeature)}
                     className="anime-menu-item group relative w-full overflow-hidden rounded-[24px] border p-3 flex items-center gap-3 text-left"
-                    style={hw
-                      ? { background: 'rgba(36,20,61,0.78)', borderColor: `${item.colors[0]}55`, boxShadow: '0 12px 28px rgba(0,0,0,0.35)' }
-                      : { background: 'rgba(255,255,255,0.82)', borderColor: `${item.colors[0]}30`, boxShadow: '0 12px 28px rgba(15,23,42,0.06)' }}
+                    style={{ background: 'rgba(255,255,255,0.82)', borderColor: `${item.colors[0]}30`, boxShadow: '0 12px 28px rgba(15,23,42,0.06)' }}
                     whileHover={{ x: -3 }}
                     whileTap={{ scale: 0.98 }}>
                     <motion.span
@@ -2652,15 +2621,13 @@ export default function EscanerWeb() {
               </div>
               <div>
                 <h1 className="font-black text-base leading-none" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>RUAG</h1>
-                <p className="text-xs font-semibold" style={{ color: 'var(--text-3)' }}>{hw ? '🎃 Noche de brujas · Marca tu asistencia' : 'Registra tu asistencia'}</p>
+                <p className="text-xs font-semibold" style={{ color: 'var(--text-3)' }}>Registra tu asistencia</p>
               </div>
             </div>
             <motion.button
               onClick={() => setShowSideMenu(true)}
               className="w-14 h-14 rounded-[22px] flex items-center justify-center border text-white"
-              style={hw
-                ? { background: HW.gradient, borderColor: 'rgba(255,255,255,0.35)', boxShadow: '0 16px 34px rgba(232,93,4,0.35)' }
-                : { background: 'linear-gradient(135deg, #0F766E, #22C55E, #0EA5E9)', borderColor: 'rgba(255,255,255,0.55)', boxShadow: '0 16px 34px rgba(16,185,129,0.22)' }}
+              style={{ background: 'linear-gradient(135deg, #0F766E, #22C55E, #0EA5E9)', borderColor: 'rgba(255,255,255,0.55)', boxShadow: '0 16px 34px rgba(16,185,129,0.22)' }}
               whileTap={{ scale: 0.94 }}>
               <Menu size={28} />
             </motion.button>
@@ -2669,7 +2636,7 @@ export default function EscanerWeb() {
           {/* Camera box */}
           <motion.div
             className="anime-scanner-card relative flex-1 rounded-3xl overflow-hidden min-h-[320px] max-h-[55vh]"
-            style={{ background: '#0f0f1a', boxShadow: hw ? '0 18px 44px rgba(0,0,0,0.6), 0 0 36px rgba(255,122,26,0.28)' : 'var(--shadow-lg)', border: hw ? `2px solid ${HW.orange}` : '2px solid var(--border)' }}
+            style={{ background: '#0f0f1a', boxShadow: 'var(--shadow-lg)', border: '2px solid var(--border)' }}
             initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, ease: [0.34, 1.2, 0.64, 1] }}
           >
@@ -2687,9 +2654,7 @@ export default function EscanerWeb() {
                   <div className="relative w-56 h-56">
                     {/* Scanning line */}
                     <div className="absolute left-0 right-0 h-0.5 z-10"
-                      style={hw
-                        ? { background: `linear-gradient(90deg, transparent, ${HW.orange}, transparent)`, boxShadow: `0 0 10px ${HW.orange}`, animation: 'hw-scan 2.5s ease-in-out infinite' }
-                        : { background: 'linear-gradient(90deg, transparent, #818CF8, transparent)', animation: 'scan 2.5s ease-in-out infinite' }} />
+                      style={{ background: 'linear-gradient(90deg, transparent, #818CF8, transparent)', animation: 'scan 2.5s ease-in-out infinite' }} />
                     {/* Corners */}
                     {[
                       'top-0 left-0 border-t-[3px] border-l-[3px] rounded-tl-2xl',
@@ -2697,7 +2662,7 @@ export default function EscanerWeb() {
                       'bottom-0 left-0 border-b-[3px] border-l-[3px] rounded-bl-2xl',
                       'bottom-0 right-0 border-b-[3px] border-r-[3px] rounded-br-2xl',
                     ].map((cls, i) => (
-                      <div key={i} className={`absolute w-8 h-8 ${cls}`} style={{ borderColor: hw ? HW.orange : '#818CF8', filter: hw ? `drop-shadow(0 0 6px ${HW.orange})` : undefined }} />
+                      <div key={i} className={`absolute w-8 h-8 ${cls}`} style={{ borderColor: '#818CF8' }} />
                     ))}
                   </div>
                 </div>
@@ -2713,7 +2678,7 @@ export default function EscanerWeb() {
 
             {scanState === 'ESCANEO' && !isOnline && (
               <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-7 text-center"
-                style={{ background: hw ? 'linear-gradient(160deg, rgba(26,15,46,0.98), rgba(20,10,38,0.98))' : 'linear-gradient(160deg, rgba(239,246,255,0.98), rgba(236,253,245,0.98))' }}>
+                style={{ background: 'linear-gradient(160deg, rgba(239,246,255,0.98), rgba(236,253,245,0.98))' }}>
                 <motion.div
                   className="w-20 h-20 rounded-[28px] flex items-center justify-center mb-5"
                   style={{ background: 'rgba(255,255,255,0.88)', color: 'var(--amber)', boxShadow: 'var(--shadow-md)' }}
@@ -2744,7 +2709,7 @@ export default function EscanerWeb() {
               {scanState !== 'ESCANEO' && (
                 <motion.div
                   className="absolute inset-0 z-30 flex flex-col items-center justify-center p-8"
-                  style={{ background: hw ? 'rgba(20,10,38,0.96)' : 'rgba(238,242,255,0.97)', backdropFilter: 'blur(12px)' }}
+                  style={{ background: 'rgba(238,242,255,0.97)', backdropFilter: 'blur(12px)' }}
                   initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
                 >
                   {scanState === 'CARGANDO' && (
@@ -2829,9 +2794,7 @@ export default function EscanerWeb() {
             <motion.button
               onClick={() => setShowSideMenu(true)}
               className="w-14 h-14 rounded-[22px] flex items-center justify-center border text-white"
-              style={hw
-                ? { background: HW.gradient, borderColor: 'rgba(255,255,255,0.35)', boxShadow: '0 16px 34px rgba(232,93,4,0.35)' }
-                : { background: 'linear-gradient(135deg, #0F766E, #22C55E, #0EA5E9)', borderColor: 'rgba(255,255,255,0.55)', boxShadow: '0 16px 34px rgba(16,185,129,0.22)' }}
+              style={{ background: 'linear-gradient(135deg, #0F766E, #22C55E, #0EA5E9)', borderColor: 'rgba(255,255,255,0.55)', boxShadow: '0 16px 34px rgba(16,185,129,0.22)' }}
               whileTap={{ scale: 0.94 }}>
               <Menu size={28} />
             </motion.button>
@@ -2873,18 +2836,11 @@ export default function EscanerWeb() {
             />
 
             <div className="relative rounded-[26px] p-7 overflow-hidden"
-              style={hw
-                ? { background: 'linear-gradient(160deg, rgba(36,20,61,0.97), rgba(26,15,46,0.98))', boxShadow: 'var(--shadow-lg)', border: `1px solid ${HW.border2}` }
-                : { background: 'linear-gradient(160deg, rgba(255,255,255,0.98), rgba(248,250,252,0.96))', boxShadow: 'var(--shadow-lg)' }}>
+              style={{ background: 'linear-gradient(160deg, rgba(255,255,255,0.98), rgba(248,250,252,0.96))', boxShadow: 'var(--shadow-lg)' }}>
               {isFiestasPatriasMonth() && <PatriaFotocheckOverlay />}
-              {hw && (
-                <div className="pointer-events-none absolute -right-3 -top-3 w-[76px] h-[76px] opacity-95" style={{ animation: 'hw-float 4.2s ease-in-out infinite' }}>
-                  <LottiePlayer src="/lottie/halloween-pumpkin.json" style={{ width: '100%', height: '100%' }} />
-                </div>
-              )}
               <motion.div
                 className="absolute inset-y-0 -left-24 w-20 pointer-events-none"
-                style={{ background: hw ? 'linear-gradient(90deg, transparent, rgba(255,160,80,0.28), transparent)' : 'linear-gradient(90deg, transparent, rgba(255,255,255,0.75), transparent)', transform: 'skewX(-18deg)' }}
+                style={{ background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.75), transparent)', transform: 'skewX(-18deg)' }}
                 animate={{ x: [-120, 470] }}
                 transition={{ duration: 3.8, repeat: Infinity, ease: 'linear', repeatDelay: 1.4 }}
               />
@@ -3025,7 +2981,7 @@ export default function EscanerWeb() {
               {(isPendingLocal || cardIsOfflineOnly) && (
                 <div className="flex justify-center mt-3">
                   <span className="anime-fotocheck-chip px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-[0.14em] flex items-center gap-1.5"
-                    style={{ background: hw ? 'rgba(46,31,10,0.96)' : 'rgba(255,247,237,0.96)', color: 'var(--amber)', border: '1px solid rgba(245,158,11,0.28)' }}>
+                    style={{ background: 'rgba(255,247,237,0.96)', color: 'var(--amber)', border: '1px solid rgba(245,158,11,0.28)' }}>
                     <CloudOff size={13} />
                     {isPendingLocal ? 'Pendiente offline' : 'Modo offline'}
                   </span>
@@ -3062,7 +3018,7 @@ export default function EscanerWeb() {
             <div className="flex flex-col gap-3">
               <motion.div
                 className="anime-fotocheck-action rounded-3xl p-5 text-center"
-                style={{ background: hw ? 'rgba(46,31,10,0.92)' : 'rgba(255,247,237,0.92)', border: '1.5px solid rgba(245,158,11,0.28)', boxShadow: 'var(--shadow-sm)' }}
+                style={{ background: 'rgba(255,247,237,0.92)', border: '1.5px solid rgba(245,158,11,0.28)', boxShadow: 'var(--shadow-sm)' }}
                 initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
               >
                 <CloudOff size={30} className="mx-auto mb-2" style={{ color: 'var(--amber)' }} />
@@ -3083,17 +3039,17 @@ export default function EscanerWeb() {
           ) : asistenciaHoy?.hora_salida ? (
             <motion.div
               className="anime-fotocheck-action rounded-3xl p-6 flex flex-col items-center text-center"
-              style={{ background: 'var(--green-light)', border: `1.5px solid ${hw ? 'rgba(180,255,58,0.35)' : '#6EE7B7'}`, boxShadow: 'var(--shadow-sm)' }}
+              style={{ background: 'var(--green-light)', border: '1.5px solid #6EE7B7', boxShadow: 'var(--shadow-sm)' }}
               initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
             >
               <CheckCircle2 size={40} style={{ color: 'var(--green)' }} className="mb-3" />
-              <p className="font-semibold" style={{ color: hw ? HW.text2 : '#047857' }}>Ya marcaste tu salida.</p>
-              <p className="font-black text-lg mt-1" style={{ color: hw ? HW.lime : '#065F46', fontFamily: 'Sora, sans-serif' }}>¡Buen descanso!</p>
+              <p className="font-semibold" style={{ color: '#047857' }}>Ya marcaste tu salida.</p>
+              <p className="font-black text-lg mt-1" style={{ color: '#065F46', fontFamily: 'Sora, sans-serif' }}>¡Buen descanso!</p>
               {/* Multi-turno: se puede volver a ingresar las veces que haga falta en el día. */}
               <motion.button
                 onClick={() => { setAsistenciaHoy(null); setScanState('ESCANEO') }}
                 className="mt-4 w-full py-3 rounded-2xl flex items-center justify-center gap-2 text-sm font-black text-white"
-                style={{ background: hw ? HW.gradient : 'linear-gradient(135deg, #0F766E, #22C55E)', boxShadow: hw ? '0 12px 26px rgba(232,93,4,0.30)' : '0 12px 26px rgba(16,185,129,0.22)' }}
+                style={{ background: 'linear-gradient(135deg, #0F766E, #22C55E)', boxShadow: '0 12px 26px rgba(16,185,129,0.22)' }}
                 whileTap={{ scale: 0.97 }}
               >
                 <RefreshCw size={16} /> Marcar nuevo ingreso
