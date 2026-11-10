@@ -9,12 +9,14 @@ import {
   ChevronRight, ChevronDown, CheckCircle2, HardHat, Store, Moon, Star,
   PlaneTakeoff, Phone, RefreshCw, Wallet, Menu, Badge, Cloud, CloudOff,
   BookOpen, Camera, FileText, Image as ImageIcon, Send, Stethoscope, Upload,
-  Cake, Gift, PartyPopper,
+  Cake, Gift, PartyPopper, UserCog, BarChart3, Hourglass, Compass, Megaphone, Headset,
+  MessageCircle, BadgeCheck, LocateFixed, CloudUpload, Building2, Globe, Timer, Sun, Flame,
+  Zap, Medal, Crown,
 } from 'lucide-react'
 import { format, parseISO, differenceInDays } from 'date-fns'
 import { es } from 'date-fns/locale'
 import { toast } from 'sonner'
-import { motion, AnimatePresence } from 'framer-motion'
+import { motion, AnimatePresence, useMotionValue, useTransform, animate as animateMotion } from 'framer-motion'
 import { animate, stagger } from 'animejs'
 import type { AnimationParams, JSAnimation } from 'animejs'
 import { supabase } from '@/utils/supabase/client'
@@ -559,6 +561,65 @@ const evaluarLogrosSalida = async (dni: string, pais?: string | null): Promise<n
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
+/** Barra superior común de las pantallas del trabajador (cancela el padding del panel). */
+function ScreenTopBar({ title, subtitle, icon, onBack, right }: {
+  title: string
+  subtitle?: string
+  icon: React.ReactNode
+  onBack: () => void
+  right?: React.ReactNode
+}) {
+  return (
+    <div
+      className="-mx-5 -mt-[calc(env(safe-area-inset-top)+16px)] mb-5 flex items-center gap-3 border-b pl-1 pr-4 pb-2.5 pt-[calc(env(safe-area-inset-top)+6px)]"
+      style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+    >
+      <button onClick={onBack} aria-label="Volver" className="w-11 h-11 rounded-full flex items-center justify-center shrink-0" style={{ color: 'var(--text-1)' }}>
+        <ChevronLeft size={24} />
+      </button>
+      <div className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'var(--blue-light)', color: 'var(--blue)' }}>
+        {icon}
+      </div>
+      <div className="min-w-0 flex-1">
+        <h3 className="text-lg font-semibold leading-tight truncate" style={{ color: 'var(--text-1)' }}>{title}</h3>
+        {subtitle && <p className="text-xs truncate" style={{ color: 'var(--text-2)' }}>{subtitle}</p>}
+      </div>
+      {right}
+    </div>
+  )
+}
+
+/** Botón de menú (esquina superior derecha) igual al de la app Android. */
+function MenuButton({ onClick, alert }: { onClick: () => void; alert?: 'amber' | 'red' | null }) {
+  return (
+    <motion.button
+      onClick={onClick}
+      aria-label="Abrir menú"
+      className="relative w-12 h-12 rounded-2xl flex items-center justify-center border shrink-0"
+      style={{ background: 'var(--surface)', borderColor: 'var(--border)', color: 'var(--text-1)', boxShadow: 'var(--shadow-md)' }}
+      whileTap={{ scale: 0.94 }}
+    >
+      <Menu size={24} />
+      {alert && (
+        <span className="absolute -top-1 -right-1 w-3.5 h-3.5 rounded-full border-2"
+          style={{ background: alert === 'amber' ? 'var(--amber)' : 'var(--red)', borderColor: 'var(--surface)' }} />
+      )}
+    </motion.button>
+  )
+}
+
+/** "JORGAN CÉSAR NEYRA" -> "Jorgan" */
+const primerNombre = (nombre?: string | null) => {
+  const n = (nombre ?? '').trim().split(/\s+/)[0] ?? ''
+  return n ? n.charAt(0).toUpperCase() + n.slice(1).toLowerCase() : ''
+}
+
+const LOGRO_ICONS: Record<number, React.ReactNode> = {
+  1: <Timer size={24} />, 2: <Sun size={24} />, 3: <Camera size={24} />, 4: <Flame size={24} />,
+  5: <MessageCircle size={24} />, 6: <Moon size={24} />, 7: <Zap size={24} />, 8: <Medal size={24} />,
+  9: <PartyPopper size={24} />, 10: <Crown size={24} />,
+}
+
 function SheetOverlay({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
   return (
     <AnimatePresence>
@@ -577,22 +638,20 @@ function SheetOverlay({ onClose, children }: { onClose: () => void; children: Re
 function WorkerInfoScreen({
   title,
   subtitle,
-  gif,
-  color,
+  icon,
   items,
   onClose,
 }: {
   title: string
   subtitle: string
-  gif: string
-  color: string
+  icon: React.ReactNode
   items: [string, string][]
   onClose: () => void
 }) {
   return (
     <motion.div
       className="fixed inset-0 z-50 flex items-stretch justify-center"
-      style={{ background: 'rgba(15,23,42,0.42)', backdropFilter: 'blur(10px)' }}
+      style={{ background: 'rgba(15,23,42,0.42)' }}
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
@@ -600,62 +659,38 @@ function WorkerInfoScreen({
     >
       <motion.div
         className="w-full max-w-lg p-5 pt-[calc(env(safe-area-inset-top)+16px)] pb-[calc(env(safe-area-inset-bottom)+24px)] flex flex-col"
-        style={{ background: 'linear-gradient(180deg, #F8FBFF, #FFFFFF, #EEF8F4)', minHeight: '100vh' }}
+        style={{ background: 'var(--bg)', minHeight: '100vh' }}
         initial={{ x: '100%' }}
         animate={{ x: 0 }}
         exit={{ x: '100%' }}
         transition={{ type: 'spring', stiffness: 380, damping: 36 }}
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="flex items-center gap-3 mb-5">
-          <button onClick={onClose} className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: '#0F172A', color: 'white' }}>
-            <ChevronLeft size={22} />
-          </button>
-          <motion.div
-            className="w-16 h-16 rounded-3xl flex items-center justify-center overflow-hidden border"
-            style={{ background: 'white', borderColor: `${color}33`, boxShadow: `0 18px 40px ${color}22` }}
-            animate={{ y: [0, -5, 0] }}
-            transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
-          >
-            <img src={gif} alt="" className="w-14 h-14 object-contain" />
-          </motion.div>
-          <div className="min-w-0">
-            <h3 className="font-black text-xl" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>{title}</h3>
-            <p className="text-sm font-semibold leading-snug" style={{ color: 'var(--text-3)' }}>{subtitle}</p>
-          </div>
-        </div>
+        <ScreenTopBar title={title} subtitle={subtitle} icon={icon} onBack={onClose} />
 
-        <div className="relative overflow-hidden rounded-[30px] border p-5 mb-5" style={{ background: 'rgba(255,255,255,0.86)', borderColor: `${color}24` }}>
-          <motion.div
-            className="absolute -right-14 -top-14 h-32 w-32 rounded-full opacity-25 blur-2xl"
-            style={{ background: color }}
-            animate={{ scale: [1, 1.25, 1], opacity: [0.18, 0.32, 0.18] }}
-            transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
-          />
-          <p className="relative z-10 text-sm font-bold leading-relaxed" style={{ color: 'var(--text-2)' }}>
-            Lee esta seccion cuando tengas dudas. Cada tarjeta resume una funcion importante del PWA.
-          </p>
-        </div>
-
-        <div className="overflow-y-auto scrollbar-hide flex-1 space-y-3 pr-1">
-          {items.map(([itemTitle, description], index) => (
-            <motion.article
-              key={itemTitle}
-              className="rounded-[24px] border p-4 flex gap-3"
-              style={{ background: 'rgba(255,255,255,0.88)', borderColor: 'var(--border)', boxShadow: '0 14px 30px rgba(15,23,42,0.06)' }}
-              initial={{ opacity: 0, y: 16 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ delay: index * 0.05 }}
-            >
-              <span className="w-10 h-10 rounded-2xl flex items-center justify-center text-white text-sm font-black shrink-0" style={{ background: `linear-gradient(135deg, ${color}, #22C55E)` }}>
-                {String(index + 1).padStart(2, '0')}
-              </span>
-              <span>
-                <span className="block text-base font-black" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>{itemTitle}</span>
-                <span className="block text-sm font-semibold mt-1 leading-relaxed" style={{ color: 'var(--text-3)' }}>{description}</span>
-              </span>
-            </motion.article>
-          ))}
+        <div className="overflow-y-auto scrollbar-hide flex-1 space-y-3">
+          {items.map(([itemTitle, description], index) => {
+            const [version, ...rest] = itemTitle.split(' - ')
+            return (
+              <motion.article
+                key={itemTitle}
+                className="rounded-2xl border p-4 flex gap-3"
+                style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ delay: index * 0.04 }}
+              >
+                <span className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0" style={{ background: 'var(--blue-light)', color: 'var(--blue)' }}>
+                  <Megaphone size={19} />
+                </span>
+                <span className="min-w-0">
+                  <span className="block text-[11px] font-semibold" style={{ color: 'var(--blue)' }}>{rest.length ? version : ''}</span>
+                  <span className="block text-[15px] font-semibold" style={{ color: 'var(--text-1)' }}>{rest.length ? rest.join(' - ') : itemTitle}</span>
+                  <span className="block text-[13px] mt-1 leading-relaxed" style={{ color: 'var(--text-2)' }}>{description}</span>
+                </span>
+              </motion.article>
+            )
+          })}
         </div>
       </motion.div>
     </motion.div>
@@ -704,27 +739,12 @@ function BirthdaysScreen({ myDni, onClose }: { myDni?: string | null; onClose: (
     >
       <motion.div
         className="w-full max-w-lg p-5 pt-[calc(env(safe-area-inset-top)+16px)] pb-[calc(env(safe-area-inset-bottom)+24px)] flex flex-col"
-        style={{ background: 'linear-gradient(180deg, #FFF5FA, #FFFFFF, #F3F0FF)', minHeight: '100vh' }}
+        style={{ background: 'var(--bg)', minHeight: '100vh' }}
         initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
         transition={{ type: 'spring', stiffness: 380, damping: 36 }}
         onClick={(e) => e.stopPropagation()}
       >
-        <div className="flex items-center gap-3 mb-5">
-          <button onClick={onClose} className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: '#0F172A', color: 'white' }}>
-            <ChevronLeft size={22} />
-          </button>
-          <motion.div
-            className="w-16 h-16 rounded-3xl flex items-center justify-center overflow-hidden border"
-            style={{ background: 'white', borderColor: '#EC489933', boxShadow: '0 18px 40px #EC489922' }}
-            animate={{ y: [0, -5, 0] }} transition={{ duration: 2.5, repeat: Infinity, ease: 'easeInOut' }}
-          >
-            <LottiePlayer src="/lottie/birthday-cake.json" style={{ width: 56, height: 56 }} />
-          </motion.div>
-          <div className="min-w-0">
-            <h3 className="font-black text-xl" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Cumpleaños</h3>
-            <p className="text-sm font-semibold leading-snug" style={{ color: 'var(--text-3)' }}>Mira qué cumpleaños se acercan en tu equipo.</p>
-          </div>
-        </div>
+        <ScreenTopBar title="Cumpleaños" subtitle="Próximos y los de hoy" icon={<Cake size={20} />} onBack={onClose} />
 
         {!loading && ordered.length > 0 && (
           <div className="grid grid-cols-3 gap-2.5 mb-4">
@@ -736,12 +756,12 @@ function BirthdaysScreen({ myDni, onClose }: { myDni?: string | null; onClose: (
               <motion.div
                 key={String(label)}
                 className="rounded-2xl border px-3 py-3 text-center"
-                style={{ background: 'rgba(255,255,255,0.9)', borderColor: `${color}2e` }}
+                style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
                 initial={{ opacity: 0, y: 10 }}
                 animate={{ opacity: 1, y: 0 }}
               >
-                <p className="text-xl font-black leading-none" style={{ color: String(color), fontFamily: 'Sora, sans-serif' }}>{value}</p>
-                <p className="mt-1 text-[10px] font-black uppercase tracking-wider" style={{ color: 'var(--text-3)' }}>{label}</p>
+                <p className="text-xl font-bold leading-none" style={{ color: String(color), fontFamily: 'Sora, sans-serif' }}>{value}</p>
+                <p className="mt-1 text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-3)' }}>{label}</p>
               </motion.div>
             ))}
           </div>
@@ -750,7 +770,7 @@ function BirthdaysScreen({ myDni, onClose }: { myDni?: string | null; onClose: (
         {!loading && ordered[0] && (
           <motion.div
             className="relative overflow-hidden rounded-[30px] border p-4 mb-5"
-            style={{ background: 'linear-gradient(150deg, #FFE4F1, #FFFFFF 55%, #F0E9FF)', borderColor: '#EC489944', boxShadow: '0 18px 42px rgba(236,72,153,0.16)' }}
+            style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
             initial={{ opacity: 0, scale: 0.96, y: 12 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             transition={{ type: 'spring', stiffness: 260, damping: 24 }}
@@ -765,21 +785,21 @@ function BirthdaysScreen({ myDni, onClose }: { myDni?: string | null; onClose: (
                 <LottiePlayer src={ordered[0].info.isToday ? '/lottie/birthday-gifts.json' : '/lottie/birthday-cake.json'} style={{ width: 58, height: 58 }} />
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-[10px] font-black uppercase tracking-[0.16em]" style={{ color: '#DB2777' }}>
+                <p className="text-[10px] font-bold uppercase tracking-[0.16em]" style={{ color: '#DB2777' }}>
                   {ordered[0].info.isToday ? 'Cumpleaños de hoy' : 'Próximo cumpleaños'}
                 </p>
-                <p className="mt-1 text-base font-black leading-snug" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>
+                <p className="mt-1 text-base font-bold leading-snug" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>
                   {ordered[0].nombres}{ordered[0].dni === myDni ? ' (tú)' : ''}
                 </p>
                 <p className="mt-1 text-xs font-bold" style={{ color: 'var(--text-3)' }}>
                   {formatBirthdayDate(ordered[0].fecha)}{ordered[0].info.turningAge ? ` · ${ordered[0].info.turningAge} años` : ''}
                 </p>
               </div>
-              <div className="rounded-2xl border px-3 py-2 text-center shrink-0" style={{ background: ordered[0].info.isToday ? 'linear-gradient(135deg, #EC4899, #7C3AED)' : 'rgba(255,255,255,0.82)', borderColor: '#EC489933' }}>
-                <p className="text-lg font-black leading-none" style={{ color: ordered[0].info.isToday ? 'white' : 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>
+              <div className="rounded-2xl border px-3 py-2 text-center shrink-0" style={{ background: ordered[0].info.isToday ? '#DB2777' : 'var(--surface-2)', borderColor: 'var(--border)' }}>
+                <p className="text-lg font-bold leading-none" style={{ color: ordered[0].info.isToday ? 'white' : 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>
                   {ordered[0].info.isToday ? 'HOY' : ordered[0].info.daysUntil}
                 </p>
-                {!ordered[0].info.isToday && <p className="text-[9px] font-black uppercase tracking-wider" style={{ color: 'var(--text-3)' }}>{ordered[0].info.daysUntil === 1 ? 'día' : 'días'}</p>}
+                {!ordered[0].info.isToday && <p className="text-[9px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-3)' }}>{ordered[0].info.daysUntil === 1 ? 'día' : 'días'}</p>}
               </div>
             </div>
           </motion.div>
@@ -788,7 +808,7 @@ function BirthdaysScreen({ myDni, onClose }: { myDni?: string | null; onClose: (
         {todayList.length > 0 && (
           <motion.div
             className="relative overflow-hidden rounded-[30px] border mb-5"
-            style={{ background: 'linear-gradient(150deg, #FFE4F1, #FFFFFF 55%, #F0E9FF)', borderColor: '#EC489955', boxShadow: '0 22px 50px rgba(236,72,153,0.22)' }}
+            style={{ background: 'var(--surface)', borderColor: '#EC489955' }}
             initial={{ opacity: 0, scale: 0.94, y: 14 }} animate={{ opacity: 1, scale: 1, y: 0 }}
             transition={{ type: 'spring', stiffness: 260, damping: 22 }}
           >
@@ -800,7 +820,7 @@ function BirthdaysScreen({ myDni, onClose }: { myDni?: string | null; onClose: (
             <div className="relative z-10 p-5">
               <div className="flex items-center gap-2 mb-3" style={{ color: '#DB2777' }}>
                 <PartyPopper size={18} />
-                <span className="text-xs font-black uppercase tracking-[0.16em]">
+                <span className="text-xs font-bold uppercase tracking-[0.16em]">
                   {todayList.some((p) => p.dni === myDni) ? '¡Hoy es tu cumpleaños!' : '¡Hoy cumple!'}
                 </span>
               </div>
@@ -820,11 +840,11 @@ function BirthdaysScreen({ myDni, onClose }: { myDni?: string | null; onClose: (
                     initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}
                   >
                     <div className="w-12 h-12 rounded-full overflow-hidden shrink-0 ring-2" style={{ background: 'var(--blue-light)', boxShadow: '0 0 0 3px #EC489922' }}>
-                      {p.foto_url ? <img src={p.foto_url} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-sm font-black" style={{ color: 'var(--blue)' }}>{getInitials(p.nombres)}</div>}
+                      {p.foto_url ? <img src={p.foto_url} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-sm font-bold" style={{ color: 'var(--blue)' }}>{getInitials(p.nombres)}</div>}
                     </div>
                     <div className="min-w-0">
-                      <p className="text-sm font-black truncate" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>{p.nombres}{p.dni === myDni ? ' (tú)' : ''}</p>
-                      <p className="text-xs font-black" style={{ color: '#DB2777' }}>{p.info.turningAge ? `Cumple ${p.info.turningAge} años hoy 🎂` : '¡Feliz cumpleaños! 🎂'}</p>
+                      <p className="text-sm font-bold truncate" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>{p.nombres}{p.dni === myDni ? ' (tú)' : ''}</p>
+                      <p className="text-xs font-bold" style={{ color: '#DB2777' }}>{p.info.turningAge ? `Cumple ${p.info.turningAge} años hoy 🎂` : '¡Feliz cumpleaños! 🎂'}</p>
                     </div>
                   </motion.div>
                 ))}
@@ -849,21 +869,21 @@ function BirthdaysScreen({ myDni, onClose }: { myDni?: string | null; onClose: (
               initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(index * 0.04, 0.4) }}
             >
               <div className="w-12 h-12 rounded-full overflow-hidden shrink-0" style={{ background: 'var(--blue-light)' }}>
-                {p.foto_url ? <img src={p.foto_url} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-sm font-black" style={{ color: 'var(--blue)' }}>{getInitials(p.nombres)}</div>}
+                {p.foto_url ? <img src={p.foto_url} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-sm font-bold" style={{ color: 'var(--blue)' }}>{getInitials(p.nombres)}</div>}
               </div>
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-black truncate" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>{p.nombres}{p.dni === myDni ? ' (tú)' : ''}</p>
+                <p className="text-sm font-bold truncate" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>{p.nombres}{p.dni === myDni ? ' (tú)' : ''}</p>
                 <p className="text-xs font-bold mt-0.5 flex items-center gap-1.5" style={{ color: 'var(--text-3)' }}>
                   <Gift size={12} style={{ color: '#DB2777' }} /> {formatBirthdayDate(p.fecha)}{p.info.turningAge ? ` · ${p.info.turningAge} años` : ''}
                 </p>
               </div>
               <div className="text-right shrink-0">
                 {p.info.isToday ? (
-                  <span className="px-3 py-1.5 rounded-full text-[11px] font-black" style={{ background: 'linear-gradient(135deg, #EC4899, #7C3AED)', color: 'white' }}>¡HOY!</span>
+                  <span className="px-3 py-1.5 rounded-full text-[11px] font-bold" style={{ background: '#DB2777', color: 'white' }}>¡HOY!</span>
                 ) : (
                   <>
-                    <p className="text-lg font-black leading-none" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>{p.info.daysUntil}</p>
-                    <p className="text-[10px] font-black uppercase tracking-wider" style={{ color: 'var(--text-3)' }}>{p.info.daysUntil === 1 ? 'día' : 'días'}</p>
+                    <p className="text-lg font-bold leading-none" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>{p.info.daysUntil}</p>
+                    <p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: 'var(--text-3)' }}>{p.info.daysUntil === 1 ? 'día' : 'días'}</p>
                   </>
                 )}
               </div>
@@ -931,7 +951,7 @@ function ProfileEditorModal({
       >
         <motion.div
           className="absolute inset-x-0 top-0 h-40 pointer-events-none"
-          style={{ background: 'linear-gradient(135deg, #2563EB, #0EA5E9, #7C3AED, #EC4899)', backgroundSize: '220% 220%' }}
+          style={{ background: 'linear-gradient(135deg, #0F172A, #1E293B)' }}
           animate={{ backgroundPosition: ['0% 50%', '100% 50%', '0% 50%'] }}
           transition={{ duration: 7, repeat: Infinity, ease: 'easeInOut' }}
         />
@@ -959,14 +979,14 @@ function ProfileEditorModal({
             transition={{ duration: 2, repeat: Infinity, ease: 'easeInOut' }}
           />
           <div className="relative w-24 h-24 rounded-full overflow-hidden border-4 mb-3 shadow-xl" style={{ background: 'rgba(255,255,255,0.18)', borderColor: 'rgba(255,255,255,0.82)' }}>
-            {photoSrc ? <img src={photoSrc} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-xl font-black" style={{ color: 'var(--blue)' }}>{getInitials(perfil.nombres)}</div>}
+            {photoSrc ? <img src={photoSrc} alt="" className="w-full h-full object-cover" /> : <div className="w-full h-full flex items-center justify-center text-xl font-bold" style={{ color: 'var(--blue)' }}>{getInitials(perfil.nombres)}</div>}
             {uploading && (
               <div className="absolute inset-0 flex items-center justify-center" style={{ background: 'rgba(15,23,42,0.42)' }}>
                 <Loader2 className="animate-spin text-white" size={26} />
               </div>
             )}
           </div>
-          <p className="text-xl font-black" style={{ color: 'white', fontFamily: 'Sora, sans-serif' }}>Editar fotocheck</p>
+          <p className="text-xl font-bold" style={{ color: 'white', fontFamily: 'Sora, sans-serif' }}>Editar fotocheck</p>
           <p className="text-xs font-semibold mt-1" style={{ color: 'rgba(255,255,255,0.82)' }}>Foto, nombre, DNI, área, empresa y cumpleaños</p>
         </div>
 
@@ -974,8 +994,8 @@ function ProfileEditorModal({
           type="button"
           onClick={onPickPhoto}
           disabled={busy}
-          className="relative z-10 w-full mt-8 h-12 rounded-2xl text-white font-black flex items-center justify-center gap-2 disabled:opacity-50"
-          style={{ background: 'linear-gradient(135deg, #2563EB, #0EA5E9)', fontFamily: 'Sora, sans-serif' }}
+          className="relative z-10 w-full mt-8 h-12 rounded-2xl text-white font-bold flex items-center justify-center gap-2 disabled:opacity-50"
+          style={{ background: 'var(--blue)' }}
         >
           {uploading ? <Loader2 className="animate-spin" size={18} /> : <Camera size={18} />}
           {uploading ? 'SUBIENDO FOTO...' : 'CAMBIAR FOTO'}
@@ -983,7 +1003,7 @@ function ProfileEditorModal({
 
         <div className="relative z-10 mt-4 space-y-3">
           <label className="block rounded-2xl border px-4 py-3" style={{ background: 'var(--surface-2)', borderColor: 'var(--border)' }}>
-            <span className="block text-[10px] font-black uppercase tracking-wider mb-1" style={{ color: 'var(--text-3)' }}>Nombres y apellidos</span>
+            <span className="block text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--text-3)' }}>Nombres y apellidos</span>
             <input
               value={nombres}
               onChange={(event) => setNombres(event.target.value.toUpperCase())}
@@ -994,7 +1014,7 @@ function ProfileEditorModal({
           </label>
 
           <label className="block rounded-2xl border px-4 py-3" style={{ background: 'var(--surface-2)', borderColor: 'var(--border)' }}>
-            <span className="block text-[10px] font-black uppercase tracking-wider mb-1" style={{ color: 'var(--text-3)' }}>DNI</span>
+            <span className="block text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--text-3)' }}>DNI</span>
             <input
               value={dni}
               onChange={(event) => setDni(event.target.value.replace(/\D/g, '').slice(0, 12))}
@@ -1005,7 +1025,7 @@ function ProfileEditorModal({
           </label>
 
           <label className="block rounded-2xl border px-4 py-3" style={{ background: 'var(--surface-2)', borderColor: 'var(--border)' }}>
-            <span className="block text-[10px] font-black uppercase tracking-wider mb-1" style={{ color: 'var(--text-3)' }}>Área</span>
+            <span className="block text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--text-3)' }}>Área</span>
             <div className="relative">
               <select
                 value={area}
@@ -1024,7 +1044,7 @@ function ProfileEditorModal({
           </label>
 
           <label className="block rounded-2xl border px-4 py-3" style={{ background: 'var(--surface-2)', borderColor: 'var(--border)' }}>
-            <span className="block text-[10px] font-black uppercase tracking-wider mb-1" style={{ color: 'var(--text-3)' }}>Empresa</span>
+            <span className="block text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--text-3)' }}>Empresa</span>
             <div className="relative">
               <select
                 value={empresa}
@@ -1043,7 +1063,7 @@ function ProfileEditorModal({
           </label>
 
           <label className="block rounded-2xl border px-4 py-3" style={{ background: 'var(--surface-2)', borderColor: 'var(--border)' }}>
-            <span className="block text-[10px] font-black uppercase tracking-wider mb-1" style={{ color: 'var(--text-3)' }}>
+            <span className="block text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--text-3)' }}>
               País (define tu horario)
             </span>
             <div className="relative">
@@ -1063,7 +1083,7 @@ function ProfileEditorModal({
           </label>
 
           <label className="block rounded-2xl border px-4 py-3" style={{ background: 'var(--surface-2)', borderColor: birthday ? 'rgba(236,72,153,0.32)' : 'var(--border)' }}>
-            <span className="block text-[10px] font-black uppercase tracking-wider mb-1" style={{ color: 'var(--text-3)' }}>Cumpleaños</span>
+            <span className="block text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: 'var(--text-3)' }}>Cumpleaños</span>
             <div className="flex items-center gap-2">
               <Cake size={16} style={{ color: '#DB2777' }} />
               <input
@@ -1091,8 +1111,8 @@ function ProfileEditorModal({
             type="button"
             onClick={() => onSave({ dni, nombres, area, empresa: empresa || null, pais: pais || null, fecha_cumpleanos: birthday || null })}
             disabled={busy}
-            className="h-12 rounded-2xl text-white font-black flex items-center justify-center gap-2 disabled:opacity-50"
-            style={{ background: 'linear-gradient(135deg, #7C3AED, #EC4899)', fontFamily: 'Sora, sans-serif' }}
+            className="h-12 rounded-2xl text-white font-bold flex items-center justify-center gap-2 disabled:opacity-50"
+            style={{ background: 'var(--blue)' }}
           >
             {saving ? <Loader2 className="animate-spin" size={18} /> : null}
             GUARDAR
@@ -1127,8 +1147,8 @@ function BirthdayPromptModal({ open, value, onChange, onSave, onSkip, saving }: 
           <div className="w-20 h-20 rounded-3xl flex items-center justify-center overflow-hidden border mb-4" style={{ background: 'white', borderColor: '#EC489933', boxShadow: '0 18px 40px #EC489922' }}>
             <LottiePlayer src="/lottie/birthday-cake.json" style={{ width: 68, height: 68 }} />
           </div>
-          <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-[0.16em] mb-2" style={{ background: 'rgba(236,72,153,0.12)', color: '#DB2777' }}>Nueva función</span>
-          <h3 className="text-xl font-black" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Agrega tu fecha de cumpleaños</h3>
+          <span className="px-3 py-1 rounded-full text-[10px] font-bold uppercase tracking-[0.16em] mb-2" style={{ background: 'rgba(236,72,153,0.12)', color: '#DB2777' }}>Nueva función</span>
+          <h3 className="text-xl font-bold" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Agrega tu fecha de cumpleaños</h3>
           <p className="text-sm font-semibold mt-2 mb-5" style={{ color: 'var(--text-3)' }}>
             Así tu equipo sabrá cuándo celebrarte. Solo se usa para el módulo de cumpleaños 🎂
           </p>
@@ -1147,8 +1167,8 @@ function BirthdayPromptModal({ open, value, onChange, onSave, onSkip, saving }: 
           <motion.button
             onClick={onSave}
             disabled={saving || !value}
-            className="w-full mt-5 py-4 rounded-2xl font-black text-white flex items-center justify-center gap-2 disabled:opacity-40"
-            style={{ background: 'linear-gradient(135deg, #EC4899, #7C3AED)', fontFamily: 'Sora, sans-serif' }}
+            className="w-full mt-5 py-4 rounded-2xl font-bold text-white flex items-center justify-center gap-2 disabled:opacity-40"
+            style={{ background: 'var(--blue)' }}
             whileTap={{ scale: 0.98 }}
           >
             {saving ? <Loader2 className="animate-spin" size={20} /> : <><Cake size={18} /> GUARDAR</>}
@@ -1287,7 +1307,14 @@ export default function EscanerWeb() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const medicalCameraRef = useRef<HTMLInputElement>(null)
   const medicalGalleryRef = useRef<HTMLInputElement>(null)
-  const touchStartRef = useRef<{ x: number; y: number } | null>(null)
+  const drawerP = useMotionValue(0)
+  const drawerX = useTransform(drawerP, (v) => `${(1 - v) * 100}%`)
+  const drawerVisibility = useTransform(drawerP, (v) => (v > 0 ? 'visible' : 'hidden'))
+  const drawerDrag = useRef<{ x: number; y: number; lastX: number; dir: number; w: number; p0: number; axis: 'x' | 'y' | null } | null>(null)
+  useEffect(() => {
+    const c = animateMotion(drawerP, showSideMenu ? 1 : 0, { type: 'spring', stiffness: 400, damping: 40 })
+    return () => c.stop()
+  }, [showSideMenu, drawerP])
 
   const openFeature = (feature: WorkerFeature) => {
     setShowSideMenu(false)
@@ -2280,13 +2307,13 @@ export default function EscanerWeb() {
             <motion.div
               key={label}
               className="rounded-2xl p-3 border text-center relative overflow-hidden"
-              style={{ background: bg, borderColor: `${color}33` }}
+              style={{ background: bg, borderColor: 'var(--border)' }}
               initial={{ opacity: 0, y: 12, scale: 0.96 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               transition={{ delay: i * 0.06, type: 'spring', stiffness: 320, damping: 24 }}
             >
-              <p className="text-2xl font-black leading-none" style={{ color, fontFamily: 'Sora, sans-serif' }}>{value}</p>
-              <p className="text-[10px] font-black uppercase tracking-wider mt-1.5" style={{ color }}>{label}</p>
+              <p className="text-2xl font-bold leading-none" style={{ color, fontFamily: 'Sora, sans-serif' }}>{value}</p>
+              <p className="text-[10px] font-bold uppercase tracking-wider mt-1.5" style={{ color }}>{label}</p>
             </motion.div>
           ))}
         </div>
@@ -2301,7 +2328,7 @@ export default function EscanerWeb() {
             transition={{ duration: 0.28, ease: [0.34, 1.1, 0.64, 1] }}
           >
             {['L','M','M','J','V','S','D'].map((d, i) => (
-              <div key={i} className="text-center text-[11px] font-black pb-2 uppercase tracking-wider" style={{ color: 'var(--text-3)' }}>{d}</div>
+              <div key={i} className="text-center text-[11px] font-bold pb-2 uppercase tracking-wider" style={{ color: 'var(--text-3)' }}>{d}</div>
             ))}
             {Array.from({ length: blanks }, (_, i) => <div key={`b${i}`} className="aspect-square" />)}
             {Array.from({ length: total }, (_, i) => {
@@ -2326,7 +2353,7 @@ export default function EscanerWeb() {
                     if (hasVacation) setSelectedVacationDay({ fecha: dStr, solicitudes: vacationRequests })
                     else if (e) setSelectedDay(e)
                   }}
-                  className="relative aspect-square rounded-2xl flex flex-col items-center justify-center text-sm font-black border"
+                  className="relative aspect-square rounded-2xl flex flex-col items-center justify-center text-sm font-bold border"
                   style={{
                     background: hasVacation ? 'var(--blue-light)' : isPuntual ? 'var(--green-light)' : isTardanza ? 'var(--red-light)' : isFeriado ? '#CCFBF1' : 'var(--surface-2)',
                     borderColor: isToday ? 'var(--blue)' : hasVacation ? '#93C5FD' : isPuntual ? '#6EE7B7' : isTardanza ? '#FCA5A5' : isFeriado ? '#5EEAD4' : 'var(--border)',
@@ -2425,33 +2452,36 @@ export default function EscanerWeb() {
       })
     }
 
-    if (showSideMenu) {
-      runAnime('.anime-menu-item', {
-        opacity: [0, 1],
-        translateX: [18, 0],
-        duration: 430,
-        delay: stagger(38, { start: 120 }),
-        ease: 'outQuad',
-      })
-    }
-
     return () => {
       animations.forEach((animation) => animation.pause())
     }
-  }, [asistenciaHoy?.id, isLoading, perfil?.dni, scanState, showOfflineFotocheck, showScannerView, showSideMenu])
+  }, [asistenciaHoy?.id, isLoading, perfil?.dni, scanState, showOfflineFotocheck, showScannerView])
 
   if (isLoading || !perfil) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center" style={{ background: 'var(--bg)' }}>
+      <div className="worker-theme min-h-screen flex flex-col items-center justify-center px-6" style={{ background: 'var(--surface)' }}>
         <motion.div
-          className="w-16 h-16 rounded-3xl flex items-center justify-center mb-5"
-          style={{ background: 'var(--blue)', boxShadow: 'var(--shadow-glow)' }}
-          animate={{ rotate: [0, 10, -10, 0], scale: [1, 1.05, 1] }}
-          transition={{ duration: 2, repeat: Infinity }}
+          className="w-[104px] h-[104px] rounded-[28px] overflow-hidden"
+          style={{ boxShadow: '0 18px 40px rgba(15,23,42,0.16)' }}
+          initial={{ scale: 0.86, opacity: 0 }}
+          animate={{ scale: 1, opacity: 1 }}
+          transition={{ type: 'spring', stiffness: 260, damping: 18 }}
         >
-          <Loader2 className="text-white animate-spin" size={30} />
+          <img src="/ruag-icon-512.png" alt="RUAG" className="w-full h-full object-cover" />
         </motion.div>
-        <p className="font-semibold text-lg" style={{ color: 'var(--text-2)', fontFamily: 'Sora, sans-serif' }}>Sincronizando RUAG...</p>
+        <motion.div className="mt-6 text-center" initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.15 }}>
+          <p className="text-[26px] font-bold tracking-tight" style={{ color: 'var(--text-1)' }}>RUAG Jornada</p>
+          <p className="text-sm mt-1" style={{ color: 'var(--text-2)' }}>Control de asistencia</p>
+        </motion.div>
+        <div className="mt-9 h-1 w-[120px] overflow-hidden rounded-full" style={{ background: 'var(--blue-light)' }}>
+          <motion.div
+            className="h-full rounded-full"
+            style={{ background: 'var(--blue)' }}
+            initial={{ width: '0%' }}
+            animate={{ width: ['0%', '100%'] }}
+            transition={{ duration: 1.4, ease: 'easeInOut', repeat: Infinity }}
+          />
+        </div>
       </div>
     )
   }
@@ -2473,20 +2503,43 @@ export default function EscanerWeb() {
 
   return (
     <div
-      className="min-h-screen flex flex-col items-center relative overflow-hidden"
+      className="worker-theme min-h-screen flex flex-col items-center relative overflow-hidden"
       onTouchStart={(e) => {
+        // Abierto: cualquier arrastre lo cierra. Cerrado: se abre arrastrando desde la franja media.
         const t = e.touches[0]
-        touchStartRef.current = { x: t.clientX, y: t.clientY }
+        const otherOpen = showLogros || showCalendar || showVacations || showMedicalLeave || showTour || showUpdates || showBirthdays || showBirthdayPrompt || showNota || showObra || showExterno || showNocturno || showProfileEditor
+        const middleBand = t.clientY > window.innerHeight * 0.22 && t.clientY < window.innerHeight * 0.78
+        drawerDrag.current = showSideMenu || (!otherOpen && middleBand)
+          ? { x: t.clientX, y: t.clientY, lastX: t.clientX, dir: 0, w: Math.min(window.innerWidth * 0.86, 360), p0: drawerP.get(), axis: null }
+          : null
       }}
-      onTouchEnd={(e) => {
-        const start = touchStartRef.current
-        const t = e.changedTouches[0]
-        touchStartRef.current = null
-        if (!start || showSideMenu || showLogros || showCalendar || showVacations || showMedicalLeave || showTour || showUpdates || showBirthdays || showBirthdayPrompt || showNota || showObra || showExterno || showNocturno) return
-        const dx = t.clientX - start.x
-        const dy = Math.abs(t.clientY - start.y)
-        const middleBand = start.y > window.innerHeight * 0.22 && start.y < window.innerHeight * 0.78
-        if (middleBand && dx < -85 && dy < 70) setShowSideMenu(true)
+      onTouchMove={(e) => {
+        const d = drawerDrag.current
+        if (!d) return
+        const t = e.touches[0]
+        const dx = t.clientX - d.x
+        if (!d.axis) {
+          if (Math.abs(dx) < 8 && Math.abs(t.clientY - d.y) < 8) return
+          d.axis = Math.abs(dx) > Math.abs(t.clientY - d.y) ? 'x' : 'y'
+          if (d.axis === 'x') drawerP.stop()
+        }
+        if (d.axis !== 'x') return
+        if (t.clientX !== d.lastX) { d.dir = t.clientX - d.lastX; d.lastX = t.clientX }
+        drawerP.set(Math.min(1, Math.max(0, d.p0 - dx / d.w)))
+      }}
+      onTouchEnd={() => {
+        const d = drawerDrag.current
+        drawerDrag.current = null
+        if (!d || d.axis !== 'x') return
+        // Al soltar manda la dirección del último movimiento; si estaba quieto, la mitad del recorrido.
+        const p = drawerP.get()
+        const open = d.dir < -2 ? p > 0.1 : d.dir > 2 ? p > 0.9 : p > 0.5
+        if (open === showSideMenu) animateMotion(drawerP, open ? 1 : 0, { type: 'spring', stiffness: 400, damping: 40 })
+        else setShowSideMenu(open)
+      }}
+      onTouchCancel={() => {
+        drawerDrag.current = null
+        animateMotion(drawerP, showSideMenu ? 1 : 0, { type: 'spring', stiffness: 400, damping: 40 })
       }}
       style={{
         background: 'var(--bg)',
@@ -2495,116 +2548,108 @@ export default function EscanerWeb() {
         paddingBottom: 'env(safe-area-inset-bottom)',
       }}
     >
-      {/* Background decoration */}
-      <div className="absolute inset-0 pointer-events-none overflow-hidden">
-        <div className="absolute -top-20 -right-20 w-72 h-72 rounded-full opacity-30"
-          style={{ background: 'radial-gradient(circle, rgba(79,70,229,0.15) 0%, transparent 70%)' }} />
-        <div className="absolute bottom-0 -left-20 w-80 h-80 rounded-full opacity-20"
-          style={{ background: 'radial-gradient(circle, rgba(124,58,237,0.12) 0%, transparent 70%)' }} />
-      </div>
-
-      <AnimatePresence>
-        {showSideMenu && (
-          <motion.div
-            className="fixed inset-0 z-[80] flex justify-end"
-            style={{ background: 'rgba(15,23,42,0.38)', backdropFilter: 'blur(8px)' }}
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            onClick={() => setShowSideMenu(false)}
-          >
+      <motion.div
+        className="fixed inset-0 z-[80] flex justify-end"
+        style={{ visibility: drawerVisibility }}
+        aria-hidden={!showSideMenu}
+      >
+            <motion.div
+              className="absolute inset-0"
+              style={{ background: 'rgba(15,23,42,0.45)', opacity: drawerP }}
+              onClick={() => setShowSideMenu(false)}
+            />
             <motion.aside
-              className="h-full w-[82vw] max-w-[330px] rounded-l-[34px] p-5 flex flex-col"
-              style={{ background: 'linear-gradient(180deg, rgba(255,255,255,0.97), rgba(239,248,244,0.97), rgba(239,246,255,0.97))', borderLeft: '1px solid rgba(255,255,255,0.9)', boxShadow: '-24px 0 60px rgba(15,23,42,0.18)' }}
-              initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
-              transition={{ type: 'spring', stiffness: 380, damping: 34 }}
-              onClick={(e) => e.stopPropagation()}
+              className="relative h-full w-[86vw] max-w-[360px] rounded-l-[28px] overflow-hidden flex flex-col"
+              style={{ background: 'var(--bg)', boxShadow: '-24px 0 60px rgba(15,23,42,0.2)', x: drawerX, touchAction: 'pan-y' }}
             >
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-[11px] font-black uppercase tracking-[0.18em]" style={{ color: 'var(--text-3)' }}>Panel rapido</p>
-                  <h3 className="text-xl font-black" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Opciones</h3>
+              {/* Cabecera: identidad del trabajador */}
+              <div className="px-5 pb-5 pt-[calc(env(safe-area-inset-top)+8px)]" style={{ background: 'linear-gradient(180deg, #0F172A, #1E293B)' }}>
+                <div className="flex items-center justify-between">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em]" style={{ color: 'rgba(255,255,255,0.55)' }}>RUAG Jornada</p>
+                  <button onClick={() => setShowSideMenu(false)} aria-label="Cerrar menú" className="w-11 h-11 -mr-2 rounded-full flex items-center justify-center text-white">
+                    <X size={22} />
+                  </button>
                 </div>
-                <button onClick={() => setShowSideMenu(false)} className="w-10 h-10 rounded-2xl border flex items-center justify-center" style={{ background: 'white', borderColor: 'var(--border)', color: 'var(--text-2)' }}>
-                  <X size={18} />
-                </button>
-              </div>
-
-              <div className="mt-5 rounded-3xl p-4 border flex items-center gap-3" style={{ background: 'rgba(255,255,255,0.72)', borderColor: 'rgba(203,213,225,0.75)' }}>
-                <div className="w-14 h-14 rounded-full overflow-hidden" style={{ background: 'var(--blue-light)' }}>
-                  {profilePhotoSrc ? (
-                    <img src={profilePhotoSrc} alt="" className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-sm font-black" style={{ color: 'var(--blue)' }}>
-                      {perfil ? getInitials(perfil.nombres) : ''}
-                    </div>
+                <div className="flex items-center gap-3.5 mt-1">
+                  <div className="w-14 h-14 rounded-full overflow-hidden shrink-0 border-2" style={{ background: '#1E293B', borderColor: 'rgba(255,255,255,0.9)' }}>
+                    {profilePhotoSrc ? (
+                      <img src={profilePhotoSrc} alt="" className="w-full h-full object-cover" />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center text-base font-bold text-white">
+                        {perfil ? getInitials(perfil.nombres) : ''}
+                      </div>
+                    )}
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-base font-semibold leading-snug text-white line-clamp-2">{perfil?.nombres}</p>
+                    <p className="text-xs mt-0.5 truncate" style={{ color: 'rgba(255,255,255,0.62)' }}>DNI {perfil?.dni} · {perfil?.area}</p>
+                  </div>
+                </div>
+                <div className="flex gap-2 mt-4">
+                  <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs font-medium text-white" style={{ background: 'rgba(255,255,255,0.10)' }}>
+                    <span className="w-[7px] h-[7px] rounded-full" style={{ background: isOnline ? '#6EE7B7' : '#FCA5A5' }} />
+                    {isOnline ? 'En línea' : 'Sin conexión'}
+                  </span>
+                  {hasPendingOfflineEntry && (
+                    <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-xs font-medium text-white" style={{ background: 'rgba(255,255,255,0.10)' }}>
+                      <span className="w-[7px] h-[7px] rounded-full" style={{ background: '#FCD34D' }} />
+                      Pendiente por subir
+                    </span>
                   )}
                 </div>
-                <div className="min-w-0">
-                  <p className="text-sm font-black leading-tight truncate" style={{ color: 'var(--text-1)' }}>{perfil?.nombres}</p>
-                  <p className="text-xs font-bold mt-1" style={{ color: 'var(--text-3)' }}>{perfil?.dni}</p>
-                  <p className="text-[10px] font-black uppercase tracking-[0.12em] mt-1 truncate" style={{ color: 'var(--blue)' }}>{perfil?.area}</p>
-                </div>
               </div>
 
-              <div
-                className="mt-4 w-fit rounded-full px-4 py-2 border flex items-center gap-2 text-xs font-black"
-                style={{
-                  background: isOnline && !hasPendingOfflineEntry ? 'rgba(220,252,231,0.9)' : 'rgba(255,247,237,0.94)',
-                  color: isOnline && !hasPendingOfflineEntry ? 'var(--green)' : 'var(--amber)',
-                  borderColor: isOnline && !hasPendingOfflineEntry ? 'rgba(16,185,129,0.22)' : 'rgba(245,158,11,0.28)',
-                }}
-              >
-                {isOnline && !hasPendingOfflineEntry ? <Cloud size={16} /> : <CloudOff size={16} />}
-                <span>{isOnline && !hasPendingOfflineEntry ? 'Online' : hasPendingOfflineEntry ? 'Pendiente offline' : 'Offline'}</span>
-              </div>
-
-              <div className="mt-6 flex-1 space-y-3 overflow-y-auto pr-1 pb-[calc(env(safe-area-inset-bottom)+18px)]">
-                {[
-                  { key: 'profile', label: 'Editar perfil', desc: 'Foto, nombre, área y empresa', gif: '/icons-web/edit-profile.gif', icon: <Edit2 size={20} />, colors: ['#2563EB', '#7C3AED'] },
-                  { key: 'calendar', label: 'Calendario', desc: 'Historial mensual', gif: '/icons-web/calendario.gif', icon: <Calendar size={20} />, colors: ['#2563EB', '#06B6D4'] },
-                  { key: 'logros', label: 'Logros', desc: 'Insignias y progreso', gif: '/icons-web/logros.gif', icon: <Trophy size={20} />, colors: ['#F59E0B', '#FBBF24'] },
-                  { key: 'birthdays', label: 'Cumpleaños', desc: 'Próximos y del día', gif: '/icons-web/cumpleanos.gif', icon: <Cake size={20} />, colors: ['#EC4899', '#7C3AED'] },
-                  { key: 'vacations', label: 'Vacaciones', desc: 'Saldo y solicitudes', gif: '/icons-web/vacaciones.gif', icon: <PlaneTakeoff size={20} />, colors: ['#0EA5E9', '#6366F1'] },
-                  { key: 'medical', label: 'Descanso medico', desc: 'Certificado para RRHH', gif: '/icons-web/descanso-medico.gif', icon: <Stethoscope size={20} />, colors: ['#7C3AED', '#EC4899'] },
-                  { key: 'ranking', label: 'Ranking puntual', desc: 'Top 10 de oficina', gif: '/icons-web/ranking.gif', icon: <Star size={20} />, colors: ['#F59E0B', '#F97316'] },
-                  { key: 'rankingLate', label: 'Ranking tardanza', desc: 'Llegadas tarde', gif: '/icons-web/ranking-tardanza.gif', icon: <AlertTriangle size={20} />, colors: ['#DC2626', '#F43F5E'] },
-                  { key: 'tour', label: 'Ver tour de nuevo', desc: 'Aprende cada boton', gif: '/icons-web/guia-de-uso.gif', icon: <BookOpen size={20} />, colors: ['#2563EB', '#22C55E'] },
-                  { key: 'updates', label: 'Actualizaciones', desc: 'Libro de novedades', gif: '/icons-web/actualizaciones.gif', icon: <FileText size={20} />, colors: ['#0F766E', '#0EA5E9'] },
-                  { key: 'support', label: 'Soporte', desc: 'Abre la app SupportDev', gif: '/icons-web/soporte.gif', icon: <Phone size={20} />, colors: ['#2563EB', '#06B6D4'] },
-                  { key: 'rrhh', label: 'RRHH', desc: 'Recursos humanos', gif: '/icons-web/rrhh.gif', icon: <Badge size={20} />, colors: ['#2563EB', '#06B6D4'] },
-                ].map((item) => (
-                  <motion.button key={item.key} onClick={() => openFeature(item.key as WorkerFeature)}
-                    className="anime-menu-item group relative w-full overflow-hidden rounded-[24px] border p-3 flex items-center gap-3 text-left"
-                    style={{ background: 'rgba(255,255,255,0.82)', borderColor: `${item.colors[0]}30`, boxShadow: '0 12px 28px rgba(15,23,42,0.06)' }}
-                    whileHover={{ x: -3 }}
-                    whileTap={{ scale: 0.98 }}>
-                    <motion.span
-                      className="absolute right-[-28px] top-[-28px] h-20 w-20 rounded-full opacity-20 blur-xl"
-                      style={{ background: `linear-gradient(135deg, ${item.colors[0]}, ${item.colors[1]})` }}
-                      animate={{ scale: [1, 1.25, 1], opacity: [0.14, 0.28, 0.14] }}
-                      transition={{ duration: 2.7, repeat: Infinity, ease: 'easeInOut' }}
-                    />
-                    <span className="relative w-14 h-14 rounded-2xl flex items-center justify-center shrink-0 overflow-hidden border"
-                      style={{ background: `linear-gradient(135deg, ${item.colors[0]}18, ${item.colors[1]}24)`, borderColor: `${item.colors[0]}24` }}>
-                      {item.key === 'birthdays'
-                        ? <LottiePlayer src="/lottie/birthday-cake.json" style={{ width: 46, height: 46 }} />
-                        : item.key === 'profile'
-                        ? <span style={{ color: item.colors[0] }}>{item.icon}</span>
-                        : <img src={item.gif} alt="" className="h-11 w-11 object-contain" />}
-                    </span>
-                    <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-black" style={{ color: 'var(--text-1)' }}>{item.label}</span>
-                      <span className="block text-xs font-semibold mt-0.5" style={{ color: 'var(--text-3)' }}>{item.desc}</span>
-                    </span>
-                    <span className="w-8 h-8 rounded-xl flex items-center justify-center text-white shrink-0" style={{ background: `linear-gradient(135deg, ${item.colors[0]}, ${item.colors[1]})` }}>
-                      {item.icon}
-                    </span>
-                  </motion.button>
+              {/* Opciones agrupadas */}
+              <div className="flex-1 overflow-y-auto px-4 pt-3 pb-[calc(env(safe-area-inset-bottom)+18px)]">
+                {([
+                  ['Mi espacio', [
+                    { key: 'profile', label: 'Editar perfil', desc: 'Foto, nombre, área y empresa', icon: <UserCog size={20} /> },
+                    { key: 'calendar', label: 'Calendario', desc: 'Historial y días marcados', icon: <Calendar size={20} /> },
+                    { key: 'logros', label: 'Logros', desc: 'Tus insignias ganadas', icon: <Trophy size={20} /> },
+                    { key: 'birthdays', label: 'Cumpleaños', desc: 'Próximos y del día', icon: <Cake size={20} /> },
+                  ]],
+                  ['Solicitudes', [
+                    { key: 'vacations', label: 'Vacaciones', desc: 'Solicitudes y saldos', icon: <PlaneTakeoff size={20} /> },
+                    { key: 'medical', label: 'Descanso médico', desc: 'Sube tu certificado', icon: <Stethoscope size={20} /> },
+                  ]],
+                  ['Equipo', [
+                    { key: 'ranking', label: 'Ranking puntual', desc: 'Top 10 de llegada', icon: <BarChart3 size={20} /> },
+                    { key: 'rankingLate', label: 'Ranking tardanza', desc: 'Llegadas tarde del día', icon: <Hourglass size={20} /> },
+                  ]],
+                  ['Ayuda', [
+                    { key: 'tour', label: 'Ver tour de nuevo', desc: 'Aprende cada botón', icon: <Compass size={20} /> },
+                    { key: 'updates', label: 'Actualizaciones', desc: 'Novedades de la app', icon: <Megaphone size={20} /> },
+                    { key: 'support', label: 'Soporte', desc: 'Abre la app SupportDev', icon: <Headset size={20} /> },
+                    { key: 'rrhh', label: 'RRHH', desc: 'Escribe a recursos humanos', icon: <Badge size={20} /> },
+                  ]],
+                ] as [string, { key: string; label: string; desc: string; icon: React.ReactNode }[]][]).map(([section, items]) => (
+                  <div key={section} className="mb-3">
+                    <p className="px-1 pt-2 pb-2 text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: 'var(--text-3)' }}>{section}</p>
+                    <div className="rounded-2xl border overflow-hidden" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
+                      {items.map((item, i) => (
+                        <button
+                          key={item.key}
+                          onClick={() => openFeature(item.key as WorkerFeature)}
+                          className="anime-menu-item w-full flex items-center gap-3 px-3.5 py-3 text-left active:bg-slate-50"
+                          style={{ borderTop: i > 0 ? '1px solid var(--border)' : 'none' }}
+                        >
+                          <span className="w-[38px] h-[38px] rounded-[11px] flex items-center justify-center shrink-0" style={{ background: 'var(--blue-light)', color: 'var(--blue)' }}>
+                            {item.icon}
+                          </span>
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-[15px] font-semibold" style={{ color: 'var(--text-1)' }}>{item.label}</span>
+                            <span className="block text-xs" style={{ color: 'var(--text-2)' }}>{item.desc}</span>
+                          </span>
+                          <ChevronRight size={20} style={{ color: 'var(--text-3)' }} />
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                 ))}
+                <p className="text-center text-xs py-2" style={{ color: 'var(--text-3)' }}>RUAG Jornada</p>
               </div>
             </motion.aside>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      </motion.div>
 
       {/* ──────────────────────────────────────────────────────────────────── */}
       {/* VISTA 1: ESCÁNER QR                                                  */}
@@ -2612,31 +2657,19 @@ export default function EscanerWeb() {
       {showScannerView && (
         <div className="w-full max-w-sm mx-auto flex flex-col min-h-screen px-5 pt-6 pb-4 relative z-10">
 
-          {/* Header */}
-          <div className="flex items-center justify-between mb-5">
-            <div className="flex items-center gap-3">
-              <div className="w-11 h-11 rounded-2xl flex items-center justify-center"
-                style={{ background: 'var(--surface)', boxShadow: 'var(--shadow-md)', overflow: 'hidden' }}>
-                <img src="/ruag-logo.png" alt="RUAG" className="h-full w-full object-cover" />
-              </div>
-              <div>
-                <h1 className="font-black text-base leading-none" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>RUAG</h1>
-                <p className="text-xs font-semibold" style={{ color: 'var(--text-3)' }}>Registra tu asistencia</p>
-              </div>
+          {/* Encabezado */}
+          <div className="flex items-start justify-between gap-3 mb-5">
+            <div className="min-w-0">
+              <h1 className="text-2xl font-bold tracking-tight truncate" style={{ color: 'var(--text-1)' }}>Hola, {primerNombre(perfil.nombres)}</h1>
+              <p className="text-sm mt-0.5" style={{ color: 'var(--text-2)' }}>Escanea el código QR de ingreso</p>
             </div>
-            <motion.button
-              onClick={() => setShowSideMenu(true)}
-              className="w-14 h-14 rounded-[22px] flex items-center justify-center border text-white"
-              style={{ background: 'linear-gradient(135deg, #0F766E, #22C55E, #0EA5E9)', borderColor: 'rgba(255,255,255,0.55)', boxShadow: '0 16px 34px rgba(16,185,129,0.22)' }}
-              whileTap={{ scale: 0.94 }}>
-              <Menu size={28} />
-            </motion.button>
+            <MenuButton onClick={() => setShowSideMenu(true)} alert={hasPendingOfflineEntry ? 'amber' : !isOnline ? 'red' : null} />
           </div>
 
           {/* Camera box */}
           <motion.div
-            className="anime-scanner-card relative flex-1 rounded-3xl overflow-hidden min-h-[320px] max-h-[55vh]"
-            style={{ background: '#0f0f1a', boxShadow: 'var(--shadow-lg)', border: '2px solid var(--border)' }}
+            className="anime-scanner-card relative flex-1 rounded-[28px] overflow-hidden min-h-[320px] max-h-[55vh]"
+            style={{ background: '#0B1220', boxShadow: 'var(--shadow-lg)' }}
             initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, ease: [0.34, 1.2, 0.64, 1] }}
           >
@@ -2654,23 +2687,23 @@ export default function EscanerWeb() {
                   <div className="relative w-56 h-56">
                     {/* Scanning line */}
                     <div className="absolute left-0 right-0 h-0.5 z-10"
-                      style={{ background: 'linear-gradient(90deg, transparent, #818CF8, transparent)', animation: 'scan 2.5s ease-in-out infinite' }} />
+                      style={{ background: 'linear-gradient(90deg, transparent, #38BDF8, transparent)', animation: 'scan 2.5s ease-in-out infinite' }} />
                     {/* Corners */}
                     {[
-                      'top-0 left-0 border-t-[3px] border-l-[3px] rounded-tl-2xl',
-                      'top-0 right-0 border-t-[3px] border-r-[3px] rounded-tr-2xl',
-                      'bottom-0 left-0 border-b-[3px] border-l-[3px] rounded-bl-2xl',
-                      'bottom-0 right-0 border-b-[3px] border-r-[3px] rounded-br-2xl',
+                      'top-0 left-0 border-t-4 border-l-4 rounded-tl-[20px]',
+                      'top-0 right-0 border-t-4 border-r-4 rounded-tr-[20px]',
+                      'bottom-0 left-0 border-b-4 border-l-4 rounded-bl-[20px]',
+                      'bottom-0 right-0 border-b-4 border-r-4 rounded-br-[20px]',
                     ].map((cls, i) => (
-                      <div key={i} className={`absolute w-8 h-8 ${cls}`} style={{ borderColor: '#818CF8' }} />
+                      <div key={i} className={`absolute w-10 h-10 ${cls}`} style={{ borderColor: '#FFFFFF' }} />
                     ))}
                   </div>
                 </div>
                 {/* Bottom hint */}
                 <div className="absolute bottom-4 left-0 right-0 flex justify-center z-20 pointer-events-none">
-                  <div className="flex items-center gap-2 px-4 py-2 rounded-full" style={{ background: 'rgba(15,15,26,0.7)', backdropFilter: 'blur(8px)' }}>
-                    <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#10B981', boxShadow: '0 0 6px #10B981' }} />
-                    <span className="text-white text-xs font-semibold">Se verificará tu GPS</span>
+                  <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-full" style={{ background: 'rgba(255,255,255,0.14)', backdropFilter: 'blur(8px)' }}>
+                    <LocateFixed size={14} style={{ color: '#6EE7B7' }} />
+                    <span className="text-white text-xs font-medium">Se verificará tu ubicación</span>
                   </div>
                 </div>
               </>
@@ -2678,7 +2711,7 @@ export default function EscanerWeb() {
 
             {scanState === 'ESCANEO' && !isOnline && (
               <div className="absolute inset-0 z-20 flex flex-col items-center justify-center p-7 text-center"
-                style={{ background: 'linear-gradient(160deg, rgba(239,246,255,0.98), rgba(236,253,245,0.98))' }}>
+                style={{ background: 'var(--surface)' }}>
                 <motion.div
                   className="w-20 h-20 rounded-[28px] flex items-center justify-center mb-5"
                   style={{ background: 'rgba(255,255,255,0.88)', color: 'var(--amber)', boxShadow: 'var(--shadow-md)' }}
@@ -2687,7 +2720,7 @@ export default function EscanerWeb() {
                 >
                   <CloudOff size={34} />
                 </motion.div>
-                <h2 className="text-xl font-black mb-2" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>
+                <h2 className="text-xl font-bold mb-2" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>
                   Sin conexion
                 </h2>
                 <p className="text-sm font-semibold leading-relaxed mb-5" style={{ color: 'var(--text-3)' }}>
@@ -2695,8 +2728,8 @@ export default function EscanerWeb() {
                 </p>
                 <motion.button
                   onClick={handleOfflineEntry}
-                  className="w-full rounded-2xl py-4 text-white font-black uppercase tracking-wider"
-                  style={{ background: 'linear-gradient(135deg, #0F766E, #22C55E)', boxShadow: '0 18px 34px rgba(16,185,129,0.24)' }}
+                  className="w-full rounded-2xl py-4 text-white font-bold uppercase tracking-wider"
+                  style={{ background: 'var(--green)' }}
                   whileTap={{ scale: 0.97 }}
                 >
                   Guardar entrada offline
@@ -2727,7 +2760,7 @@ export default function EscanerWeb() {
                         style={{ background: 'var(--green-light)', boxShadow: '0 0 40px rgba(5,150,105,0.25)' }}>
                         <CheckCircle size={44} style={{ color: 'var(--green)' }} />
                       </div>
-                      <h3 className="font-black text-lg mb-1" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>¡INGRESO EXITOSO!</h3>
+                      <h3 className="font-bold text-lg mb-1" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>¡INGRESO EXITOSO!</h3>
                       <p className="text-sm font-medium whitespace-pre-line" style={{ color: 'var(--text-3)' }}>{mensaje}</p>
                     </motion.div>
                   )}
@@ -2737,7 +2770,7 @@ export default function EscanerWeb() {
                         style={{ background: 'var(--red-light)', boxShadow: '0 0 40px rgba(220,38,38,0.2)' }}>
                         <AlertTriangle size={40} style={{ color: 'var(--red)' }} />
                       </div>
-                      <h3 className="font-black text-base mb-1" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>ACCESO DENEGADO</h3>
+                      <h3 className="font-bold text-base mb-1" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>ACCESO DENEGADO</h3>
                       <p className="text-sm font-medium whitespace-pre-line" style={{ color: 'var(--red)' }}>{mensaje}</p>
                     </motion.div>
                   )}
@@ -2749,29 +2782,30 @@ export default function EscanerWeb() {
           {/* Bottom panel */}
           {scanState === 'ESCANEO' && (
             <motion.div
-              className="anime-scanner-panel mt-4 rounded-3xl p-4"
-              style={{ background: 'var(--surface)', border: '1.5px solid var(--border)', boxShadow: 'var(--shadow-md)' }}
+              className="anime-scanner-panel mt-4 rounded-3xl p-4 border"
+              style={{ background: 'var(--surface)', borderColor: 'var(--border)', boxShadow: 'var(--shadow-md)' }}
               initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
               transition={{ delay: 0.2 }}
             >
-              <p className="text-xs font-bold text-center mb-3" style={{ color: 'var(--text-3)' }}>
-                ¿No estás en la oficina principal?
-              </p>
-              <div className="grid grid-cols-3 gap-2">
+              <p className="text-base font-semibold" style={{ color: 'var(--text-1)' }}>¿Trabajas fuera de la oficina?</p>
+              <p className="text-[13px] mb-3.5" style={{ color: 'var(--text-2)' }}>Marca tu ingreso según dónde estés hoy</p>
+              <div className="grid grid-cols-3 gap-2.5">
                 {[
-                  { label: 'Obra', icon: <HardHat size={20} />, color: 'var(--blue)', bg: 'var(--blue-light)', border: 'var(--border-2)', onClick: () => { setNotaTexto(''); setShowObra(true) } },
-                  { label: 'Externo', icon: <Store size={20} />, color: 'var(--purple)', bg: 'var(--purple-light)', border: '#DDD6FE', onClick: () => { setNotaTexto(''); setShowExterno(true) } },
-                  { label: 'Nocturno', icon: <Moon size={20} />, color: 'var(--amber)', bg: 'var(--amber-light)', border: '#FDE68A', onClick: () => { setNotaTexto(''); setHoraSeleccionada(null); setShowNocturno(true) } },
+                  { label: 'Obra', icon: <HardHat size={22} />, onClick: () => { setNotaTexto(''); setShowObra(true) } },
+                  { label: 'Externo', icon: <Store size={22} />, onClick: () => { setNotaTexto(''); setShowExterno(true) } },
+                  { label: 'Nocturno', icon: <Moon size={22} />, onClick: () => { setNotaTexto(''); setHoraSeleccionada(null); setShowNocturno(true) } },
                 ].map(btn => (
                   <motion.button
                     key={btn.label}
                     onClick={btn.onClick}
-                    className="anime-scanner-action flex flex-col items-center justify-center py-3.5 rounded-2xl font-bold text-sm gap-1.5 transition-all border"
-                    style={{ background: btn.bg, color: btn.color, borderColor: btn.border }}
-                    whileHover={{ scale: 1.04, y: -2 }} whileTap={{ scale: 0.96 }}
+                    className="anime-scanner-action flex flex-col items-center justify-center py-3.5 rounded-2xl border gap-2"
+                    style={{ background: 'var(--surface-2)', borderColor: 'var(--border)' }}
+                    whileTap={{ scale: 0.97 }}
                   >
-                    {btn.icon}
-                    <span className="text-xs">{btn.label}</span>
+                    <span className="w-10 h-10 rounded-xl border flex items-center justify-center" style={{ background: 'var(--surface)', borderColor: 'var(--border)', color: 'var(--text-1)' }}>
+                      {btn.icon}
+                    </span>
+                    <span className="text-[13px] font-semibold" style={{ color: 'var(--text-1)' }}>{btn.label}</span>
                   </motion.button>
                 ))}
               </div>
@@ -2786,313 +2820,187 @@ export default function EscanerWeb() {
       {(asistenciaHoy || showOfflineFotocheck) && (
         <div className="w-full max-w-sm mx-auto flex flex-col px-5 pt-6 pb-8 relative z-10 gap-5">
 
-          {/* Header */}
-          <div className="flex items-center justify-between">
-            <p className="text-xs font-bold uppercase tracking-widest" style={{ color: 'var(--text-3)' }}>
-              {format(new Date(), "EEEE d 'de' MMMM", { locale: es })}
-            </p>
-            <motion.button
-              onClick={() => setShowSideMenu(true)}
-              className="w-14 h-14 rounded-[22px] flex items-center justify-center border text-white"
-              style={{ background: 'linear-gradient(135deg, #0F766E, #22C55E, #0EA5E9)', borderColor: 'rgba(255,255,255,0.55)', boxShadow: '0 16px 34px rgba(16,185,129,0.22)' }}
-              whileTap={{ scale: 0.94 }}>
-              <Menu size={28} />
-            </motion.button>
+          {/* Saludo */}
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <p className="text-[13px] font-medium" style={{ color: cardIsOfflineOnly ? 'var(--amber)' : 'var(--text-2)' }}>
+                {cardIsOfflineOnly ? 'Sin conexión' : format(new Date(), "EEEE d 'de' MMMM", { locale: es }).replace(/^./, (c) => c.toUpperCase())}
+              </p>
+              <h1 className="text-2xl font-bold tracking-tight truncate" style={{ color: 'var(--text-1)' }}>Hola, {primerNombre(perfil.nombres)}</h1>
+            </div>
+            <MenuButton onClick={() => setShowSideMenu(true)} alert={hasPendingOfflineEntry ? 'amber' : !isOnline ? 'red' : null} />
           </div>
 
-          {/* Fotocheck Card */}
+          {cardIsOfflineOnly && (
+            <div className="flex items-center gap-3 rounded-2xl border p-3.5" style={{ background: 'var(--amber-light)', borderColor: 'rgba(217,119,6,0.25)' }}>
+              <CloudOff size={22} style={{ color: 'var(--amber)' }} className="shrink-0" />
+              <div>
+                <p className="text-sm font-semibold" style={{ color: 'var(--text-1)' }}>Estás sin internet</p>
+                <p className="text-xs leading-snug" style={{ color: 'var(--text-2)' }}>Tu ingreso se guarda en este equipo y se sube solo al reconectar.</p>
+              </div>
+            </div>
+          )}
+
           <input type="file" accept="image/*" ref={fileInputRef} onChange={handleFoto} className="hidden" />
 
+          {/* Tarjeta fotocheck */}
           <motion.div
-            className="anime-fotocheck-card relative"
-            initial={{ opacity: 0, y: 24 }} animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, ease: [0.34, 1.2, 0.64, 1] }}
+            className="anime-fotocheck-card relative rounded-3xl overflow-hidden border"
+            style={{ background: 'var(--surface)', borderColor: 'var(--border)', boxShadow: '0 14px 36px rgba(15,23,42,0.10)' }}
+            initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.45, ease: [0.22, 1, 0.36, 1] }}
           >
-            <div
-              className="absolute -inset-1 rounded-[30px]"
-              style={{ background: cardIsOfflineOnly
-                ? 'linear-gradient(135deg, #B45309, #F59E0B 52%, #FBBF24)'
-                : isPuntual
-                ? 'linear-gradient(135deg, #047857, #34D399 48%, #0EA5E9)'
-                : 'linear-gradient(135deg, #991B1B, #EF4444 52%, #F97316)',
-                boxShadow: cardIsOfflineOnly
-                  ? '0 24px 55px rgba(245,158,11,0.20)'
-                  : isPuntual
-                  ? '0 24px 55px rgba(16,185,129,0.20)'
-                  : '0 24px 55px rgba(239,68,68,0.18)'
-              }} />
-            <motion.div
-              className="absolute -inset-4 rounded-[34px] opacity-40"
-              style={{
-                background: cardIsOfflineOnly
-                  ? 'radial-gradient(circle at 30% 10%, rgba(251,191,36,0.34), transparent 42%), radial-gradient(circle at 80% 85%, rgba(245,158,11,0.20), transparent 38%)'
-                  : isPuntual
-                  ? 'radial-gradient(circle at 30% 10%, rgba(52,211,153,0.38), transparent 42%), radial-gradient(circle at 80% 85%, rgba(14,165,233,0.22), transparent 38%)'
-                  : 'radial-gradient(circle at 30% 10%, rgba(248,113,113,0.34), transparent 42%), radial-gradient(circle at 80% 85%, rgba(249,115,22,0.20), transparent 38%)',
-                filter: 'blur(12px)',
-              }}
-              animate={{ opacity: [0.24, 0.42, 0.24], scale: [0.98, 1.02, 0.98] }}
-              transition={{ duration: 3.4, repeat: Infinity, ease: 'easeInOut' }}
-            />
+            {isFiestasPatriasMonth() && <PatriaFotocheckOverlay />}
 
-            <div className="relative rounded-[26px] p-7 overflow-hidden"
-              style={{ background: 'linear-gradient(160deg, rgba(255,255,255,0.98), rgba(248,250,252,0.96))', boxShadow: 'var(--shadow-lg)' }}>
-              {isFiestasPatriasMonth() && <PatriaFotocheckOverlay />}
-              <motion.div
-                className="absolute inset-y-0 -left-24 w-20 pointer-events-none"
-                style={{ background: 'linear-gradient(90deg, transparent, rgba(255,255,255,0.75), transparent)', transform: 'skewX(-18deg)' }}
-                animate={{ x: [-120, 470] }}
-                transition={{ duration: 3.8, repeat: Infinity, ease: 'linear', repeatDelay: 1.4 }}
-              />
-
-              {/* Watermark */}
-              <div className="absolute -bottom-8 -right-8 opacity-5">
-                <svg width="140" height="140" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="0.8">
-                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/><path d="m9 12 2 2 4-4"/>
-                </svg>
+            {/* Banda superior */}
+            <div className="relative h-24 px-[18px] py-4 flex items-start justify-between" style={{ background: 'linear-gradient(135deg, #0F172A, #1E293B)' }}>
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.14em]" style={{ color: 'rgba(255,255,255,0.55)' }}>Fotocheck digital</p>
+                <p className="text-[15px] font-semibold text-white mt-0.5">{perfil.empresa || 'RUAG'}</p>
               </div>
+              <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium text-white" style={{ background: 'rgba(255,255,255,0.12)' }}>
+                {cardIsOfflineOnly
+                  ? <><CloudOff size={14} style={{ color: '#FCD34D' }} /> Offline</>
+                  : <><BadgeCheck size={14} style={{ color: '#6EE7B7' }} /> Verificado</>}
+              </span>
+            </div>
 
-              {/* Photo */}
-              <div className="flex justify-center mb-5">
-                <div className="anime-profile-photo relative">
-                  {/* Anillo cónico animado alrededor de la foto */}
-                  <motion.div
-                    className="absolute -inset-[6px] rounded-full"
-                    style={{
-                      background: `conic-gradient(from 0deg, ${statusColor}, ${statusColor}55, ${statusColor}, ${statusColor}22, ${statusColor})`,
-                      filter: 'blur(0.5px)',
-                    }}
-                    animate={{ rotate: 360 }}
-                    transition={{ duration: 9, repeat: Infinity, ease: 'linear' }}
-                  />
-                  <div className="relative w-28 h-28 rounded-full overflow-hidden border-[3px]"
-                    style={{ borderColor: 'var(--surface)', boxShadow: `0 0 0 4px ${statusBg}, 0 12px 28px rgba(15,23,42,0.18)` }}>
-                    {profilePhotoSrc ? (
-                      <img src={profilePhotoSrc} alt="Foto" className="w-full h-full object-cover" />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center font-black text-3xl"
-                        style={{ background: 'var(--surface-2)', color: 'var(--blue)' }}>
-                        {getInitials(perfil.nombres)}
-                      </div>
-                    )}
-                    {uploadingPhoto && (
-                      <div className="absolute inset-0 flex items-center justify-center rounded-full"
-                        style={{ background: 'rgba(255,255,255,0.85)' }}>
-                        <Loader2 className="animate-spin" size={28} style={{ color: 'var(--blue)' }} />
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Punto de estado con pulso */}
-                  <div className="absolute top-1 right-1 w-4 h-4 rounded-full flex items-center justify-center"
-                    style={{ background: 'var(--surface)', boxShadow: '0 2px 6px rgba(0,0,0,0.12)' }}>
-                    <motion.span
-                      className="block w-2.5 h-2.5 rounded-full"
-                      style={{ background: statusColor, boxShadow: `0 0 0 0 ${statusColor}` }}
-                      animate={{ boxShadow: [`0 0 0 0 ${statusColor}aa`, `0 0 0 8px ${statusColor}00`] }}
-                      transition={{ duration: 1.8, repeat: Infinity, ease: 'easeOut' }}
-                    />
-                  </div>
-
-                  {!uploadingPhoto && asistenciaHoy && (
-                    <motion.button
-                      onClick={() => setShowProfileEditor(true)}
-                      className="absolute -bottom-1 -right-1 w-9 h-9 rounded-full flex items-center justify-center text-white border-4"
-                      style={{ background: 'var(--blue)', borderColor: 'var(--surface)', boxShadow: 'var(--shadow-md)' }}
-                      whileHover={{ scale: 1.15 }} whileTap={{ scale: 0.9 }}
-                    >
-                      <Edit2 size={14} />
-                    </motion.button>
+            <div className="relative flex flex-col items-center -mt-12">
+              {/* Foto */}
+              <div className="anime-profile-photo relative">
+                <div className="w-[104px] h-[104px] rounded-full overflow-hidden border-4" style={{ borderColor: 'var(--surface)', background: 'var(--surface-2)' }}>
+                  {profilePhotoSrc ? (
+                    <img src={profilePhotoSrc} alt="Foto" className="w-full h-full object-cover" />
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center font-bold text-3xl" style={{ color: 'var(--text-2)' }}>
+                      {getInitials(perfil.nombres)}
+                    </div>
+                  )}
+                  {uploadingPhoto && (
+                    <div className="absolute inset-1 flex items-center justify-center rounded-full" style={{ background: 'rgba(15,23,42,0.4)' }}>
+                      <Loader2 className="animate-spin text-white" size={28} />
+                    </div>
                   )}
                 </div>
-              </div>
-
-              <h2 className="text-[22px] font-extrabold text-center leading-tight uppercase tracking-tight"
-                style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif', letterSpacing: '-0.01em' }}>
-                {perfil.nombres}
-              </h2>
-              <p className="text-[13px] text-center mt-1 font-semibold tabular-nums tracking-[0.32em]"
-                style={{ color: 'var(--text-3)', fontFamily: 'Sora, sans-serif' }}>
-                {perfil.dni}
-              </p>
-
-              <div className="flex justify-center items-center gap-2 mt-3">
-                <span className="anime-fotocheck-chip px-4 py-1.5 rounded-full text-[11px] font-extrabold tracking-[0.18em] uppercase"
-                  style={{ background: 'var(--blue-light)', color: 'var(--blue)', border: '1.5px solid var(--border-2)', fontFamily: 'Sora, sans-serif' }}>
-                  {perfil.area}
-                </span>
-                <span className="anime-fotocheck-chip px-2.5 py-1 rounded-full text-[9px] font-black tracking-[0.18em] uppercase flex items-center gap-1"
-                  style={{ background: 'rgba(5,150,105,0.10)', color: 'var(--green)', border: '1px solid rgba(5,150,105,0.25)', fontFamily: 'Sora, sans-serif' }}>
-                  <CheckCircle2 size={10} strokeWidth={3} /> VERIFICADO
-                </span>
-              </div>
-
-              {perfil.pais && (
-                <div className="flex justify-center mt-2">
-                  <span
-                    className="anime-fotocheck-chip inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[10px] font-black uppercase tracking-[0.12em]"
-                    style={{
-                      background: 'rgba(15,23,42,0.06)',
-                      border: '1px solid rgba(15,23,42,0.14)',
-                      color: 'var(--text-1)',
-                      fontFamily: 'Sora, sans-serif',
-                    }}
+                {!uploadingPhoto && asistenciaHoy && (
+                  <button
+                    onClick={() => setShowProfileEditor(true)}
+                    aria-label="Editar perfil"
+                    className="absolute bottom-0.5 right-0.5 w-[34px] h-[34px] rounded-full flex items-center justify-center border"
+                    style={{ background: 'var(--surface)', borderColor: 'var(--border)', color: 'var(--blue)' }}
                   >
-                    <span className="text-[13px] leading-none">{countryOf(perfil.pais).flag}</span>
-                    {countryOf(perfil.pais).name}
-                    <span className="h-[3px] w-[3px] rounded-full" style={{ background: 'var(--text-3)' }} />
-                    <span style={{ color: 'var(--text-2)' }}>
-                      {String(localHourMinute(perfil.pais).hour).padStart(2, '0')}:
-                      {String(localHourMinute(perfil.pais).minute).padStart(2, '0')}
+                    <Edit2 size={16} />
+                  </button>
+                )}
+              </div>
+
+              <h2 className="mt-3 px-5 text-xl font-bold text-center leading-tight" style={{ color: 'var(--text-1)' }}>{perfil.nombres}</h2>
+              <p className="text-[13px] mt-0.5 tabular-nums tracking-wider" style={{ color: 'var(--text-2)' }}>DNI {perfil.dni}</p>
+              <span className="anime-fotocheck-chip mt-2.5 px-3 py-1 rounded-lg text-xs font-semibold uppercase tracking-wide" style={{ background: 'var(--blue-light)', color: 'var(--blue)' }}>
+                {perfil.area}
+              </span>
+
+              {/* Datos */}
+              <div className="w-full px-[18px] pt-4">
+                {perfil.pais && (
+                  <div className="flex items-center gap-2.5 py-1.5 text-[13px]">
+                    <Globe size={18} style={{ color: 'var(--text-3)' }} />
+                    <span className="flex-1" style={{ color: 'var(--text-2)' }}>País</span>
+                    <span className="font-semibold" style={{ color: 'var(--text-1)' }}>
+                      {countryOf(perfil.pais).flag} {countryOf(perfil.pais).name} · {String(localHourMinute(perfil.pais).hour).padStart(2, '0')}:{String(localHourMinute(perfil.pais).minute).padStart(2, '0')}
                     </span>
-                  </span>
-                </div>
-              )}
+                  </div>
+                )}
+                {perfil.empresa && (
+                  <div className="flex items-center gap-2.5 py-1.5 text-[13px]">
+                    <Building2 size={18} style={{ color: 'var(--text-3)' }} />
+                    <span className="flex-1" style={{ color: 'var(--text-2)' }}>Empresa</span>
+                    <span className="font-semibold" style={{ color: 'var(--text-1)' }}>{perfil.empresa}</span>
+                  </div>
+                )}
+                {perfil.fecha_cumpleanos && (
+                  <div className="flex items-center gap-2.5 py-1.5 text-[13px]">
+                    <Cake size={18} style={{ color: 'var(--text-3)' }} />
+                    <span className="flex-1" style={{ color: 'var(--text-2)' }}>Cumpleaños</span>
+                    <span className="font-semibold" style={{ color: 'var(--text-1)' }}>{formatBirthdayDate(perfil.fecha_cumpleanos)}</span>
+                  </div>
+                )}
+              </div>
 
-              {perfil.empresa && (
-                <div className="flex justify-center mt-2">
-                  <span
-                    className="anime-fotocheck-chip inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-[10px] font-black tracking-[0.14em] uppercase text-white border border-white/40"
-                    style={{
-                      background: perfil.empresa === 'RUAG'
-                        ? 'linear-gradient(90deg, #047857, #059669, #22C55E)'
-                        : perfil.empresa === 'ARUG'
-                        ? 'linear-gradient(90deg, #1D4ED8, #2563EB, #38BDF8)'
-                        : 'linear-gradient(90deg, #B45309, #F59E0B, #FBBF24)',
-                      fontFamily: 'Sora, sans-serif',
-                      boxShadow: '0 6px 14px rgba(15,23,42,0.14)',
-                    }}
-                  >
-                    <Badge size={11} strokeWidth={2.8} />
-                    EMPRESA · {perfil.empresa}
-                  </span>
-                </div>
-              )}
-
-              {perfil.fecha_cumpleanos && (
-                <div className="flex justify-center mt-2">
-                  <span className="anime-fotocheck-chip px-3 py-1.5 rounded-full text-[10px] font-black flex items-center gap-1.5"
-                    style={{ background: 'rgba(236,72,153,0.10)', color: '#DB2777', border: '1px solid rgba(236,72,153,0.24)', fontFamily: 'Sora, sans-serif' }}>
-                    <Cake size={13} /> Cumpleaños: {formatBirthdayDate(perfil.fecha_cumpleanos)}
-                  </span>
-                </div>
-              )}
-
-              {(isPendingLocal || cardIsOfflineOnly) && (
-                <div className="flex justify-center mt-3">
-                  <span className="anime-fotocheck-chip px-3 py-1.5 rounded-full text-[10px] font-black uppercase tracking-[0.14em] flex items-center gap-1.5"
-                    style={{ background: 'rgba(255,247,237,0.96)', color: 'var(--amber)', border: '1px solid rgba(245,158,11,0.28)' }}>
-                    <CloudOff size={13} />
-                    {isPendingLocal ? 'Pendiente offline' : 'Modo offline'}
-                  </span>
-                </div>
-              )}
-
-              <div className="w-full h-px my-5" style={{ background: 'var(--border)' }} />
-
-              <div className="flex items-center justify-between">
+              {/* Ingreso + estado */}
+              <div className="w-full mt-4 px-[18px] py-4 flex items-center justify-between" style={{ background: 'var(--surface-2)' }}>
                 <div>
-                  <p className="text-[10px] font-black uppercase tracking-[0.15em] mb-1" style={{ color: 'var(--text-3)' }}>Ingreso Hoy</p>
-                  <p className="text-[26px] font-extrabold tabular-nums leading-none" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif', letterSpacing: '-0.02em' }}>
-                    {asistenciaHoy ? formatTimeLima(asistenciaHoy.hora_ingreso) : 'Sin entrada'}
+                  <p className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: 'var(--text-3)' }}>Ingreso hoy</p>
+                  <p className="text-2xl font-bold tabular-nums leading-tight" style={{ color: 'var(--text-1)' }}>
+                    {asistenciaHoy ? formatTimeLima(asistenciaHoy.hora_ingreso) : 'Sin marcar'}
                   </p>
                 </div>
-                <div className="text-right">
-                  <p className="text-[10px] font-black uppercase tracking-[0.15em] mb-1" style={{ color: 'var(--text-3)' }}>Estado</p>
-                  <motion.span
-                    className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-sm font-extrabold"
-                    style={{ background: statusBg, color: statusColor, border: `1.5px solid ${statusColor}33`, fontFamily: 'Sora, sans-serif' }}
-                    animate={{ boxShadow: [`0 0 0 0 ${statusColor}00`, `0 0 0 6px ${statusColor}1f`, `0 0 0 0 ${statusColor}00`] }}
-                    transition={{ duration: 2.4, repeat: Infinity, ease: 'easeOut' }}
-                  >
-                    <span className="w-1.5 h-1.5 rounded-full" style={{ background: statusColor }} />
-                    {asistenciaHoy?.estado_ingreso ?? 'OFFLINE'}
-                  </motion.span>
-                </div>
+                <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[13px] font-semibold border capitalize"
+                  style={{ background: statusBg, color: statusColor, borderColor: 'rgba(15,23,42,0.08)' }}>
+                  <span className="w-[7px] h-[7px] rounded-full" style={{ background: statusColor }} />
+                  {isPendingLocal ? 'Pendiente' : cardIsOfflineOnly ? 'Pendiente' : (asistenciaHoy?.estado_ingreso ?? '').toLowerCase()}
+                </span>
               </div>
             </div>
           </motion.div>
 
-          {/* Actions */}
+          {/* Acciones */}
           {cardIsOfflineOnly ? (
-            <div className="flex flex-col gap-3">
-              <motion.div
-                className="anime-fotocheck-action rounded-3xl p-5 text-center"
-                style={{ background: 'rgba(255,247,237,0.92)', border: '1.5px solid rgba(245,158,11,0.28)', boxShadow: 'var(--shadow-sm)' }}
-                initial={{ opacity: 0, y: 12 }} animate={{ opacity: 1, y: 0 }}
-              >
-                <CloudOff size={30} className="mx-auto mb-2" style={{ color: 'var(--amber)' }} />
-                <p className="text-sm font-bold" style={{ color: 'var(--text-2)' }}>
-                  Tu fotocheck esta disponible sin internet. La entrada se guardara en este equipo y se subira cuando vuelva la conexion.
-                </p>
-              </motion.div>
-              <motion.button
-                onClick={handleOfflineEntry}
-                className="anime-fotocheck-action w-full h-[64px] rounded-2xl flex items-center justify-center gap-3 font-black text-base text-white"
-                style={{ background: 'linear-gradient(135deg, #0F766E, #22C55E)', fontFamily: 'Sora, sans-serif', boxShadow: '0 12px 28px rgba(16,185,129,0.28)' }}
-                whileTap={{ scale: 0.97 }}
-              >
-                <CloudOff size={22} />
-                REGISTRAR ENTRADA OFFLINE
-              </motion.button>
-            </div>
+            <motion.button
+              onClick={handleOfflineEntry}
+              className="anime-fotocheck-action w-full h-14 rounded-2xl flex items-center justify-center gap-2.5 font-semibold text-base text-white"
+              style={{ background: 'var(--green)' }}
+              whileTap={{ scale: 0.98 }}
+            >
+              <CloudUpload size={22} />
+              Registrar entrada sin conexión
+            </motion.button>
           ) : asistenciaHoy?.hora_salida ? (
             <motion.div
-              className="anime-fotocheck-action rounded-3xl p-6 flex flex-col items-center text-center"
-              style={{ background: 'var(--green-light)', border: '1.5px solid #6EE7B7', boxShadow: 'var(--shadow-sm)' }}
-              initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }}
+              className="anime-fotocheck-action rounded-2xl p-4 border"
+              style={{ background: 'var(--green-light)', borderColor: 'rgba(5,150,105,0.25)' }}
+              initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }}
             >
-              <CheckCircle2 size={40} style={{ color: 'var(--green)' }} className="mb-3" />
-              <p className="font-semibold" style={{ color: '#047857' }}>Ya marcaste tu salida.</p>
-              <p className="font-black text-lg mt-1" style={{ color: '#065F46', fontFamily: 'Sora, sans-serif' }}>¡Buen descanso!</p>
+              <div className="flex items-center gap-3">
+                <CheckCircle2 size={28} style={{ color: 'var(--green)' }} />
+                <div>
+                  <p className="text-[15px] font-semibold" style={{ color: 'var(--text-1)' }}>Salida registrada</p>
+                  <p className="text-[13px]" style={{ color: 'var(--text-2)' }}>¡Buen descanso!</p>
+                </div>
+              </div>
               {/* Multi-turno: se puede volver a ingresar las veces que haga falta en el día. */}
               <motion.button
                 onClick={() => { setAsistenciaHoy(null); setScanState('ESCANEO') }}
-                className="mt-4 w-full py-3 rounded-2xl flex items-center justify-center gap-2 text-sm font-black text-white"
-                style={{ background: 'linear-gradient(135deg, #0F766E, #22C55E)', boxShadow: '0 12px 26px rgba(16,185,129,0.22)' }}
-                whileTap={{ scale: 0.97 }}
+                className="mt-4 w-full h-12 rounded-2xl flex items-center justify-center gap-2 text-sm font-semibold text-white"
+                style={{ background: 'var(--green)' }}
+                whileTap={{ scale: 0.98 }}
               >
                 <RefreshCw size={16} /> Marcar nuevo ingreso
               </motion.button>
             </motion.div>
           ) : (
-            <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-2.5">
               <motion.button
                 onClick={() => { setIsRemoteExit(false); setNotaTexto(''); setShowNota(true) }}
-                className="anime-fotocheck-action w-full py-4 rounded-2xl flex items-center justify-center gap-2 font-semibold text-sm transition-all border"
-                style={{ background: 'var(--surface)', color: 'var(--text-2)', borderColor: 'var(--border)', boxShadow: 'var(--shadow-sm)' }}
-                whileHover={{ y: -1, boxShadow: 'var(--shadow-md)' }} whileTap={{ scale: 0.98 }}
+                className="anime-fotocheck-action w-full h-[52px] rounded-2xl flex items-center justify-center gap-2 text-sm font-medium border"
+                style={{ background: 'var(--surface)', color: 'var(--text-1)', borderColor: 'var(--border)' }}
+                whileTap={{ scale: 0.98 }}
               >
-                <Edit3 size={16} style={{ color: 'var(--blue)' }} />
-                Añadir nota de permiso
-                <span className="text-xs ml-0.5" style={{ color: 'var(--text-3)' }}>(Opcional)</span>
+                <Edit3 size={18} style={{ color: 'var(--text-2)' }} />
+                Añadir motivo de salida (opcional)
               </motion.button>
 
               <motion.button
                 onClick={handleSalida}
                 disabled={isMarkingExit}
-                className="anime-fotocheck-action w-full h-[64px] rounded-2xl flex items-center justify-center gap-3 font-black text-base disabled:opacity-60 relative overflow-hidden"
-                style={{
-                  background: 'linear-gradient(135deg, #DC2626, #B91C1C)',
-                  color: 'white',
-                  fontFamily: 'Sora, sans-serif',
-                  boxShadow: '0 8px 24px rgba(220,38,38,0.35), 0 2px 6px rgba(220,38,38,0.2)',
-                }}
-                whileHover={{ scale: 1.02, boxShadow: '0 12px 32px rgba(220,38,38,0.45)' }}
-                whileTap={{ scale: 0.97 }}
+                className="anime-fotocheck-action w-full h-14 rounded-2xl flex items-center justify-center gap-2.5 font-semibold text-base text-white disabled:opacity-60"
+                style={{ background: 'var(--red)' }}
+                whileTap={{ scale: 0.98 }}
               >
-                <div className="absolute inset-0 opacity-0 hover:opacity-100 transition-opacity"
-                  style={{ background: 'linear-gradient(135deg, #EF4444, #DC2626)' }} />
                 {isMarkingExit ? (
-                  <>
-                    <Loader2 className="animate-spin relative z-10" size={22} />
-                    <span className="relative z-10">PROCESANDO...</span>
-                  </>
+                  <><Loader2 className="animate-spin" size={22} /> Procesando...</>
                 ) : (
-                  <>
-                    <LogOut size={22} className="relative z-10" />
-                    <span className="relative z-10">MARCAR SALIDA</span>
-                  </>
+                  <><LogOut size={22} /> Marcar salida</>
                 )}
               </motion.button>
             </div>
@@ -3118,7 +3026,7 @@ export default function EscanerWeb() {
                   <HardHat size={24} style={{ color: 'var(--blue)' }} />
                 </div>
                 <div>
-                  <h3 className="font-black text-base" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Ingreso a Obra</h3>
+                  <h3 className="font-bold text-base" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Ingreso a Obra</h3>
                   <p className="text-xs" style={{ color: 'var(--text-3)' }}>Indica el nombre del proyecto</p>
                 </div>
                 <button onClick={() => { if (!guardando) { setShowObra(false); setNotaTexto('') } }} className="ml-auto w-8 h-8 rounded-full flex items-center justify-center" style={{ background: 'var(--surface-2)', color: 'var(--text-3)' }}>
@@ -3163,7 +3071,7 @@ export default function EscanerWeb() {
                   <Store size={24} style={{ color: 'var(--purple)' }} />
                 </div>
                 <div>
-                  <h3 className="font-black text-base" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Diligencia Externa</h3>
+                  <h3 className="font-bold text-base" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Diligencia Externa</h3>
                   <p className="text-xs" style={{ color: 'var(--text-3)' }}>Indica el motivo o lugar</p>
                 </div>
                 <button onClick={() => { if (!guardando) { setShowExterno(false); setNotaTexto('') } }} className="ml-auto w-8 h-8 rounded-full flex items-center justify-center" style={{ background: 'var(--surface-2)', color: 'var(--text-3)' }}>
@@ -3208,7 +3116,7 @@ export default function EscanerWeb() {
                   <Moon size={22} style={{ color: 'var(--amber)' }} />
                 </div>
                 <div>
-                  <h3 className="font-black text-base" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Turno Nocturno</h3>
+                  <h3 className="font-bold text-base" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Turno Nocturno</h3>
                   <p className="text-xs" style={{ color: 'var(--text-3)' }}>Registro 7 PM – 11 PM · Siempre puntual</p>
                 </div>
                 <button onClick={() => { if (!guardando) { setShowNocturno(false); setNotaTexto(''); setHoraSeleccionada(null) } }}
@@ -3226,7 +3134,7 @@ export default function EscanerWeb() {
                     <motion.button
                       key={hora}
                       onClick={() => setHoraSeleccionada(hora)}
-                      className="py-2.5 rounded-xl text-xs font-black transition-all"
+                      className="py-2.5 rounded-xl text-xs font-bold transition-all"
                       style={{
                         background: sel ? 'var(--amber)' : 'var(--surface-2)',
                         color:      sel ? 'white' : 'var(--text-2)',
@@ -3285,7 +3193,7 @@ export default function EscanerWeb() {
                   {isRemoteExit ? <MapPin size={22} style={{ color: 'var(--red)' }} /> : <Edit3 size={22} style={{ color: 'var(--text-2)' }} />}
                 </div>
                 <div>
-                  <h3 className="font-black text-base" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>
+                  <h3 className="font-bold text-base" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>
                     {isRemoteExit ? 'Salida Remota' : 'Añadir Nota'}
                   </h3>
                   {isRemoteExit && <p className="text-xs font-bold" style={{ color: 'var(--red)' }}>Estás fuera de la oficina</p>}
@@ -3324,46 +3232,40 @@ export default function EscanerWeb() {
             onClick={() => setShowCalendar(false)}>
             <motion.div
               className="w-full max-w-lg p-5 pt-[calc(env(safe-area-inset-top)+16px)] pb-[calc(env(safe-area-inset-bottom)+24px)] flex flex-col"
-              style={{ background: 'var(--surface)', boxShadow: '0 -20px 60px rgba(30,27,75,0.15)', maxHeight: '90vh', border: '1.5px solid var(--border)', borderBottom: 'none' }}
+              style={{ background: 'var(--bg)', minHeight: '100vh' }}
               initial={{ y: '100%' }} animate={{ y: 0 }} exit={{ y: '100%' }}
               transition={{ type: 'spring', stiffness: 380, damping: 36 }}
               onClick={e => e.stopPropagation()}
             >
-              <button onClick={() => setShowCalendar(false)} className="w-12 h-12 rounded-2xl flex items-center justify-center mb-4" style={{ background: '#0F172A', color: 'white' }}>
-                <ChevronLeft size={22} />
-              </button>
-
-              {/* Header */}
-              <div className="flex items-center justify-between mb-6">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: 'var(--blue-light)', border: '1.5px solid var(--border-2)' }}>
-                    <Calendar size={22} style={{ color: 'var(--blue)' }} />
-                  </div>
-                  <div>
-                    <h3 className="font-black text-lg" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Mi Historial</h3>
-                    <p className="text-sm font-semibold capitalize" style={{ color: 'var(--text-3)' }}>
-                      {format(targetDate, 'MMMM yyyy', { locale: es })}
-                    </p>
-                  </div>
+              <ScreenTopBar
+                title="Calendario"
+                subtitle="Asistencias, salidas y ausencias"
+                icon={<Calendar size={20} />}
+                onBack={() => setShowCalendar(false)}
+              />
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <p className="text-xl font-bold capitalize" style={{ color: 'var(--text-1)' }}>{format(targetDate, 'MMMM yyyy', { locale: es })}</p>
+                  <p className="text-xs" style={{ color: 'var(--text-2)' }}>Toca un día para ver el detalle</p>
                 </div>
                 <div className="flex gap-2">
-                  <motion.button onClick={() => setTargetDate(new Date(targetDate.getFullYear(), targetDate.getMonth() - 1))}
-                    className="w-9 h-9 rounded-xl flex items-center justify-center border"
-                    style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text-2)' }}
-                    whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
+                  <button onClick={() => setTargetDate(new Date(targetDate.getFullYear(), targetDate.getMonth() - 1))}
+                    aria-label="Mes anterior"
+                    className="w-10 h-10 rounded-full flex items-center justify-center border"
+                    style={{ background: 'var(--surface)', borderColor: 'var(--border)', color: 'var(--text-1)' }}>
                     <ChevronLeft size={18} />
-                  </motion.button>
-                  <motion.button
+                  </button>
+                  <button
                     onClick={() => {
                       const next = new Date(targetDate.getFullYear(), targetDate.getMonth() + 1)
                       if (next <= new Date()) setTargetDate(next)
                     }}
                     disabled={new Date(targetDate.getFullYear(), targetDate.getMonth() + 1) > new Date()}
-                    className="w-9 h-9 rounded-xl flex items-center justify-center border disabled:opacity-30"
-                    style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text-2)' }}
-                    whileHover={{ scale: 1.1 }} whileTap={{ scale: 0.9 }}>
+                    aria-label="Mes siguiente"
+                    className="w-10 h-10 rounded-full flex items-center justify-center border disabled:opacity-30"
+                    style={{ background: 'var(--surface)', borderColor: 'var(--border)', color: 'var(--text-1)' }}>
                     <ChevronRight size={18} />
-                  </motion.button>
+                  </button>
                 </div>
               </div>
 
@@ -3404,40 +3306,26 @@ export default function EscanerWeb() {
             onClick={() => !submittingVacation && setShowVacations(false)}>
             <motion.div
               className="w-full max-w-lg p-5 pt-[calc(env(safe-area-inset-top)+16px)] pb-[calc(env(safe-area-inset-bottom)+24px)] flex flex-col"
-              style={{ background: 'linear-gradient(180deg, #F8FBFF, #EEF8F4, #EAF2FF)', minHeight: '100vh' }}
+              style={{ background: 'var(--bg)', minHeight: '100vh' }}
               initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
               transition={{ type: 'spring', stiffness: 380, damping: 36 }}
               onClick={e => e.stopPropagation()}
             >
-              <button onClick={() => !submittingVacation && setShowVacations(false)} className="w-12 h-12 rounded-2xl flex items-center justify-center mb-4" style={{ background: '#0F172A', color: 'white' }}>
-                <ChevronLeft size={22} />
-              </button>
-              <div className="flex items-center justify-between gap-3 mb-5">
-                <div className="flex items-center gap-3">
-                  <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: 'var(--blue-light)', border: '1.5px solid var(--border-2)' }}>
-                    <PlaneTakeoff size={22} style={{ color: 'var(--blue)' }} />
-                  </div>
-                  <div>
-                    <h3 className="font-black text-lg" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Mis Vacaciones</h3>
-                    <p className="text-sm font-semibold" style={{ color: 'var(--text-3)' }}>Consulta tu saldo y solicita dias desde aqui.</p>
-                  </div>
-                </div>
-                <div className="flex gap-2">
-                  <motion.button
-                    onClick={() => void cargarVacaciones(perfil.dni, true)}
-                    className="w-10 h-10 rounded-2xl flex items-center justify-center border transition-all"
-                    style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text-2)' }}
-                    whileHover={{ scale: 1.06 }} whileTap={{ scale: 0.94 }}>
-                    <RefreshCw size={17} />
-                  </motion.button>
+              <ScreenTopBar
+                title="Vacaciones"
+                subtitle="Saldo y solicitudes"
+                icon={<PlaneTakeoff size={20} />}
+                onBack={() => !submittingVacation && setShowVacations(false)}
+                right={
                   <button
-                    onClick={() => !submittingVacation && setShowVacations(false)}
-                    className="w-10 h-10 rounded-2xl flex items-center justify-center border"
-                    style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text-2)' }}>
-                    <X size={16} />
+                    onClick={() => void cargarVacaciones(perfil.dni, true)}
+                    aria-label="Recargar"
+                    className="w-10 h-10 rounded-full flex items-center justify-center"
+                    style={{ color: 'var(--text-2)' }}>
+                    <RefreshCw size={18} />
                   </button>
-                </div>
-              </div>
+                }
+              />
               <div className="overflow-y-auto scrollbar-hide flex-1 pr-1">
                 {loadingVacaciones ? (
                   <div className="flex min-h-[240px] items-center justify-center">
@@ -3452,7 +3340,7 @@ export default function EscanerWeb() {
                     )}
                     {vacacionesSaldo ? (
                       <div className="rounded-3xl p-5" style={{ background: 'var(--surface-2)', border: '1.5px solid var(--border)' }}>
-                        <p className="text-lg font-black" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>
+                        <p className="text-lg font-bold" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>
                           {vacacionesSaldo.trabajador_nombre}
                         </p>
                         <p className="text-sm font-semibold mt-1" style={{ color: 'var(--text-3)' }}>
@@ -3474,16 +3362,16 @@ export default function EscanerWeb() {
                           })().map((item) => (
                             <div key={item.label} className="rounded-2xl p-4 border" style={{ background: item.bg, borderColor: 'var(--border)' }}>
                               <div className="flex items-center justify-between gap-3">
-                                <span className="text-[11px] font-black uppercase tracking-[0.12em]" style={{ color: item.color }}>{item.label}</span>
+                                <span className="text-[11px] font-bold uppercase tracking-[0.12em]" style={{ color: item.color }}>{item.label}</span>
                                 <span style={{ color: item.color }}>{item.icon}</span>
                               </div>
-                              <p className="mt-3 text-2xl font-black" style={{ color: item.color, fontFamily: 'Sora, sans-serif' }}>{item.value}</p>
+                              <p className="mt-3 text-2xl font-bold" style={{ color: item.color, fontFamily: 'Sora, sans-serif' }}>{item.value}</p>
                             </div>
                           ))}
                         </div>
                         <div className="mt-4 rounded-2xl px-4 py-3 border" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
-                          <p className="text-[10px] font-black uppercase tracking-[0.14em]" style={{ color: 'var(--text-3)' }}>Vencimiento actual</p>
-                          <p className="mt-1 text-sm font-black" style={{ color: 'var(--text-1)' }}>{formatShortDate(vacacionesSaldo.fecha_vencimiento)}</p>
+                          <p className="text-[10px] font-bold uppercase tracking-[0.14em]" style={{ color: 'var(--text-3)' }}>Vencimiento actual</p>
+                          <p className="mt-1 text-sm font-bold" style={{ color: 'var(--text-1)' }}>{formatShortDate(vacacionesSaldo.fecha_vencimiento)}</p>
                           <p className="mt-1 text-xs font-medium" style={{ color: 'var(--text-3)' }}>
                             Al aprobarse, los dias bajan de pendientes y suben a gozados en tiempo real.
                           </p>
@@ -3491,7 +3379,7 @@ export default function EscanerWeb() {
                       </div>
                     ) : (
                       <div className="rounded-3xl p-5 text-center" style={{ background: 'var(--surface-2)', border: '1.5px dashed var(--border)' }}>
-                        <p className="font-black text-base" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Sin saldo importado</p>
+                        <p className="font-bold text-base" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Sin saldo importado</p>
                         <p className="text-sm mt-2" style={{ color: 'var(--text-3)' }}>
                           Todavia no encontramos vacaciones cargadas para tu DNI en la hoja 2026.
                         </p>
@@ -3501,23 +3389,23 @@ export default function EscanerWeb() {
                       <div className="rounded-3xl p-5" style={{ background: 'var(--surface)', border: '1.5px solid var(--border)', boxShadow: 'var(--shadow-sm)' }}>
                         <div className="flex items-start justify-between gap-3 mb-4">
                           <div>
-                            <h4 className="font-black text-base" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Solicitar vacaciones</h4>
+                            <h4 className="font-bold text-base" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Solicitar vacaciones</h4>
                             <p className="text-xs font-semibold mt-1" style={{ color: 'var(--text-3)' }}>
                               Puedes pedirlas aunque tu saldo quede en positivo o negativo.
                             </p>
                           </div>
-                          <span className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-black" style={{ background: 'var(--blue-light)', color: 'var(--blue)' }}>
+                          <span className="inline-flex items-center rounded-full px-3 py-1 text-[11px] font-bold" style={{ background: 'var(--blue-light)', color: 'var(--blue)' }}>
                             {diasSolicitadosPreview > 0 ? `${diasSolicitadosPreview} dia(s)` : 'Rango invalido'}
                           </span>
                         </div>
                         <div className="grid grid-cols-2 gap-3">
                           <label className="rounded-2xl p-4 border" style={{ background: 'var(--surface-2)', borderColor: 'var(--border)' }}>
-                            <p className="text-[10px] font-black uppercase tracking-[0.12em]" style={{ color: 'var(--text-3)' }}>Desde</p>
+                            <p className="text-[10px] font-bold uppercase tracking-[0.12em]" style={{ color: 'var(--text-3)' }}>Desde</p>
                             <input type="date" value={vacationStart} onChange={e => setVacationStart(e.target.value)}
                               className="mt-2 w-full bg-transparent text-sm font-bold outline-none" style={{ color: 'var(--text-1)' }} />
                           </label>
                           <label className="rounded-2xl p-4 border" style={{ background: 'var(--surface-2)', borderColor: 'var(--border)' }}>
-                            <p className="text-[10px] font-black uppercase tracking-[0.12em]" style={{ color: 'var(--text-3)' }}>Hasta</p>
+                            <p className="text-[10px] font-bold uppercase tracking-[0.12em]" style={{ color: 'var(--text-3)' }}>Hasta</p>
                             <input type="date" value={vacationEnd} onChange={e => setVacationEnd(e.target.value)}
                               className="mt-2 w-full bg-transparent text-sm font-bold outline-none" style={{ color: 'var(--text-1)' }} />
                           </label>
@@ -3540,7 +3428,7 @@ export default function EscanerWeb() {
                         <motion.button
                           onClick={handleSolicitarVacaciones}
                           disabled={submittingVacation || diasSolicitadosPreview <= 0}
-                          className="mt-4 w-full py-4 rounded-2xl font-black text-sm text-white flex items-center justify-center gap-2 disabled:opacity-50"
+                          className="mt-4 w-full py-4 rounded-2xl font-bold text-sm text-white flex items-center justify-center gap-2 disabled:opacity-50"
                           style={{ background: 'var(--blue)', boxShadow: 'var(--shadow-md)' }}
                           whileHover={{ scale: 1.01 }} whileTap={{ scale: 0.98 }}
                         >
@@ -3549,7 +3437,7 @@ export default function EscanerWeb() {
                       </div>
                     )}
                     <div className="rounded-3xl p-5" style={{ background: 'var(--surface)', border: '1.5px solid var(--border)', boxShadow: 'var(--shadow-sm)' }}>
-                      <h4 className="font-black text-base" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Historial de solicitudes</h4>
+                      <h4 className="font-bold text-base" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Historial de solicitudes</h4>
                       <p className="text-xs font-semibold mt-1 mb-4" style={{ color: 'var(--text-3)' }}>
                         Cuando una solicitud queda aprobada, tu saldo visible se recalcula automaticamente.
                       </p>
@@ -3567,14 +3455,14 @@ export default function EscanerWeb() {
                               <div key={item.id} className="rounded-2xl p-4 border" style={{ background: 'var(--surface-2)', borderColor: 'var(--border)' }}>
                                 <div className="flex items-start justify-between gap-3">
                                   <div>
-                                    <p className="text-sm font-black" style={{ color: 'var(--text-1)' }}>
+                                    <p className="text-sm font-bold" style={{ color: 'var(--text-1)' }}>
                                       {formatVacationRangeLabel(item.fecha_inicio, item.fecha_fin)}
                                     </p>
                                     <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
                                       {num(item.dias_solicitados)} dia(s)
                                     </p>
                                   </div>
-                                  <span className="inline-flex rounded-full px-3 py-1 text-[10px] font-black uppercase"
+                                  <span className="inline-flex rounded-full px-3 py-1 text-[10px] font-bold uppercase"
                                     style={{ background: badgeBg, color: badgeColor }}>
                                     {status === 'cancelada' ? 'rechazada' : status}
                                   </span>
@@ -3582,8 +3470,8 @@ export default function EscanerWeb() {
                                 {(item.saldo_antes != null || item.saldo_despues != null) && (
                                   <div className="mt-3 flex items-center justify-between rounded-xl px-3 py-2 border"
                                     style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
-                                    <span className="text-[11px] font-black uppercase tracking-[0.12em]" style={{ color: 'var(--text-3)' }}>Saldo</span>
-                                    <span className="text-sm font-black" style={{ color: 'var(--text-1)' }}>
+                                    <span className="text-[11px] font-bold uppercase tracking-[0.12em]" style={{ color: 'var(--text-3)' }}>Saldo</span>
+                                    <span className="text-sm font-bold" style={{ color: 'var(--text-1)' }}>
                                       {item.saldo_antes ?? '—'} {'->'} {item.saldo_despues ?? '—'}
                                     </span>
                                   </div>
@@ -3625,19 +3513,17 @@ export default function EscanerWeb() {
               transition={{ type: 'spring', stiffness: 450, damping: 30 }}
               onClick={e => e.stopPropagation()}
             >
-              <div className="absolute top-0 left-0 right-0 h-24 opacity-40"
-                style={{ background: 'linear-gradient(to bottom, rgba(37,99,235,0.2), transparent)' }} />
               <div className="flex flex-col items-center text-center relative z-10">
                 <div className="w-16 h-16 rounded-full flex items-center justify-center mb-4" style={{ background: 'var(--blue-light)' }}>
                   <PlaneTakeoff size={32} style={{ color: 'var(--blue)' }} />
                 </div>
-                <h3 className="text-2xl font-black capitalize" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>
+                <h3 className="text-2xl font-bold capitalize" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>
                   {format(parseISO(selectedVacationDay.fecha), "EEEE dd", { locale: es })}
                 </h3>
                 <p className="text-sm font-medium capitalize mt-0.5" style={{ color: 'var(--text-3)' }}>
                   {format(parseISO(selectedVacationDay.fecha), "MMMM yyyy", { locale: es })}
                 </p>
-                <span className="mt-3 px-4 py-1.5 rounded-lg text-xs font-black tracking-wider uppercase"
+                <span className="mt-3 px-4 py-1.5 rounded-lg text-xs font-bold tracking-wider uppercase"
                   style={{ background: 'var(--blue-light)', color: 'var(--blue)', border: '1.5px solid #93C5FD' }}>
                   Vacaciones aprobadas
                 </span>
@@ -3645,7 +3531,7 @@ export default function EscanerWeb() {
                   {selectedVacationDay.solicitudes.map((item) => (
                     <div key={item.id} className="rounded-2xl p-4 text-left"
                       style={{ background: 'var(--surface-2)', border: '1.5px solid var(--border)' }}>
-                      <p className="text-sm font-black" style={{ color: 'var(--text-1)' }}>
+                      <p className="text-sm font-bold" style={{ color: 'var(--text-1)' }}>
                         {formatVacationRangeLabel(item.fecha_inicio, item.fecha_fin)}
                       </p>
                       <p className="text-xs mt-1" style={{ color: 'var(--text-3)' }}>
@@ -3679,55 +3565,46 @@ export default function EscanerWeb() {
             onClick={() => !submittingMedical && setShowMedicalLeave(false)}>
             <motion.div
               className="w-full max-w-lg p-5 pt-[calc(env(safe-area-inset-top)+16px)] pb-[calc(env(safe-area-inset-bottom)+24px)] flex flex-col"
-              style={{ background: 'linear-gradient(180deg, #F8FBFF, #F5F3FF, #ECFEFF)', minHeight: '100vh' }}
+              style={{ background: 'var(--bg)', minHeight: '100vh' }}
               initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
               transition={{ type: 'spring', stiffness: 380, damping: 36 }}
               onClick={e => e.stopPropagation()}
             >
-              <div className="flex items-center gap-3 mb-5">
-                <button onClick={() => !submittingMedical && setShowMedicalLeave(false)} className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ background: '#0F172A', color: 'white' }}>
-                  <ChevronLeft size={22} />
-                </button>
-                <div className="w-14 h-14 rounded-2xl flex items-center justify-center overflow-hidden border" style={{ background: 'white', borderColor: '#DDD6FE' }}>
-                  <img src="/icons-web/descanso-medico.gif" alt="" className="w-12 h-12 object-contain" />
-                </div>
-                <div className="min-w-0">
-                  <h3 className="font-black text-xl" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Descanso medico</h3>
-                  <p className="text-sm font-semibold" style={{ color: 'var(--text-3)' }}>Sustenta con foto y comentario para RRHH.</p>
-                </div>
-              </div>
+              <ScreenTopBar
+                title="Descanso médico"
+                subtitle="Envía tu certificado a RRHH"
+                icon={<Stethoscope size={20} />}
+                onBack={() => !submittingMedical && setShowMedicalLeave(false)}
+              />
 
               <div className="overflow-y-auto scrollbar-hide flex-1 pr-1 space-y-5">
                 <motion.div
-                  className="rounded-[30px] p-5 border relative overflow-hidden"
-                  style={{ background: 'rgba(255,255,255,0.88)', borderColor: '#DDD6FE', boxShadow: '0 20px 50px rgba(124,58,237,0.12)' }}
+                  className="rounded-2xl p-5 border relative overflow-hidden"
+                  style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
                   initial={{ opacity: 0, y: 16 }} animate={{ opacity: 1, y: 0 }}
                 >
-                  <motion.div className="absolute -right-16 -top-16 h-36 w-36 rounded-full opacity-25 blur-2xl"
-                    style={{ background: 'linear-gradient(135deg, #7C3AED, #EC4899)' }}
-                    animate={{ scale: [1, 1.25, 1] }}
-                    transition={{ duration: 3, repeat: Infinity, ease: 'easeInOut' }}
-                  />
+                  <p className="text-base font-semibold mb-1" style={{ color: 'var(--text-1)' }}>Nueva solicitud</p>
+                  <p className="text-[13px] mb-4" style={{ color: 'var(--text-2)' }}>Sube una evidencia y RRHH la revisará desde el panel web.</p>
 
                   <div className="grid grid-cols-2 gap-3 relative z-10">
                     <label className="space-y-2">
-                      <span className="text-[10px] font-black uppercase tracking-[0.16em]" style={{ color: 'var(--text-3)' }}>Desde</span>
+                      <span className="text-[10px] font-bold uppercase tracking-[0.16em]" style={{ color: 'var(--text-3)' }}>Desde</span>
                       <input type="date" value={medicalStart} onChange={(e) => {
                         setMedicalStart(e.target.value)
                         if (medicalEnd < e.target.value) setMedicalEnd(e.target.value)
-                      }} className="w-full rounded-2xl border px-3 py-3 text-sm font-black outline-none" style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text-1)' }} />
+                      }} className="w-full rounded-2xl border px-3 py-3 text-sm font-bold outline-none" style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text-1)' }} />
                     </label>
                     <label className="space-y-2">
-                      <span className="text-[10px] font-black uppercase tracking-[0.16em]" style={{ color: 'var(--text-3)' }}>Hasta</span>
+                      <span className="text-[10px] font-bold uppercase tracking-[0.16em]" style={{ color: 'var(--text-3)' }}>Hasta</span>
                       <input type="date" value={medicalEnd} onChange={(e) => {
                         setMedicalEnd(e.target.value)
                         if (medicalStart > e.target.value) setMedicalStart(e.target.value)
-                      }} className="w-full rounded-2xl border px-3 py-3 text-sm font-black outline-none" style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text-1)' }} />
+                      }} className="w-full rounded-2xl border px-3 py-3 text-sm font-bold outline-none" style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text-1)' }} />
                     </label>
                   </div>
 
                   <label className="mt-4 block space-y-2 relative z-10">
-                    <span className="text-[10px] font-black uppercase tracking-[0.16em]" style={{ color: 'var(--text-3)' }}>Comentario</span>
+                    <span className="text-[10px] font-bold uppercase tracking-[0.16em]" style={{ color: 'var(--text-3)' }}>Comentario</span>
                     <textarea
                       value={medicalComment}
                       onChange={(e) => setMedicalComment(e.target.value.slice(0, 280))}
@@ -3747,12 +3624,12 @@ export default function EscanerWeb() {
                   }} />
 
                   <div className="mt-4 grid grid-cols-2 gap-3 relative z-10">
-                    <motion.button type="button" onClick={() => medicalCameraRef.current?.click()} className="rounded-2xl border px-3 py-4 flex flex-col items-center gap-2 font-black text-sm"
-                      style={{ background: '#F5F3FF', color: '#7C3AED', borderColor: '#DDD6FE' }} whileTap={{ scale: 0.97 }}>
+                    <motion.button type="button" onClick={() => medicalCameraRef.current?.click()} className="rounded-2xl border px-3 py-4 flex flex-col items-center gap-2 font-bold text-sm"
+                      style={{ background: 'var(--surface-2)', color: 'var(--blue)', borderColor: 'var(--border)' }} whileTap={{ scale: 0.97 }}>
                       <Camera size={22} /> Tomar foto
                     </motion.button>
-                    <motion.button type="button" onClick={() => medicalGalleryRef.current?.click()} className="rounded-2xl border px-3 py-4 flex flex-col items-center gap-2 font-black text-sm"
-                      style={{ background: '#FDF2F8', color: '#DB2777', borderColor: '#FBCFE8' }} whileTap={{ scale: 0.97 }}>
+                    <motion.button type="button" onClick={() => medicalGalleryRef.current?.click()} className="rounded-2xl border px-3 py-4 flex flex-col items-center gap-2 font-bold text-sm"
+                      style={{ background: 'var(--surface-2)', color: 'var(--blue)', borderColor: 'var(--border)' }} whileTap={{ scale: 0.97 }}>
                       <Upload size={22} /> Subir fotos
                     </motion.button>
                   </div>
@@ -3764,10 +3641,10 @@ export default function EscanerWeb() {
                         style={{ background: '#DCFCE7', borderColor: '#86EFAC', color: '#166534' }}>
                         <CheckCircle2 size={20} />
                         <div className="flex-1">
-                          <p className="font-black text-sm">{medicalFiles.length} evidencia(s) lista(s)</p>
+                          <p className="font-bold text-sm">{medicalFiles.length} evidencia(s) lista(s)</p>
                           <p className="text-xs font-semibold opacity-75">Maximo 8 fotos por solicitud</p>
                         </div>
-                        <button type="button" onClick={() => setMedicalFiles([])} className="text-xs font-black">Limpiar</button>
+                        <button type="button" onClick={() => setMedicalFiles([])} className="text-xs font-bold">Limpiar</button>
                       </motion.div>
                     )}
                   </AnimatePresence>
@@ -3775,18 +3652,18 @@ export default function EscanerWeb() {
                   <motion.button
                     onClick={submitMedicalLeave}
                     disabled={submittingMedical}
-                    className="relative z-10 mt-4 w-full py-4 rounded-2xl font-black text-sm text-white flex items-center justify-center gap-2 disabled:opacity-60"
-                    style={{ background: 'linear-gradient(135deg, #7C3AED, #EC4899)', boxShadow: '0 16px 34px rgba(124,58,237,0.24)' }}
+                    className="relative z-10 mt-4 w-full py-4 rounded-2xl font-bold text-sm text-white flex items-center justify-center gap-2 disabled:opacity-60"
+                    style={{ background: 'var(--blue)' }}
                     whileTap={{ scale: 0.98 }}>
-                    {submittingMedical ? <Loader2 className="animate-spin" size={18} /> : <><Send size={17} /> ENVIAR A RRHH</>}
+                    {submittingMedical ? <Loader2 className="animate-spin" size={18} /> : <><Send size={17} /> Enviar a RRHH</>}
                   </motion.button>
                 </motion.div>
 
-                <div className="rounded-[28px] border p-5" style={{ background: 'rgba(255,255,255,0.82)', borderColor: 'var(--border)' }}>
+                <div className="rounded-2xl border p-5" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
                   <div className="flex items-center justify-between gap-3 mb-4">
                     <div>
-                      <p className="text-[10px] font-black uppercase tracking-[0.18em]" style={{ color: '#7C3AED' }}>Historial</p>
-                      <h4 className="font-black text-lg" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Tus solicitudes</h4>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: 'var(--text-3)' }}>Historial</p>
+                      <h4 className="font-bold text-lg" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Tus solicitudes</h4>
                     </div>
                     <button onClick={() => perfil && cargarDescansosMedicos(perfil.dni, true)} className="w-10 h-10 rounded-2xl border flex items-center justify-center" style={{ background: 'white', borderColor: 'var(--border)', color: 'var(--text-2)' }}>
                       {loadingMedical ? <Loader2 className="animate-spin" size={17} /> : <RefreshCw size={17} />}
@@ -3816,15 +3693,15 @@ export default function EscanerWeb() {
                                 <Stethoscope size={21} />
                               </div>
                               <div className="min-w-0 flex-1">
-                                <p className="font-black text-sm" style={{ color: 'var(--text-1)' }}>{item.fecha_inicio} al {item.fecha_fin}</p>
+                                <p className="font-bold text-sm" style={{ color: 'var(--text-1)' }}>{item.fecha_inicio} al {item.fecha_fin}</p>
                                 <p className="text-xs font-semibold mt-1 line-clamp-2" style={{ color: 'var(--text-3)' }}>{item.comentario || 'Sin comentario'}</p>
                               </div>
-                              <span className="rounded-full px-2.5 py-1 text-[10px] font-black uppercase" style={{ background: statusBg, color: statusColor }}>
+                              <span className="rounded-full px-2.5 py-1 text-[10px] font-bold uppercase" style={{ background: statusBg, color: statusColor }}>
                                 {status}
                               </span>
                             </div>
                             {urls.length > 0 && (
-                              <button onClick={() => window.open(urls[0], '_blank', 'noopener,noreferrer')} className="mt-3 w-full rounded-2xl border px-3 py-2.5 flex items-center justify-center gap-2 text-xs font-black"
+                              <button onClick={() => window.open(urls[0], '_blank', 'noopener,noreferrer')} className="mt-3 w-full rounded-2xl border px-3 py-2.5 flex items-center justify-center gap-2 text-xs font-bold"
                                 style={{ background: 'var(--surface-2)', borderColor: 'var(--border)', color: 'var(--text-2)' }}>
                                 <ImageIcon size={16} /> Ver evidencia enviada ({urls.length})
                               </button>
@@ -3892,15 +3769,14 @@ export default function EscanerWeb() {
         {showUpdates && (
           <WorkerInfoScreen
             title="Actualizaciones"
-            subtitle="Libro de novedades recientes de la app."
-            gif="/icons-web/actualizaciones.gif"
-            color="#0F766E"
+            subtitle="Novedades de la app"
+            icon={<Megaphone size={20} />}
             onClose={() => setShowUpdates(false)}
             items={[
               ['v5.0 - Cumpleaños', 'Mira qué cumpleaños se acercan y el día que cumplen tus compañeros.'],
               ['v4.9 - Ranking separado', 'Ranking puntual y ranking tardanza ahora son accesos independientes.'],
               ['v4.8 - Descanso medico', 'Puedes subir una o varias evidencias y revisar el historial de aprobacion.'],
-              ['v4.7 - Sidebar animado', 'El panel rapido incluye GIFs y tarjetas modernas.'],
+              ['v4.7 - Nuevo diseño', 'Menú, fotocheck y pantallas con un diseño más claro y profesional.'],
               ['v4.6 - Modo offline', 'El fotocheck y la asistencia pueden mantenerse hasta recuperar conexion.'],
               ['v4.5 - Vacaciones en tiempo real', 'Las solicitudes y estados se actualizan sin cerrar la app.'],
             ]}
@@ -3965,14 +3841,14 @@ export default function EscanerWeb() {
                     : <AlertTriangle size={36} style={{ color: 'var(--red)' }} />}
                 </div>
 
-                <h3 className="text-2xl font-black capitalize" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>
+                <h3 className="text-2xl font-bold capitalize" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>
                   {selectedDay.fecha ? format(parseISO(selectedDay.fecha), "EEEE dd", { locale: es }) : '—'}
                 </h3>
                 <p className="text-sm font-medium capitalize mt-0.5" style={{ color: 'var(--text-3)' }}>
                   {selectedDay.fecha ? format(parseISO(selectedDay.fecha), "MMMM yyyy", { locale: es }) : ''}
                 </p>
 
-                <span className="mt-3 px-4 py-1.5 rounded-lg text-xs font-black tracking-wider uppercase"
+                <span className="mt-3 px-4 py-1.5 rounded-lg text-xs font-bold tracking-wider uppercase"
                   style={{
                     background: selectedDay.estado_ingreso === 'PUNTUAL' ? 'var(--green-light)' : 'var(--red-light)',
                     color: selectedDay.estado_ingreso === 'PUNTUAL' ? 'var(--green)' : 'var(--red)',
@@ -3988,15 +3864,15 @@ export default function EscanerWeb() {
                   ].map(({ label, time }) => (
                     <div key={label} className="flex-1 rounded-2xl p-4 text-center"
                       style={{ background: 'var(--surface-2)', border: '1.5px solid var(--border)' }}>
-                      <p className="text-[10px] font-black uppercase tracking-widest mb-1" style={{ color: 'var(--text-3)' }}>{label}</p>
-                      <p className="font-black text-lg" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>{time}</p>
+                      <p className="text-[10px] font-bold uppercase tracking-widest mb-1" style={{ color: 'var(--text-3)' }}>{label}</p>
+                      <p className="font-bold text-lg" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>{time}</p>
                     </div>
                   ))}
                 </div>
 
                 {selectedDay.notas && (
                   <div className="w-full mt-4 p-4 rounded-2xl text-left" style={{ background: 'var(--surface-2)', border: '1.5px solid var(--border)' }}>
-                    <p className="text-xs font-black uppercase tracking-wider mb-2" style={{ color: 'var(--text-3)' }}>Notas</p>
+                    <p className="text-xs font-bold uppercase tracking-wider mb-2" style={{ color: 'var(--text-3)' }}>Notas</p>
                     <p className="text-sm font-medium leading-relaxed whitespace-pre-line" style={{ color: 'var(--text-2)' }}>{selectedDay.notas}</p>
                   </div>
                 )}
@@ -4022,36 +3898,31 @@ export default function EscanerWeb() {
             onClick={() => setShowLogros(false)}>
             <motion.div
               className="w-full max-w-lg p-5 pt-[calc(env(safe-area-inset-top)+16px)] pb-[calc(env(safe-area-inset-bottom)+24px)] flex flex-col"
-              style={{ background: 'linear-gradient(180deg, #F8FBFF, #FFF7E6, #EEF8F4)', minHeight: '100vh' }}
+              style={{ background: 'var(--bg)', minHeight: '100vh' }}
               initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }}
               transition={{ type: 'spring', stiffness: 380, damping: 36 }}
               onClick={e => e.stopPropagation()}
             >
-              <button onClick={() => setShowLogros(false)} className="w-12 h-12 rounded-2xl flex items-center justify-center mb-4" style={{ background: '#0F172A', color: 'white' }}>
-                <ChevronLeft size={22} />
-              </button>
+              <ScreenTopBar
+                title="Logros"
+                subtitle="Tus insignias y progreso"
+                icon={<Trophy size={20} />}
+                onBack={() => setShowLogros(false)}
+              />
 
-              <div className="flex items-center gap-4 mb-5">
-                <div className="w-14 h-14 rounded-2xl flex items-center justify-center"
-                  style={{ background: 'var(--gold-light)', border: '1.5px solid #FDE68A' }}>
-                  <Trophy size={28} style={{ color: 'var(--gold)' }} />
+              <div className="rounded-2xl border p-4 mb-4" style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}>
+                <p className="flex items-baseline gap-1.5">
+                  <span className="text-[28px] font-bold leading-none" style={{ color: 'var(--text-1)' }}>{unlockedLogros.length}</span>
+                  <span className="text-sm" style={{ color: 'var(--text-2)' }}>de {TODOS_LOS_LOGROS.length} insignias desbloqueadas</span>
+                </p>
+                <div className="w-full h-1.5 rounded-full overflow-hidden mt-3" style={{ background: 'var(--surface-2)' }}>
+                  <motion.div className="h-full rounded-full"
+                    style={{ background: 'var(--gold)' }}
+                    initial={{ width: 0 }}
+                    animate={{ width: `${(unlockedLogros.length / TODOS_LOS_LOGROS.length) * 100}%` }}
+                    transition={{ duration: 0.8, ease: 'easeOut', delay: 0.15 }}
+                  />
                 </div>
-                <div>
-                  <h3 className="font-black text-xl" style={{ color: 'var(--text-1)', fontFamily: 'Sora, sans-serif' }}>Mis Trofeos</h3>
-                  <p className="text-sm font-semibold" style={{ color: 'var(--text-3)' }}>
-                    {unlockedLogros.length} de {TODOS_LOS_LOGROS.length} desbloqueados
-                  </p>
-                </div>
-              </div>
-
-              {/* Progress */}
-              <div className="w-full h-2.5 rounded-full overflow-hidden mb-6" style={{ background: 'var(--surface-2)', border: '1px solid var(--border)' }}>
-                <motion.div className="h-full rounded-full"
-                  style={{ background: 'linear-gradient(90deg, var(--gold), #FBBF24)' }}
-                  initial={{ width: 0 }}
-                  animate={{ width: `${(unlockedLogros.length / TODOS_LOS_LOGROS.length) * 100}%` }}
-                  transition={{ duration: 1, ease: 'easeOut', delay: 0.2 }}
-                />
               </div>
 
               <div className="overflow-y-auto scrollbar-hide flex-1 pb-4 space-y-3">
@@ -4062,22 +3933,23 @@ export default function EscanerWeb() {
                       key={logro.id}
                       className="flex items-center p-4 rounded-2xl border transition-all"
                       style={{
-                        background:   unlocked ? 'var(--gold-light)' : 'var(--surface-2)',
-                        borderColor:  unlocked ? '#FDE68A' : 'var(--border)',
+                        background:   unlocked ? 'var(--surface)' : 'var(--surface-2)',
+                        borderColor:  'var(--border)',
                       }}
                       initial={{ opacity: 0, y: 12 }}
                       animate={{ opacity: 1, y: 0 }}
                       transition={{ delay: i * 0.04 }}
                     >
-                      <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-2xl shrink-0 border"
+                      <div className="w-12 h-12 rounded-xl flex items-center justify-center shrink-0 border"
                         style={{
-                          background:  unlocked ? 'rgba(217,119,6,0.1)' : 'var(--border)',
-                          borderColor: unlocked ? '#FDE68A' : 'var(--border)',
+                          background:  unlocked ? 'var(--gold-light)' : 'var(--surface)',
+                          borderColor: unlocked ? 'rgba(217,119,6,0.3)' : 'var(--border)',
+                          color: unlocked ? 'var(--gold)' : 'var(--text-3)',
                         }}>
-                        {unlocked ? logro.emoji : <Lock size={18} style={{ color: 'var(--text-3)' }} />}
+                        {unlocked ? LOGRO_ICONS[logro.id] : <Lock size={18} />}
                       </div>
                       <div className="ml-4 flex-1">
-                        <h4 className="font-black text-base" style={{ color: unlocked ? 'var(--gold)' : 'var(--text-3)', fontFamily: 'Sora, sans-serif' }}>
+                        <h4 className="font-semibold text-[15px]" style={{ color: unlocked ? 'var(--text-1)' : 'var(--text-3)' }}>
                           {logro.titulo}
                         </h4>
                         <p className="text-xs font-medium mt-0.5 leading-snug" style={{ color: unlocked ? 'var(--text-2)' : 'var(--text-3)' }}>
@@ -4119,12 +3991,12 @@ export default function EscanerWeb() {
 
               <div className="px-5 py-1.5 rounded-full mb-4"
                 style={{ background: 'rgba(217,119,6,0.15)', border: '1.5px solid rgba(251,191,36,0.4)' }}>
-                <span className="text-xs font-black tracking-widest uppercase" style={{ color: '#FBBF24' }}>
+                <span className="text-xs font-bold tracking-widest uppercase" style={{ color: '#FBBF24' }}>
                   ¡NUEVO TROFEO!
                 </span>
               </div>
 
-              <h2 className="text-4xl font-black text-white mb-3" style={{ fontFamily: 'Sora, sans-serif' }}>
+              <h2 className="text-4xl font-bold text-white mb-3" style={{ fontFamily: 'Sora, sans-serif' }}>
                 {achievement.titulo}
               </h2>
               <p className="text-base mb-10 max-w-xs" style={{ color: 'rgba(255,255,255,0.65)' }}>
@@ -4133,7 +4005,7 @@ export default function EscanerWeb() {
 
               <motion.button
                 onClick={() => setAchievement(null)}
-                className="px-12 py-4 rounded-2xl font-black text-lg"
+                className="px-12 py-4 rounded-2xl font-bold text-lg"
                 style={{
                   background: 'linear-gradient(135deg, #F59E0B, #D97706)',
                   color: '#1E1B4B',

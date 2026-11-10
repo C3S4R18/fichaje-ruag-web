@@ -31,6 +31,36 @@
 }
 
 
+/* Tema de las pantallas del trabajador (PWA): misma paleta que la app Android.
+   Solo aplica dentro de .worker-theme; el panel admin conserva :root. */
+.worker-theme {
+  --bg:          #F8FAFC;
+  --surface:     #FFFFFF;
+  --surface-2:   #F1F5F9;
+  --border:      #E2E8F0;
+  --border-2:    #CBD5E1;
+  --text-1:      #0F172A;
+  --text-2:      #475569;
+  --text-3:      #64748B;
+  --blue:        #2563EB;
+  --blue-light:  #EFF6FF;
+  --blue-glow:   rgba(37,99,235,0.16);
+  --green:       #059669;
+  --green-light: #ECFDF5;
+  --red:         #DC2626;
+  --red-light:   #FEF2F2;
+  --amber:       #D97706;
+  --amber-light: #FFFBEB;
+  --purple:      #7C3AED;
+  --purple-light:#F5F3FF;
+  --gold:        #D97706;
+  --gold-light:  #FFFBEB;
+  --shadow-sm:   0 1px 2px rgba(15,23,42,0.06);
+  --shadow-md:   0 4px 14px rgba(15,23,42,0.08);
+  --shadow-lg:   0 14px 36px rgba(15,23,42,0.10);
+  --shadow-glow: 0 0 0 4px rgba(37,99,235,0.12);
+}
+
 
 *, *::before, *::after { box-sizing: border-box; }
 

@@ -33,7 +33,7 @@ const accent: Record<SidebarTone, { bar: string; halo: string; chip: string }> =
   blue:    { bar: 'bg-blue-500',    halo: 'shadow-blue-500/30',    chip: 'bg-blue-500/10 text-blue-600 dark:text-blue-300' },
 }
 
-const workerOnlyPaths = ['/setup', '/escaner', '/kiosko']
+const workerOnlyPaths = ['/setup', '/escaner', '/kiosko', '/ranking']
 const SIDEBAR_OPEN_KEY = 'ruag_sidebar_open'
 
 function todayKey() {
